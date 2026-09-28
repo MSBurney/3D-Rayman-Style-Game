@@ -1,0 +1,264 @@
+[gd_scene format=3 uid="uid://dji22wsouett0"]
+
+[ext_resource type="PackedScene" uid="uid://b010ckiaf65vi" path="res://kenney_platformer-kit/Models/GLB format/block-grass-large.glb" id="1_nmlol"]
+[ext_resource type="Script" uid="uid://dwfa3b7cl8lcy" path="res://platform_crumbling.gd" id="2_f2iad"]
+[ext_resource type="PackedScene" uid="uid://byrfg7id6kk6v" path="res://kenney_platformer-kit/Models/GLB format/block-moving-large.glb" id="2_nxual"]
+[ext_resource type="PackedScene" uid="uid://b5papl5ibq4pg" path="res://scenes/player/player.tscn" id="2_q4tyf"]
+[ext_resource type="PackedScene" uid="uid://bobiimk71v4u7" path="res://kenney_platformer-kit/Models/GLB format/block-snow-large.glb" id="3_tai0q"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_b3aw6"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_8s1dm"]
+
+[sub_resource type="Animation" id="Animation_nxual"]
+length = 0.001
+tracks/0/type = "position_3d"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = PackedFloat32Array(0, 1, -37.673492, 0.07630801, -25.120186)
+
+[sub_resource type="Animation" id="Animation_xc685"]
+resource_name = "move_platform"
+length = 4.0
+loop_mode = 2
+tracks/0/type = "position_3d"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = PackedFloat32Array(0.06666667, 1, -37.673492, 0.07630801, -25.120186, 0.96666664, 1, -37.673492, 0.07630801, -25.120186, 3, 1, -67.39946, 0.07630801, -45.597015)
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_f2iad"]
+_data = {
+&"RESET": SubResource("Animation_nxual"),
+&"move_platform": SubResource("Animation_xc685")
+}
+
+[node name="Node3D" type="Node3D" unique_id=57585831]
+
+[node name="LevelCollision" type="Node3D" parent="." unique_id=762091987]
+transform = Transform3D(20, 0, 0, 0, 20, 0, 0, 0, 20, 0, 0, 0)
+
+[node name="CSGTerrain" type="CSGCombiner3D" parent="LevelCollision" unique_id=1041384549]
+use_collision = true
+
+[node name="CSGStarterArea" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain" unique_id=445063132]
+
+[node name="CSGFloor" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea" unique_id=1315826564]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+size = Vector3(1.1, 1, 1.1)
+
+[node name="CSGCeiling" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea" unique_id=235142864]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+size = Vector3(2, 0.3, 3)
+
+[node name="CSGWalls" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain/CSGStarterArea" unique_id=1071669035]
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls" unique_id=2012242836]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0)
+size = Vector3(1, 1, 2)
+
+[node name="CSGBox3D4" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls" unique_id=351195953]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1)
+size = Vector3(2, 1, 1)
+
+[node name="CSGBox3D5" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls" unique_id=331906765]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls" unique_id=1290125840]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 0, 0.5)
+
+[node name="CSGWalls2" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain/CSGStarterArea" unique_id=20263332]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.306643, 0)
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls2" unique_id=1910324533]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0)
+size = Vector3(1, 1, 2)
+
+[node name="CSGBox3D4" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls2" unique_id=1961021607]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1)
+size = Vector3(2, 1, 1)
+
+[node name="CSGBox3D5" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls2" unique_id=1043411401]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStarterArea/CSGWalls2" unique_id=1259593641]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 0, 0.5)
+
+[node name="CSGSecondArea" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain" unique_id=1421658468]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.906178, -9.536743e-07, -4.517692)
+
+[node name="CSGFloor" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGSecondArea" unique_id=398892559]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+size = Vector3(2, 1, 3)
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGSecondArea" unique_id=1022958538]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, -0.5)
+
+[node name="CSGBox3D5" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGSecondArea" unique_id=1963489813]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGSecondArea" unique_id=960081714]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 0, 0)
+size = Vector3(2, 1.1, 2)
+
+[node name="CSGLearnToJumpArea" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain" unique_id=665588851]
+
+[node name="CSGWall1" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGLearnToJumpArea" unique_id=2031415008]
+transform = Transform3D(4.5226526, 0.029200966, -0.949262, -0.24796686, 1.212063, -0.023309547, 3.59247, 0.046899665, 1.1934416, -2.2184722, 0, -3.144992)
+size = Vector3(1, 5, 1)
+
+[node name="CSGWall2" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGLearnToJumpArea" unique_id=1379893915]
+transform = Transform3D(4.5226526, 0.029200966, -0.949262, -0.24796686, 1.212063, -0.023309547, 3.59247, 0.046899665, 1.1934416, -3.8316588, 0, -1.0424058)
+size = Vector3(1, 5, 1)
+
+[node name="CSGFloor" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGLearnToJumpArea" unique_id=1141022709]
+transform = Transform3D(4.3969727, 0, 0, 0, 1, 0, 0, 0, 4.2734823, -2.699409, -1, -2.2864656)
+size = Vector3(1.1, 1, 1.1)
+
+[node name="CSGStairs" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain" unique_id=498739845]
+
+[node name="CSGActualStairs" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain/CSGStairs" unique_id=1940240243]
+
+[node name="CSGStart" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGActualStairs" unique_id=1447683604]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.4521704, -0.5, -2.9450274)
+
+[node name="CSGBox1" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGActualStairs" unique_id=1156962933]
+transform = Transform3D(0.94337773, 0.33143926, -0.013652933, -0.33002442, 0.9336029, -0.13953301, -0.03350031, 0.13613819, 0.9901233, -6.9377933, -0.36405253, -2.9450274)
+
+[node name="CSGBox2" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGActualStairs" unique_id=1613277721]
+transform = Transform3D(0.50634617, 0.21822351, -0.5773407, -0.1735305, 0.8951543, -0.037419997, 0.28348705, 0.15817271, 1.008303, -7.439504, -0.13709518, -3.1060288)
+
+[node name="CSGBox3" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGActualStairs" unique_id=675030407]
+transform = Transform3D(0.4092989, 0.13715264, -0.839765, -0.14291136, 0.9081902, -0.027219241, 0.4229836, 0.17413022, 0.8033999, -7.7709575, -0.04186642, -3.323995)
+
+[node name="CSGBox4" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGActualStairs" unique_id=1693454151]
+transform = Transform3D(0.056622222, 0.1411563, -1.1440177, -0.11780741, 0.90882033, 0.15192038, 0.59142184, 0.16751702, 0.13978884, -7.983565, 0.05099067, -3.6039493)
+
+[node name="CSGWalls" type="CSGCombiner3D" parent="LevelCollision/CSGTerrain/CSGStairs" unique_id=850621705]
+
+[node name="CSGBox3D" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGWalls" unique_id=1169241014]
+transform = Transform3D(3.736486, 0, -0.29710126, 0, 2.2690718, 0, 1.1196789, 0, 0.991458, -7.0360584, 7.6293945e-05, -2.3123312)
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGWalls" unique_id=1767876488]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8.861715, 1, -4.214)
+size = Vector3(1, 1.1, 3)
+
+[node name="CSGBox3D3" type="CSGBox3D" parent="LevelCollision/CSGTerrain/CSGStairs/CSGWalls" unique_id=949222833]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.261849, 1, -5.5457563)
+size = Vector3(5, 1.1, 1)
+
+[node name="LevelVisuals" type="Node3D" parent="." unique_id=1407872904]
+
+[node name="LevelPlatforms" type="Node3D" parent="." unique_id=866902980]
+
+[node name="LearnToJumpArea" type="Node3D" parent="LevelPlatforms" unique_id=1676624639]
+
+[node name="PlatformFirst" type="StaticBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=2139149587]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -16.343456, -3.0183175, -7.2288585)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst" unique_id=1910882154]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst" unique_id=2067544472]
+
+[node name="block-grass-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst/PlatformVisual" unique_id=265623572 instance=ExtResource("1_nmlol")]
+
+[node name="PlatformFirst2" type="StaticBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=1594698301]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -25.884987, -1.672024, -7.2288585)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst2" unique_id=399735381]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst2" unique_id=1208154223]
+
+[node name="block-grass-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst2/PlatformVisual" unique_id=1434736789 instance=ExtResource("1_nmlol")]
+
+[node name="PlatformFirst3" type="StaticBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=1402802546]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -25.884987, 0.07630801, -20.035225)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst3" unique_id=1397940667]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst3" unique_id=1249039248]
+
+[node name="block-grass-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst3/PlatformVisual" unique_id=1579845674 instance=ExtResource("1_nmlol")]
+
+[node name="PlatformFirst4" type="StaticBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=205883225]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -71.12945, 0.07630801, -57.107292)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst4" unique_id=368256580]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst4" unique_id=434939190]
+
+[node name="block-grass-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformFirst4/PlatformVisual" unique_id=512413029 instance=ExtResource("1_nmlol")]
+
+[node name="PlatformCrumblingFirst" type="AnimatableBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=318599901]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -83.80192, 0.07630801, -57.107292)
+script = ExtResource("2_f2iad")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst" unique_id=1217372835]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst" unique_id=565610310]
+
+[node name="block-snow-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst/PlatformVisual" unique_id=795503035 instance=ExtResource("3_tai0q")]
+
+[node name="Area3D" type="Area3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst" unique_id=959613011]
+collision_mask = 3
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst/Area3D" unique_id=320763070]
+transform = Transform3D(2.1, 0, 0, 0, 2.1, 0, 0, 0, 2.1, 0, 0, 0)
+shape = SubResource("BoxShape3D_8s1dm")
+
+[node name="PlatformCrumblingFirst2" type="AnimatableBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=256639504]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -90.45436, 0.07630801, -68.48694)
+script = ExtResource("2_f2iad")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst2" unique_id=765748886]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst2" unique_id=5313376]
+
+[node name="block-snow-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst2/PlatformVisual" unique_id=1395290858 instance=ExtResource("3_tai0q")]
+
+[node name="Area3D" type="Area3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst2" unique_id=1175869201]
+collision_mask = 3
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformCrumblingFirst2/Area3D" unique_id=233264893]
+transform = Transform3D(2.1, 0, 0, 0, 2.1, 0, 0, 0, 2.1, 0, 0, 0)
+shape = SubResource("BoxShape3D_8s1dm")
+
+[node name="PlatformMovingFirst" type="AnimatableBody3D" parent="LevelPlatforms/LearnToJumpArea" unique_id=2056412918]
+transform = Transform3D(4, 0, 0, 0, 4, 0, 0, 0, 4, -37.673492, 0.07630801, -25.120186)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="LevelPlatforms/LearnToJumpArea/PlatformMovingFirst" unique_id=196927751]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+shape = SubResource("BoxShape3D_b3aw6")
+
+[node name="PlatformVisual" type="Node3D" parent="LevelPlatforms/LearnToJumpArea/PlatformMovingFirst" unique_id=634761610]
+
+[node name="block-moving-large2" parent="LevelPlatforms/LearnToJumpArea/PlatformMovingFirst/PlatformVisual" unique_id=2145157570 instance=ExtResource("2_nxual")]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0)
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="LevelPlatforms/LearnToJumpArea/PlatformMovingFirst" unique_id=392805350]
+deterministic = true
+libraries/ = SubResource("AnimationLibrary_f2iad")
+autoplay = &"move_platform"
+
+[node name="Player" parent="." unique_id=113855845 instance=ExtResource("2_q4tyf")]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=401031523]
+transform = Transform3D(0.52991927, 0, 0.8480481, -0.6383517, 0.6583288, 0.3988864, -0.5582945, -0.75273055, 0.3488611, 0, 0, 0)
+light_indirect_energy = 4.485
