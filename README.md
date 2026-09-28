@@ -2,6 +2,9 @@
 
 A movement-first 3D platformer in the spirit of Rayman 2, Rayman 3 and the cancelled Rayman 4.
 
+> **New to the project?** Start with **[docs/GUIDED_TOUR.md](docs/GUIDED_TOUR.md)** — a hands-on
+> walkthrough for developers who can code but haven't used Godot before.
+
 The design bet: **abilities combine rather than take turns.** Every state hands off into the
 others — a swing releases into a helicopter, a helicopter ends in a ledge grab, a wall run
 launches a grapple. Levels are meant to be solved by stringing the moveset together, not by
@@ -14,17 +17,20 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | Action | Keyboard / mouse | Gamepad |
 | --- | --- | --- |
 | Move | `WASD` | Left stick |
-| Look | Mouse | Right stick |
+| Look | Mouse or arrow keys | Right stick |
 | Jump | `Space` | A |
 | **Helicopter** | `Space` again while falling | A again |
-| **Grapple** | Hold `RMB` | Hold RB |
+| **Grapple** | `RMB` or `Q` — press again to let go | RB |
 | Fling off a swing | `Space` mid-swing | A |
-| Fist / charged fist | Tap / hold `LMB` | X |
+| Fist / charged fist | Tap / hold `LMB` or `F` | X |
 | Grab & throw | `E` | B |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
 | Debug readout | `F3` | — |
 | Respawn / restart | `R` / `F5` | — |
 | Release mouse | `Esc` | — |
+
+Grapple, punch and look all have keyboard alternatives because right-click and precise mouse
+movement are awkward on a laptop trackpad.
 
 ## The moveset
 
@@ -41,7 +47,8 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
   cross gaps or climb a shaft. Triggered by momentum, not by holding into the wall.
 - **Grapple** — two kinds of anchor, told apart by colour:
   - **Purple = swing.** Attach and pendulum; steer along the arc to pump height; `Space` flings you
-    off with everything you built. Hooking from beyond the rope length reels you in smoothly.
+    off with everything you built. Press grapple again to simply let go. Hooking from beyond the
+    rope length reels you in smoothly.
   - **Orange = pull.** Reels you straight to it and pops you loose with an upward kick, so pulls
     chain into jumps and further hooks.
   Aiming is camera-driven with assist: the ringed target is whatever is nearest the centre of the

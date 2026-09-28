@@ -100,11 +100,12 @@ func _format_debug(info: Dictionary) -> String:
 
 func _hint_text() -> String:
 	return "\n".join([
-		"WASD move   Mouse look   Space jump",
-		"Space again in air: HELICOPTER",
-		"RMB: grapple the ringed target   Space mid-swing: fling",
-		"LMB tap/hold: fist / charged fist   E: grab & throw",
-		"Run into a wall with speed: wall run   Space: wall jump",
-		"Fall beside a ledge: auto grab   Space: climb   S: drop",
-		"F3 debug   R respawn   F5 restart   Esc free mouse",
+		"WASD move    Mouse or arrow keys look    Space jump",
+		"Space again while falling:  HELICOPTER",
+		"RMB or Q:  grapple the ringed target  (press again to let go)",
+		"Space while swinging:  fling off and keep the speed",
+		"LMB or F, tap or hold:  fist / charged fist     E:  grab & throw",
+		"Run at a tan wall with speed:  wall run     Space:  wall jump",
+		"Jump at a high ledge:  auto grab     Space:  climb     Ctrl:  drop",
+		"F3 debug    R respawn    F5 restart    Esc free the mouse",
 	])

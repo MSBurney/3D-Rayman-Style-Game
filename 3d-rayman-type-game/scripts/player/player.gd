@@ -3,13 +3,50 @@ extends CharacterBody3D
 
 ## Rayman-style 3D platformer controller.
 ##
-## Design rule for this project: abilities must *combine*, not take turns. So
-## every state is written to hand off into the others — a swing can release into
-## a helicopter, a helicopter can end in a ledge grab, a wall run can launch a
-## grapple. Nothing locks the player out of their own moveset.
+## ─── START HERE ──────────────────────────────────────────────────────────────
 ##
-## The state machine is a plain enum + match rather than a node tree, because
-## these states share a lot of velocity maths and constantly interrupt each other.
+## This is the longest file in the project. It is long because it holds the whole
+## moveset in one place, which is easier to follow than the same logic scattered
+## across a dozen files. You do not need to read it top to bottom. It goes:
+##
+##   1. enum State        — the list of things the player can be doing
+##   2. @export variables — every tuning number, grouped as it appears in the
+##                          Inspector. Change these first; you rarely need the code.
+##   3. var declarations  — internal bookkeeping (timers, the current rope, etc.)
+##   4. _physics_process  — the heartbeat. Read this to see the order of events.
+##   5. _do_<state>()     — one function per state. Want to change the helicopter?
+##                          Go to _do_helicopter(). That is the whole trick.
+##   6. helpers           — ledge probing, abilities, damage, visuals
+##
+## ─── GODOT CONCEPTS USED HERE ────────────────────────────────────────────────
+##
+## If you are new to Godot, these are the ones worth knowing before reading on:
+##
+## • CharacterBody3D — a physics body you move yourself, rather than one the
+##   physics engine pushes around. You set `velocity`, then call move_and_slide()
+##   and it handles sliding along walls and floors for you.
+## • _physics_process(delta) — runs at a fixed rate (60x a second by default),
+##   unlike _process which runs once per drawn frame. All movement lives here so
+##   it behaves the same on fast and slow machines. `delta` is the seconds since
+##   the last tick; multiplying by it is what makes speeds framerate-independent.
+## • @export — exposes a variable in the Inspector so it can be tuned in the
+##   editor without touching code. Almost every number below is one.
+## • @onready var x = $Child — grabs a child node once the scene is fully built.
+##   `$Name` is shorthand for get_node("Name").
+## • signal — a message this node broadcasts without knowing who listens. Other
+##   scripts connect to it. See `state_changed` below.
+##
+## ─── THE ONE DESIGN RULE ─────────────────────────────────────────────────────
+##
+## Abilities must *combine*, not take turns. Every state is written to hand off
+## into the others — a swing releases into a helicopter, a helicopter ends in a
+## ledge grab, a wall run launches a grapple. If you add a state, make sure it
+## has exits into the others rather than trapping the player inside it.
+##
+## The state machine is a plain enum plus a `match`, rather than Godot's node
+## based approach, because these states share a lot of velocity maths and
+## interrupt each other constantly. Keeping them in one file makes those
+## hand-offs readable.
 
 enum State {
 	GROUND,
@@ -102,6 +139,10 @@ const FIST_SCENE := preload("res://scenes/fx/fist.tscn")
 @export var swing_damping: float = 0.06
 @export var swing_release_boost: float = 2.5
 @export var swing_min_rope: float = 2.5
+## Grace period after hooking on, before the grapple button can let go again.
+## Without it the button press that attaches you is still "just pressed" when the
+## swing/pull code runs later in the SAME frame, so you detach instantly.
+@export var grapple_repress_delay: float = 0.2
 ## Hooking an anchor farther away than its max_rope reels you in at this speed
 ## instead of snapping the rope taut, which would fire the player like a slingshot.
 @export var swing_reel_speed: float = 14.0
@@ -143,6 +184,7 @@ var _ledge_lip: Vector3 = Vector3.ZERO
 var _grapple: GrapplePoint = null
 var _rope: float = 0.0
 var _rope_target: float = 0.0
+var _grapple_lock: float = 0.0
 var _hurt_left: float = 0.0
 var _punch_left: float = 0.0
 var _charge: float = 0.0
@@ -169,10 +211,17 @@ func _ready() -> void:
 	Events.player_health_changed.emit(health.current, health.max_health)
 
 
+## The heartbeat. Runs 60 times a second, and the ORDER here matters a lot.
+##
+## Each step only decides what `velocity` should be. Nothing actually moves until
+## move_and_slide() near the bottom — that is the call that takes our velocity,
+## slides the body along walls and floors, and stops it hitting things.
 func _physics_process(delta: float) -> void:
 	_tick_timers(delta)
 	_read_input()
 
+	# Run exactly one state's logic. `match` is GDScript's switch statement.
+	# To change how an ability feels, edit its _do_ function below.
 	match state:
 		State.GROUND: _do_ground(delta)
 		State.AIR: _do_air(delta)
@@ -185,21 +234,42 @@ func _physics_process(delta: float) -> void:
 		State.HURT: _do_hurt(delta)
 		State.DEAD: _do_dead(delta)
 
+	# Remember how fast we were falling BEFORE the collision is resolved, because
+	# move_and_slide() is about to zero it if we land on something. Enemies read
+	# this to tell a stomp from a bump. See descent_speed().
 	_pre_move_vy = velocity.y
+
 	move_and_slide()
+
+	# Only NOW do is_on_floor() and is_on_wall() mean anything — they report what
+	# move_and_slide() just bumped into. Anything that depends on touching a
+	# surface has to happen after this line, which is what _after_move() is for.
 	_after_move(delta)
+
 	_update_visual(delta)
 	_update_rope()
 
 
 # ---------------------------------------------------------------- input & timers
 
+## Counts every timer down by `delta` (the seconds since the last tick).
+##
+## Two of these are standard platformer forgiveness tricks, and they are most of
+## the reason the jump feels fair rather than fussy:
+##
+## • COYOTE TIME — after you walk off an edge you can still jump for a moment,
+##   named after the cartoon pause before the fall. Without it, players who press
+##   jump a frame or two late get no jump at all and blame the game.
+## • JUMP BUFFER — if you press jump slightly before landing, the press is
+##   remembered and fires the instant you touch down, instead of being dropped.
 func _tick_timers(delta: float) -> void:
+	# Refill coyote time while grounded; drain it once airborne.
 	_coyote = coyote_time if is_on_floor() else _coyote - delta
 	_jump_buffered -= delta
 	_wall_lock -= delta
 	_ledge_lock -= delta
 	_punch_left -= delta
+	_grapple_lock -= delta
 	if state == State.HELICOPTER:
 		_heli_time += delta
 
@@ -254,10 +324,16 @@ func _apply_gravity(delta: float, scale: float = 1.0) -> void:
 	velocity.y = maxf(velocity.y - g * scale * delta, -max_fall_speed)
 
 
+## How fast to launch upward to reach exactly `jump_height` metres.
+##
+## Derived rather than hand-tuned, so `jump_height` can be set in real metres and
+## stays correct when gravity changes. From v² = 2·g·h, solve for v.
 func _jump_velocity() -> float:
 	return sqrt(2.0 * gravity_rise * jump_height)
 
 
+## Jumps only if a press is waiting in the buffer. Returns whether it jumped, so
+## callers can tell whether to change state.
 func _try_jump() -> bool:
 	if _jump_buffered <= 0.0:
 		return false
@@ -423,7 +499,12 @@ func _do_grapple_pull(_delta: float) -> void:
 		_grapple = null
 		_set_state(State.AIR)
 		return
-	if Input.is_action_just_pressed(&"grapple") or Input.is_action_just_pressed(&"jump"):
+	# Same one-frame trap as the swing: the press that started the pull is still
+	# "just pressed" when this runs, so it must be locked out briefly.
+	var cancel := Input.is_action_just_pressed(&"jump")
+	if _grapple_lock <= 0.0 and Input.is_action_just_pressed(&"grapple"):
+		cancel = true
+	if cancel:
 		_jump_buffered = 0.0
 		velocity.y = maxf(velocity.y, _jump_velocity() * 0.8)
 		_grapple = null
@@ -466,7 +547,10 @@ func _do_swing(delta: float) -> void:
 	if Input.is_action_just_pressed(&"jump"):
 		_release_swing(true)
 		return
-	if Input.is_action_just_released(&"grapple"):
+	# Press again to let go — deliberately not "let go of the button to let go".
+	# Holding would mean an ordinary click attaches and detaches on consecutive
+	# frames, which reads as the grapple simply not working.
+	if _grapple_lock <= 0.0 and Input.is_action_just_pressed(&"grapple"):
 		_release_swing(false)
 		return
 	if is_on_floor():
@@ -554,8 +638,20 @@ func _ledge_valid_at(where: Vector3) -> bool:
 	return not _probe_ledge(where, -_ledge_normal).is_empty()
 
 
-## Two casts: a chest-height ray to find a vertical wall, then a downward ray
-## just past it to find the lip. Returns {} when there's nothing to hang on.
+## Looks for a grabbable ledge in front of the player. Returns {} for "none".
+##
+## How it works: two rays, like feeling for a windowsill in the dark.
+##   1. A ray out from chest height. If it hits nothing, there is no wall.
+##      If it hits something tilted, it is a slope, not a wall — reject it.
+##   2. A ray straight DOWN, starting above and slightly past that wall hit.
+##      If it lands on something flat, that is the top lip of the ledge.
+## Then check the lip is in the grabbable height band relative to the feet.
+##
+## Godot note: this uses direct space state rather than RayCast3D nodes. A
+## RayCast3D is a node you place in the scene and read each frame; this instead
+## asks the physics world a one-off question, which suits probes that change
+## direction constantly (here, whichever way the player happens to be facing).
+## `exclude` holds our own collider so the rays do not hit the player.
 func _probe_ledge(origin: Vector3, forward: Vector3) -> Dictionary:
 	var dir := _flatten(forward)
 	if dir.length_squared() < 0.01:
@@ -641,6 +737,7 @@ func _handle_grapple_input() -> void:
 	if target == null or not Input.is_action_just_pressed(&"grapple"):
 		return
 	_grapple = target
+	_grapple_lock = grapple_repress_delay
 	match target.mode:
 		GrapplePoint.Mode.PULL:
 			_set_state(State.GRAPPLE_PULL)
@@ -806,6 +903,8 @@ func _update_rope() -> void:
 
 # ------------------------------------------------------------------- plumbing
 
+## The only way the state should ever change. Always call this rather than
+## assigning `state` directly, or the enter/exit setup below gets skipped.
 func _set_state(next: State) -> void:
 	if state == next:
 		return
@@ -813,6 +912,9 @@ func _set_state(next: State) -> void:
 	_exit_state(previous)
 	state = next
 	_enter_state(next)
+	# Broadcast for anyone who cares (animations, sound, UI). Emitting a signal
+	# costs nothing if nobody is listening, and it keeps this script from needing
+	# to know those systems exist.
 	state_changed.emit(previous, next)
 
 

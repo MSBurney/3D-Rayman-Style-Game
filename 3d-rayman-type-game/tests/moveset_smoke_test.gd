@@ -136,12 +136,11 @@ func _run() -> void:
 	_release_all()
 
 	# --- swing: rope constraint should hold the player near rope length.
-	# Swinging is hold-to-hang, so the button must be down or the first
-	# just_released drops the rope instantly.
+	# The button stays up here: swinging latches on, so a press would let go.
+	_release_all()
 	await _step(5)
 	var swing_point := level.get_node("DSwing1") as GrapplePoint
 	_place(swing_point.global_position + Vector3(0, -6, -4))
-	Input.action_press("grapple")
 	player._grapple = swing_point
 	player._rope = player.global_position.distance_to(swing_point.global_position)
 	player._rope_target = player._rope
@@ -157,6 +156,32 @@ func _run() -> void:
 	_release_all()
 	_check("swing release flings", player.state == Player.State.AIR,
 		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
+	await _step(10)
+
+	# --- a normal CLICK on a swing point must work, not just a held button.
+	# Regression test: attaching on press and detaching on release meant a tap
+	# latched on for one frame and let go, so grappling looked simply broken.
+	_release_all()
+	await _step(10)
+	_place(Vector3(0, 4, 24))
+	player.rig.yaw = 0.0
+	player.rig.pitch = 0.55
+	await _step(4)
+	Input.action_press("grapple")
+	await _step(1)
+	Input.action_release("grapple")
+	await _step(20)
+	_check("tap grapple stays attached", player.state == Player.State.SWING,
+		"state=%s" % player.state_name())
+
+	# Pressing again is what lets go.
+	Input.action_press("grapple")
+	await _step(2)
+	Input.action_release("grapple")
+	await _step(6)
+	_check("second tap releases", player.state != Player.State.SWING,
+		"state=%s" % player.state_name())
+	_release_all()
 	await _step(10)
 
 	# --- wall run along the tan wall in zone B (face at z=5, spans x 25..45).
