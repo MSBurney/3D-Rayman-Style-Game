@@ -1,7 +1,7 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://4nl2p1prnqmb"]
 
-[ext_resource type="Script" path="res://scripts/props/checkpoint.gd" id="1"]
-[ext_resource type="AudioStream" path="res://assets/audio/checkpoint.wav" id="2"]
+[ext_resource type="Script" uid="uid://c03q5l10gp7do" path="res://scripts/props/checkpoint.gd" id="1"]
+[ext_resource type="AudioStream" uid="uid://o5mkicayic5e" path="res://assets/audio/checkpoint.wav" id="2"]
 
 [sub_resource type="BoxShape3D" id="Shape_cp"]
 size = Vector3(3, 4, 3)

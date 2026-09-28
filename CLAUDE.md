@@ -80,6 +80,12 @@ site, but they are worth knowing up front:
   touch no game code (see `tools/make_placeholder_sounds.gd`).
 - **Freeing a node stops any sound it is playing.** A pickup that calls `queue_free()` immediately
   is silent. `lum.gd` and the enemies `await` the sound before freeing.
+- **Every `.tscn` needs a `uid="uid://..."` in its `[gd_scene]` header.** The editor adds one
+  automatically; a scene written as text by hand does not have one, and then references to it fall
+  back to matching by file path. That logs `invalid UID ... using text path instead` in anyone
+  else's scene that points at it, and the reference breaks outright if the file is ever moved.
+  `ext_resource` lines should carry their target's `uid=` too. Generate one with
+  `ResourceUID.id_to_text(ResourceUID.create_id())`.
 
 ## Conventions
 

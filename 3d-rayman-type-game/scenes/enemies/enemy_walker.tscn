@@ -1,10 +1,10 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://3htouak7kni1"]
 
-[ext_resource type="Script" path="res://scripts/enemies/enemy_walker.gd" id="1"]
-[ext_resource type="Script" path="res://scripts/components/health.gd" id="2"]
-[ext_resource type="PackedScene" path="res://scenes/props/lum.tscn" id="3"]
-[ext_resource type="AudioStream" path="res://assets/audio/enemy_hit.wav" id="4"]
-[ext_resource type="AudioStream" path="res://assets/audio/enemy_die.wav" id="5"]
+[ext_resource type="Script" uid="uid://b2gtracrrmlb8" path="res://scripts/enemies/enemy_walker.gd" id="1"]
+[ext_resource type="Script" uid="uid://0hc4op07qxx7" path="res://scripts/components/health.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="3"]
+[ext_resource type="AudioStream" uid="uid://umtxj02x8pcr" path="res://assets/audio/enemy_hit.wav" id="4"]
+[ext_resource type="AudioStream" uid="uid://b4kq7hqs5tgxp" path="res://assets/audio/enemy_die.wav" id="5"]
 
 [sub_resource type="CapsuleShape3D" id="Shape_body"]
 radius = 0.45
