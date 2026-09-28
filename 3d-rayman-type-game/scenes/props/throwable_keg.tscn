@@ -1,0 +1,50 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/props/throwable.gd" id="1"]
+
+[sub_resource type="CylinderShape3D" id="Shape_keg"]
+height = 1.0
+radius = 0.42
+
+[sub_resource type="StandardMaterial3D" id="Mat_keg"]
+albedo_color = Color(0.55, 0.36, 0.2, 1)
+
+[sub_resource type="StandardMaterial3D" id="Mat_band"]
+albedo_color = Color(0.32, 0.3, 0.34, 1)
+metallic = 0.6
+
+[sub_resource type="CylinderMesh" id="Mesh_keg"]
+material = SubResource("Mat_keg")
+top_radius = 0.38
+bottom_radius = 0.38
+height = 1.0
+radial_segments = 14
+rings = 2
+
+[sub_resource type="CylinderMesh" id="Mesh_band"]
+material = SubResource("Mat_band")
+top_radius = 0.42
+bottom_radius = 0.42
+height = 0.12
+radial_segments = 14
+rings = 1
+
+[node name="ThrowableKeg" type="RigidBody3D"]
+collision_layer = 64
+collision_mask = 5
+mass = 3.0
+script = ExtResource("1")
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+shape = SubResource("Shape_keg")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("Mesh_keg")
+
+[node name="BandTop" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+mesh = SubResource("Mesh_band")
+
+[node name="BandBottom" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.3, 0)
+mesh = SubResource("Mesh_band")

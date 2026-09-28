@@ -1,0 +1,326 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/props/hazard.gd" id="haz"]
+[ext_resource type="PackedScene" path="res://scenes/props/lum.tscn" id="lum"]
+[ext_resource type="PackedScene" path="res://scenes/props/grapple_point.tscn" id="gp"]
+[ext_resource type="PackedScene" path="res://scenes/props/checkpoint.tscn" id="cp"]
+[ext_resource type="PackedScene" path="res://scenes/props/throwable_keg.tscn" id="keg"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
+[ext_resource type="PackedScene" path="res://scenes/enemies/enemy_turret.tscn" id="turret"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+sky_top_color = Color(0.28, 0.48, 0.82, 1)
+sky_horizon_color = Color(0.72, 0.8, 0.88, 1)
+ground_bottom_color = Color(0.22, 0.24, 0.3, 1)
+ground_horizon_color = Color(0.72, 0.8, 0.88, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMat")
+
+; Sky ambient at full energy on top of a 1.0 sun washes every albedo out to
+; pastel. 0.3 keeps the fill light without blowing out the blockout colours.
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_energy = 0.3
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="MatGrass"]
+albedo_color = Color(0.42, 0.62, 0.35, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatStone"]
+albedo_color = Color(0.55, 0.56, 0.62, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatRunnable"]
+albedo_color = Color(0.78, 0.55, 0.32, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatLedge"]
+albedo_color = Color(0.6, 0.45, 0.5, 1)
+
+; Deep as well as wide: a thin plane can be fallen straight through in one
+; physics step once terminal velocity is high enough.
+[sub_resource type="BoxShape3D" id="ShapePit"]
+size = Vector3(400, 100, 400)
+
+[node name="TestLevel" type="Node3D"]
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+; Bias is raised from the defaults because the level spans ~200 m, which stretches
+; the shadow cascades thin enough to speckle flat ground with acne.
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 40, 0)
+light_energy = 1.0
+shadow_enabled = true
+shadow_bias = 0.2
+shadow_normal_bias = 3.0
+directional_shadow_max_distance = 140.0
+
+; ---------------------------------------------------------------- HUB
+; Spawn plaza. Everything radiates from here so any mechanic is a short walk away.
+
+[node name="Hub" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+use_collision = true
+size = Vector3(30, 1, 30)
+material = SubResource("MatGrass")
+
+; Both sit outside their own 11 m detect range of the spawn point, so you get a
+; moment to find the controls before anything walks at you.
+[node name="HubWalkerA" parent="." instance=ExtResource("walker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0.1, -6)
+patrol_distance = 5.0
+
+[node name="HubWalkerB" parent="." instance=ExtResource("walker")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 9, 0.1, -2)
+patrol_distance = 5.0
+
+; Kept well clear of the spawn point — a RigidBody overlapping the player at
+; startup launches them across the plaza.
+[node name="KegA" parent="." instance=ExtResource("keg")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 0.6, 9)
+
+[node name="KegB" parent="." instance=ExtResource("keg")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8.5, 0.6, 9)
+
+[node name="KegC" parent="." instance=ExtResource("keg")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.6, 9)
+
+; Ahead and up rather than straight overhead, so it's inside the aim cone the
+; moment you look north from spawn.
+[node name="HubPull" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7, -12)
+mode = 1
+
+[node name="HubSwing" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 7, 4)
+
+[node name="HubLumA" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1.2, 4)
+
+[node name="HubLumB" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 4)
+
+[node name="HubLumC" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1.2, 4)
+
+; ------------------------------------------------- ZONE A (north): jump + helicopter
+; Three rising hops, then a gap only the helicopter clears.
+
+[node name="A1" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, -21)
+use_collision = true
+size = Vector3(7, 1, 7)
+material = SubResource("MatStone")
+
+[node name="A2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.9, -30)
+use_collision = true
+size = Vector3(6, 1, 6)
+material = SubResource("MatStone")
+
+[node name="A3" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.1, -39)
+use_collision = true
+size = Vector3(6, 1, 6)
+material = SubResource("MatStone")
+
+; 14 m gap with a 3 m drop: a plain jump falls short, a helicopter glide lands it.
+[node name="A4" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, -64)
+use_collision = true
+size = Vector3(16, 1, 16)
+material = SubResource("MatGrass")
+
+[node name="AGlideLumA" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -46)
+
+[node name="AGlideLumB" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -50)
+
+[node name="AGlideLumC" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, -54)
+
+[node name="ACheckpoint" parent="." instance=ExtResource("cp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -58)
+
+[node name="ATurret" parent="." instance=ExtResource("turret")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.4, -69)
+
+[node name="ARedLum" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 1.4, -68)
+kind = 1
+
+; ------------------------------------------------ ZONE B (east): wall run + wall jump
+; Tan walls are the runnable ones.
+
+[node name="B1" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, -0.5, 0)
+use_collision = true
+size = Vector3(12, 1, 14)
+material = SubResource("MatStone")
+
+[node name="B2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 41, -0.5, 0)
+use_collision = true
+size = Vector3(12, 1, 14)
+material = SubResource("MatStone")
+
+; Spans the 8 m pit between B1 and B2.
+[node name="BRunWall" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 35, 4, 5.5)
+use_collision = true
+size = Vector3(20, 8, 1)
+material = SubResource("MatRunnable")
+
+[node name="BCheckpoint" parent="." instance=ExtResource("cp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 0, 0)
+
+[node name="BWalker" parent="." instance=ExtResource("walker")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 41, 0.1, 0)
+patrol_distance = 4.0
+
+; Wall-jump shaft: two faces 3 m apart climbing to a perch.
+[node name="B3" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, -0.5, 0)
+use_collision = true
+size = Vector3(6, 1, 8)
+material = SubResource("MatStone")
+
+[node name="BShaftLeft" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 46, 6, 0)
+use_collision = true
+size = Vector3(1, 12, 8)
+material = SubResource("MatRunnable")
+
+[node name="BShaftRight" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 6, 0)
+use_collision = true
+size = Vector3(1, 12, 8)
+material = SubResource("MatRunnable")
+
+[node name="BPerch" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 11.5, -7)
+use_collision = true
+size = Vector3(7, 1, 7)
+material = SubResource("MatStone")
+
+[node name="BShaftLumA" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 3, 0)
+
+[node name="BShaftLumB" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 6, 0)
+
+[node name="BShaftLumC" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 9, 0)
+
+[node name="BPerchSwing" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 16, -14)
+
+[node name="BPerchRedLum" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 13, -7)
+kind = 1
+
+; ---------------------------------------------------- ZONE C (west): ledge grabbing
+; Three terraces with lips 3.3 m up: too high to land on with a 2.35 m jump, so
+; the only way up is to jump at the wall and catch the lip on the way down.
+
+[node name="C1" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -19, 0, 0)
+use_collision = true
+size = Vector3(8, 6.6, 8)
+material = SubResource("MatLedge")
+
+[node name="C2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 1.6, 0)
+use_collision = true
+size = Vector3(8, 10, 8)
+material = SubResource("MatLedge")
+
+[node name="C3" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 2.95, 0)
+use_collision = true
+size = Vector3(8, 13.9, 8)
+material = SubResource("MatLedge")
+
+[node name="CCheckpoint" parent="." instance=ExtResource("cp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -19, 3.3, 0)
+
+[node name="CLumA" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 8, 0)
+
+[node name="CLumB" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 11.3, 0)
+
+[node name="CTurret" parent="." instance=ExtResource("turret")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 9.9, -3)
+
+[node name="CSwing" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 16, 7)
+
+; ------------------------------------------------- ZONE D (south): grapple chain
+; Run off the hub edge and hook your way across. Nothing else crosses this pit.
+
+[node name="DSwing1" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 24)
+
+[node name="DSwing2" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 11, 34)
+
+[node name="DSwing3" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 44)
+
+[node name="D1" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 60)
+use_collision = true
+size = Vector3(18, 1, 18)
+material = SubResource("MatGrass")
+
+[node name="DCheckpoint" parent="." instance=ExtResource("cp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 55)
+
+[node name="DWalker" parent="." instance=ExtResource("walker")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 62)
+patrol_distance = 6.0
+
+; Pull straight up, then helicopter across to the tower.
+[node name="DPull" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 16, 58)
+mode = 1
+
+[node name="DTower" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 12.5, 66)
+use_collision = true
+size = Vector3(10, 1, 10)
+material = SubResource("MatStone")
+
+[node name="DTowerLumA" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 14.2, 64)
+
+[node name="DTowerLumB" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 14.2, 64)
+
+[node name="DTowerLumC" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 14.2, 64)
+
+[node name="DTowerLumD" parent="." instance=ExtResource("lum")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 14.2, 68)
+
+[node name="DTowerCheckpoint" parent="." instance=ExtResource("cp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 13, 68)
+
+; -------------------------------------------------------------------- PIT PLANE
+; Catches everything that falls; the game respawns at the last checkpoint.
+
+[node name="KillPlane" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -80, 0)
+collision_layer = 16
+collision_mask = 2
+monitorable = false
+script = ExtResource("haz")
+instant_kill = true
+
+[node name="Shape" type="CollisionShape3D" parent="KillPlane"]
+shape = SubResource("ShapePit")
