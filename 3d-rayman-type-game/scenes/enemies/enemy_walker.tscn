@@ -3,6 +3,8 @@
 [ext_resource type="Script" path="res://scripts/enemies/enemy_walker.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/components/health.gd" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/props/lum.tscn" id="3"]
+[ext_resource type="AudioStream" path="res://assets/audio/enemy_hit.wav" id="4"]
+[ext_resource type="AudioStream" path="res://assets/audio/enemy_die.wav" id="5"]
 
 [sub_resource type="CapsuleShape3D" id="Shape_body"]
 radius = 0.45
@@ -54,6 +56,8 @@ collision_layer = 4
 collision_mask = 1
 script = ExtResource("1")
 lum_drop = ExtResource("3")
+sfx_hit = ExtResource("4")
+sfx_die = ExtResource("5")
 
 [node name="Shape" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
@@ -84,6 +88,10 @@ mesh = SubResource("Mesh_foot")
 [node name="FootR" type="MeshInstance3D" parent="Visual"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 0.12, 0.08)
 mesh = SubResource("Mesh_foot")
+
+[node name="Sfx" type="AudioStreamPlayer3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
+unit_size = 16.0
 
 [node name="Health" type="Node" parent="."]
 script = ExtResource("2")

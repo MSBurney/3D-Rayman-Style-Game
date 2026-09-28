@@ -73,6 +73,13 @@ site, but they are worth knowing up front:
   `Condition "det == 0" is true` errors. Shrink to `Vector3.ONE * 0.01` instead.
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
+- **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
+  `Events`, so every script mentioning it fails to compile, its node loads with a null script, and
+  all its exported values read back as null — which looks exactly like broken data. Write throwaway
+  checks as a tiny `.tscn` + script and run the scene instead. Only use `--script` for tools that
+  touch no game code (see `tools/make_placeholder_sounds.gd`).
+- **Freeing a node stops any sound it is playing.** A pickup that calls `queue_free()` immediately
+  is silent. `lum.gd` and the enemies `await` the sound before freeing.
 
 ## Conventions
 

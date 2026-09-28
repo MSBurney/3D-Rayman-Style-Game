@@ -3,10 +3,12 @@ extends Area3D
 ## Sets the respawn point. Keeps a movement sandbox from punishing experiments.
 
 @export var only_once: bool = true
+@export var sfx: AudioStream
 
 var _used: bool = false
 
 @onready var _visual: Node3D = get_node_or_null(^"Visual")
+@onready var _sfx: AudioStreamPlayer3D = $Sfx
 
 func _ready() -> void:
 	body_entered.connect(_on_body_entered)
@@ -22,6 +24,9 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	_used = true
 	Events.checkpoint_reached.emit(self)
+	if sfx != null:
+		_sfx.stream = sfx
+		_sfx.play()
 	if _visual != null:
 		var tween := create_tween()
 		tween.tween_property(_visual, "scale", Vector3.ONE * 1.4, 0.12)

@@ -12,10 +12,14 @@ enum Kind { YELLOW, RED }
 ## One scene, tinted from `kind`, so there's no second lum scene to keep in sync.
 @export var yellow_colour: Color = Color(1.0, 0.88, 0.32)
 @export var red_colour: Color = Color(1.0, 0.36, 0.42)
+@export var yellow_sfx: AudioStream
+@export var red_sfx: AudioStream
 
 var _base_y: float = 0.0
 var _t: float = 0.0
 var _taken: bool = false
+
+@onready var _sfx: AudioStreamPlayer3D = $Sfx
 
 func _ready() -> void:
 	_base_y = position.y
@@ -54,8 +58,23 @@ func _on_body_entered(body: Node3D) -> void:
 			player.heal(value)
 		_:
 			Events.lum_collected.emit(value)
+
 	set_deferred(&"monitoring", false)
+	# Stop the idle bob, or it fights the tween below for control of position.y.
+	set_process(false)
+
+	var sound := red_sfx if kind == Kind.RED else yellow_sfx
+	if sound != null:
+		_sfx.stream = sound
+		_sfx.play()
+
 	var tween := create_tween()
 	tween.tween_property(self, "scale", Vector3.ONE * 0.01, 0.14)
 	tween.parallel().tween_property(self, "position:y", position.y + 0.8, 0.14)
-	tween.tween_callback(queue_free)
+
+	# Wait for the sound before disappearing. Freeing a node kills any audio it
+	# is playing, so queue_free()ing on pickup would make collection silent.
+	await tween.finished
+	if _sfx.playing:
+		await _sfx.finished
+	queue_free()
