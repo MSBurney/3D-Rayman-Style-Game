@@ -62,7 +62,7 @@ entering `WALL_RUN` and stops on leaving, rather than one blip per frame.
 `hud.gd` already reads `player.debug_info()` for the F3 overlay. Show a small, always-visible label
 naming the current state.
 
-*Done when:* the label reads GROUND / AIR / HELICOPTER etc. as you move, without F3.
+*Done when:* the label reads GROUND / AIR / SWING / GRAPPLE_DIVE etc. as you move, without F3.
 
 ---
 
@@ -85,21 +85,20 @@ Copy `enemy_walker.gd` and change how it moves — a hopper, a charger that wind
 flyer that ignores gravity.
 
 Reuse `HealthComponent`, `Hurtbox` and `Stompbox` exactly as the walker does, so it can be killed by
-fist, keg and stomp without extra work.
+keg and stomp without extra work.
 
 *Watch out:* read `Player.descent_speed()` for stomp checks, never `player.velocity.y`. The comment
 on that function explains why.
 
-*Done when:* it threatens the player differently from the walker, and all three kill methods work.
+*Done when:* it threatens the player differently from the walker, and both kill methods work.
 
 ---
 
 ### 7. Breakable crates
-A prop that shatters when hit by a thrown keg or a charged fist.
+A prop that shatters when hit by a thrown keg.
 
-`throwable.gd` already has impact damage, and anything with a child node named `Health` takes
-damage from the fist — see `fist.gd`. So a crate mostly needs a `Health` child and a death
-reaction.
+`throwable.gd` already has impact damage, and it damages anything with a child node named `Health`.
+So a crate mostly needs a `Health` child and a death reaction.
 
 *Done when:* a thrown keg destroys it but walking into it does not.
 
@@ -107,7 +106,7 @@ reaction.
 
 ### 8. Second level
 Duplicate `test_level.tscn` and build something that demands *combining* moves — a gap you can only
-clear by swinging, releasing into a helicopter, and catching a ledge.
+clear by swinging, flinging off at the right moment, and catching a ledge.
 
 That combination is the whole point of the project. Read the design rule at the top of `player.gd`.
 

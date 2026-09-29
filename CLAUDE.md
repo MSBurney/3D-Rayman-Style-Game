@@ -86,6 +86,9 @@ site, but they are worth knowing up front:
   else's scene that points at it, and the reference breaks outright if the file is ever moved.
   `ext_resource` lines should carry their target's `uid=` too. Generate one with
   `ResourceUID.id_to_text(ResourceUID.create_id())`.
+- **Deleting a scene leaves the UID cache stale.** After removing a `.tscn`, unrelated scenes start
+  logging `invalid UID ... using text path instead` even though their headers are fine. It is the
+  cache, not your files — delete `.godot/` and re-run `--import` before believing the warning.
 
 ## Conventions
 

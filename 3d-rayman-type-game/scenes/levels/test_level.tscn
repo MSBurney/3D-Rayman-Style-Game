@@ -127,7 +127,15 @@ use_collision = true
 size = Vector3(6, 1, 6)
 material = SubResource("MatStone")
 
-; 14 m gap with a 3 m drop: a plain jump falls short, a helicopter glide lands it.
+; This gap used to be sized so only the helicopter could cross it. The helicopter
+; was removed on 2026-09-29, so these two anchors are now the way over — jump off
+; A3, dive to the first, chain to the second, land on A4.
+[node name="AGapAnchor1" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7, -46)
+
+[node name="AGapAnchor2" parent="." instance=ExtResource("gp")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, -55)
+
 [node name="A4" type="CSGBox3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, -64)
 use_collision = true

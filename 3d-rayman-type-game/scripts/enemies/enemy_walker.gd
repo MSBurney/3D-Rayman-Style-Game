@@ -1,8 +1,7 @@
 extends CharacterBody3D
 
 ## Ground patroller. Walks a line until it notices the player, then closes in.
-## Killable three ways — fist, thrown object, or a stomp on the head — because
-## every enemy should be an opportunity to use a different part of the moveset.
+## Killable by a stomp on the head or by a thrown object.
 
 @export var walk_speed: float = 2.2
 @export var chase_speed: float = 4.4

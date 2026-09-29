@@ -17,7 +17,7 @@ const MAIN := preload("res://scenes/main.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 25
+const EXPECTED_CHECKS := 26
 
 var player: Player
 var level: Node3D
@@ -55,7 +55,11 @@ func _step(n: int = 1) -> void:
 func _check(label: String, ok: bool, detail: String = "") -> void:
 	if not ok:
 		failures += 1
-	results.append("%s %-26s %s" % ["PASS" if ok else "FAIL", label, detail])
+	var line := "%s %-30s %s" % ["PASS" if ok else "FAIL", label, detail]
+	results.append(line)
+	# Printed as it happens, not just in the summary: if the suite ever hangs,
+	# the last line printed tells you which check it died on.
+	print("  ", line)
 
 
 func _place(at: Vector3) -> void:
@@ -70,7 +74,7 @@ func _place(at: Vector3) -> void:
 func _release_all() -> void:
 	# Movement actions must be in here too: a held move_right leaking out of the
 	# wall-run test walks the player away from every later test's setup.
-	for action in ["jump", "punch", "grapple", "grab", "drop",
+	for action in ["jump", "grapple", "grab", "drop",
 			"move_left", "move_right", "move_forward", "move_back"]:
 		Input.action_release(action)
 
@@ -87,22 +91,19 @@ func _run() -> void:
 	await _step(4)
 	_check("jump rises", player.velocity.y > 3.0, "vy=%.2f" % player.velocity.y)
 
-	# --- helicopter: tested over the zone A pillar, clear of any walker that
-	# would otherwise get stomped mid-descent and bounce the player upward.
+	# --- falling is now plain falling: with the helicopter gone, a second jump
+	# in mid-air must do nothing at all unless something is targetable.
 	_release_all()
 	await _step(4)
 	_place(Vector3(0, 14, -21))
 	await _step(20)
 	_check("falls freely", player.velocity.y < -5.0, "vy=%.2f" % player.velocity.y)
+	var before_vy: float = player.velocity.y
 	Input.action_press("jump")
-	await _step(15)
-	_check("helicopter deploys", player.state == Player.State.HELICOPTER,
-		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
-	await _step(20)
-	_check("helicopter clamps fall",
-		player.velocity.y > -3.0 and player.state == Player.State.HELICOPTER,
-		"vy=%.2f state=%s" % [player.velocity.y, player.state_name()])
+	await _step(2)
 	_release_all()
+	_check("no mid-air jump without a target", player.velocity.y < before_vy,
+		"vy %.2f -> %.2f state=%s" % [before_vy, player.velocity.y, player.state_name()])
 	await _step(40)
 
 	# --- ledge grab on the zone C terrace (lip at y=3.3, wall face at x=-15).
@@ -136,12 +137,12 @@ func _run() -> void:
 	# Aim is camera-driven, so drive the state directly rather than fight the camera.
 	var pull_point := level.get_node("HubPull") as GrapplePoint
 	player._grapple = pull_point
-	player._set_state(Player.State.GRAPPLE_PULL)
+	player._set_state(Player.State.GRAPPLE_DIVE)
 	await _step(4)
-	_check("pull moves player", player.velocity.length() > 5.0,
+	_check("dive moves player", player.velocity.length() > 5.0,
 		"speed=%.2f" % player.velocity.length())
 	await _step(60)
-	_check("pull releases", player.state != Player.State.GRAPPLE_PULL,
+	_check("dive releases", player.state != Player.State.GRAPPLE_DIVE,
 		"state=%s" % player.state_name())
 	_release_all()
 
@@ -194,6 +195,43 @@ func _run() -> void:
 	_release_all()
 	await _step(10)
 
+	# --- diving at an enemy: it takes damage and the player bounces off airborne,
+	# which is what lets one dive chain into the next.
+	_release_all()
+	await _step(10)
+	var dive_enemy := level.get_node("BWalker") as Node3D
+	var dive_enemy_health := dive_enemy.get_node("Health") as HealthComponent
+	var dive_enemy_hp: int = dive_enemy_health.current
+	_place(dive_enemy.global_position + Vector3(0, 6, 0))
+	player._grapple = dive_enemy
+	player._set_state(Player.State.GRAPPLE_DIVE)
+	await _step(40)
+	var dive_enemy_gone := not is_instance_valid(dive_enemy_health)
+	_check("dive damages an enemy",
+		dive_enemy_gone or dive_enemy_health.current < dive_enemy_hp,
+		"hp %d -> %s" % [dive_enemy_hp,
+			"killed" if dive_enemy_gone else str(dive_enemy_health.current)])
+	_check("dive bounces the player", player.state != Player.State.GRAPPLE_DIVE,
+		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
+	await _step(20)
+
+	# --- the style toggle: in HOMING an anchor should be dived at, not swung on.
+	_release_all()
+	await _step(10)
+	player.grapple_style = Player.GrappleStyle.HOMING
+	_place(Vector3(0, 4, 24))
+	player.rig.yaw = 0.0
+	player.rig.pitch = 0.55
+	await _step(4)
+	Input.action_press("jump")
+	await _step(2)
+	_release_all()
+	_check("HOMING style dives at anchors", player.state == Player.State.GRAPPLE_DIVE,
+		"state=%s" % player.state_name())
+	player.grapple_style = Player.GrappleStyle.MOMENTUM
+	await _step(30)
+	_release_all()
+
 	# --- wall run along the tan wall in zone B (face at z=5, spans x 25..45).
 	# Capsule edge starts 0.05 m off the face so contact happens immediately.
 	_place(Vector3(26, 2.5, 4.55))
@@ -205,16 +243,6 @@ func _run() -> void:
 	_check("wall contact state", wall_state == Player.State.WALL_RUN or wall_state == Player.State.WALL_SLIDE,
 		"state=%s" % player.state_name())
 	await _step(20)
-
-	# --- punch spawns a fist
-	_place(Vector3(0, 1.2, 10))
-	await _step(90)
-	Input.action_press("punch")
-	await _step(3)
-	Input.action_release("punch")
-	await _step(3)
-	_check("punch spawns fist", _count_nodes("Fist") > 0, "fists=%d" % _count_nodes("Fist"))
-	await _step(40)
 
 	# --- grab and throw a keg
 	var keg := level.get_node("KegA") as RigidBody3D
@@ -237,9 +265,13 @@ func _run() -> void:
 		"kegspeed=%.2f" % thrown_speed)
 	await _step(20)
 
-	# --- taking damage
-	_place(Vector3(0, 1.2, 10))
-	await _step(25)
+	# --- taking damage.
+	# Run this on the zone D tower, not the hub: the hub walkers wander, and a
+	# chasing one landing a contact hit mid-test knocks the player back into HURT
+	# and makes the death checks below fail for reasons that have nothing to do
+	# with what is being tested. The tower is 13 m up and out of their range.
+	_place(Vector3(11, 14, 66))
+	await _step(40)
 	var before: int = player.health.current
 	player.take_hit(1, player.global_position + Vector3(0, 0, 2))
 	await _step(3)
@@ -289,10 +321,3 @@ func _run() -> void:
 	await _step(120)
 	_check("no crash after idle", is_instance_valid(player), "state=%s" % player.state_name())
 
-
-func _count_nodes(prefix: String) -> int:
-	var total := 0
-	for node in get_tree().current_scene.get_children():
-		if node.name.begins_with(prefix):
-			total += 1
-	return total

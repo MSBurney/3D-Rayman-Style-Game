@@ -14,8 +14,8 @@ extends CharacterBody3D
 ##                          Inspector. Change these first; you rarely need the code.
 ##   3. var declarations  — internal bookkeeping (timers, the current rope, etc.)
 ##   4. _physics_process  — the heartbeat. Read this to see the order of events.
-##   5. _do_<state>()     — one function per state. Want to change the helicopter?
-##                          Go to _do_helicopter(). That is the whole trick.
+##   5. _do_<state>()     — one function per state. Want to change the wall run?
+##                          Go to _do_wall_run(). That is the whole trick.
 ##   6. helpers           — wall/ledge transitions, damage, plumbing
 ##
 ## ─── THE REST OF THE PLAYER ──────────────────────────────────────────────────
@@ -24,9 +24,9 @@ extends CharacterBody3D
 ## Each one is a separate file you can read in a couple of minutes, and each has
 ## its own tuning values in the Inspector:
 ##
-##   Abilities        player_abilities.gd  punching, grabbing and throwing
+##   Abilities        player_abilities.gd  grabbing and throwing objects
 ##   LedgeSensor      ledge_sensor.gd      "is there a ledge in front of me?"
-##   GrappleTargeting grapple_targeting.gd "which anchor does the player mean?"
+##   GrappleTargeting grapple_targeting.gd "which target does the player mean?"
 ##   Visual           player_visuals.gd    the body meshes and which way they face
 ##   RopeLine         rope_line.gd         drawing the grapple rope
 ##   CameraRig        player_camera.gd     the third-person camera
@@ -58,9 +58,9 @@ extends CharacterBody3D
 ## ─── THE ONE DESIGN RULE ─────────────────────────────────────────────────────
 ##
 ## Abilities must *combine*, not take turns. Every state is written to hand off
-## into the others — a swing releases into a helicopter, a helicopter ends in a
-## ledge grab, a wall run launches a grapple. If you add a state, make sure it
-## has exits into the others rather than trapping the player inside it.
+## into the others — a swing releases into a dive, a dive bounces off an enemy
+## into another dive, a wall run launches a grapple. If you add a state, make
+## sure it has exits into the others rather than trapping the player inside it.
 ##
 ## The state machine is a plain enum plus a `match`, rather than Godot's node
 ## based approach, because these states share a lot of velocity maths and
@@ -70,14 +70,27 @@ extends CharacterBody3D
 enum State {
 	GROUND,
 	AIR,
-	HELICOPTER,
 	WALL_RUN,
 	WALL_SLIDE,
 	LEDGE_HANG,
-	GRAPPLE_PULL,
+	GRAPPLE_DIVE,
 	SWING,
 	HURT,
 	DEAD,
+}
+
+## The two ways the grapple can treat a level anchor. This is a live experiment:
+## flip it in the Inspector, play both, and keep whichever the game wants to be.
+##
+## Enemies behave the same either way — you dive at them, hit them, and bounce
+## off airborne so you can chain into the next target. The difference is anchors.
+enum GrappleStyle {
+	## Anchors become a swing. You keep the speed you arrived with and can pump
+	## the arc for more. Builds momentum; higher skill ceiling per use.
+	MOMENTUM,
+	## Anchors are dived at like enemies: you stop dead on arrival and pop off.
+	## Cancels momentum; reads closer to Sonic's homing attack.
+	HOMING,
 }
 
 signal state_changed(from: State, to: State)
@@ -106,19 +119,6 @@ signal state_changed(from: State, to: State)
 @export var coyote_time: float = 0.12
 @export var jump_buffer: float = 0.14
 
-@export_group("Helicopter")
-@export var helicopter_fall_speed: float = 2.2
-## Air control while hovering is deliberately high — the helicopter is a
-## positioning tool, not just a slow fall.
-@export_range(0.0, 1.0) var helicopter_air_control: float = 0.9
-@export_range(0.0, 1.0) var helicopter_speed_scale: float = 0.8
-## 0 = unlimited, like Rayman 2. Give it a budget if you want gaps to bite.
-@export var helicopter_max_time: float = 0.0
-## When true you must release jump and press again to deploy, so it reads as a
-## deliberate input instead of triggering on every held jump.
-@export var helicopter_requires_repress: bool = true
-@export var helicopter_spin_speed: float = 26.0
-
 @export_group("Wall moves")
 @export var wall_run_speed: float = 9.0
 @export var wall_run_time: float = 1.1
@@ -144,6 +144,17 @@ signal state_changed(from: State, to: State)
 @export var ledge_cooldown: float = 0.28
 
 @export_group("Grapple")
+## Which behaviour anchors get. See GrappleStyle above — this is the toggle to
+## play with when deciding what the game's traversal should feel like.
+@export var grapple_style: GrappleStyle = GrappleStyle.MOMENTUM
+## Speed of the dive at a target. Fast enough to read as a lunge, not a glide.
+@export var dive_speed: float = 26.0
+## How close counts as having arrived.
+@export var dive_arrive_distance: float = 1.2
+## Upward kick when a dive ends on an anchor, so it can chain into another.
+@export var dive_release_boost: float = 6.0
+## Damage a dive does to an enemy.
+@export var dive_damage: int = 2
 @export var swing_stiffness: float = 22.0
 ## Tangential push from the stick — this is how you pump a swing higher.
 @export var swing_input_force: float = 13.0
@@ -174,7 +185,7 @@ signal state_changed(from: State, to: State)
 @export var hurt_lift: float = 5.0
 
 var state: State = State.AIR
-## Horizontal facing of the body model, also used to aim ledge probes and punches.
+## Horizontal facing of the body model, also used to aim ledge probes and throws.
 var facing: Vector3 = Vector3.FORWARD
 var wish_dir: Vector3 = Vector3.ZERO
 var move_input: Vector2 = Vector2.ZERO
@@ -183,16 +194,16 @@ var _coyote: float = 0.0
 var _jump_buffered: float = 0.0
 var _jumping: bool = false
 var _jump_released: bool = true
-var _heli_time: float = 0.0
 var _wall_time: float = 0.0
 var _wall_normal: Vector3 = Vector3.ZERO
 var _wall_dir: Vector3 = Vector3.ZERO
 var _wall_lock: float = 0.0
 var _ledge_lock: float = 0.0
-var _grapple: GrapplePoint = null
+var _grapple: Node3D = null
 var _rope: float = 0.0
 var _rope_target: float = 0.0
 var _grapple_lock: float = 0.0
+var _grapple_buffered: float = 0.0
 var _hurt_left: float = 0.0
 var _spawn: Transform3D
 var _pre_move_vy: float = 0.0
@@ -231,11 +242,10 @@ func _physics_process(delta: float) -> void:
 	match state:
 		State.GROUND: _do_ground(delta)
 		State.AIR: _do_air(delta)
-		State.HELICOPTER: _do_helicopter(delta)
 		State.WALL_RUN: _do_wall_run(delta)
 		State.WALL_SLIDE: _do_wall_slide(delta)
 		State.LEDGE_HANG: _do_ledge_hang(delta)
-		State.GRAPPLE_PULL: _do_grapple_pull(delta)
+		State.GRAPPLE_DIVE: _do_grapple_dive(delta)
 		State.SWING: _do_swing(delta)
 		State.HURT: _do_hurt(delta)
 		State.DEAD: _do_dead(delta)
@@ -275,8 +285,7 @@ func _tick_timers(delta: float) -> void:
 	_wall_lock -= delta
 	_ledge_lock -= delta
 	_grapple_lock -= delta
-	if state == State.HELICOPTER:
-		_heli_time += delta
+	_grapple_buffered -= delta
 
 
 func _read_input() -> void:
@@ -288,6 +297,8 @@ func _read_input() -> void:
 
 	if Input.is_action_just_pressed(&"jump"):
 		_jump_buffered = jump_buffer
+	if Input.is_action_just_pressed(&"grapple"):
+		_grapple_buffered = jump_buffer
 	if Input.is_action_just_released(&"jump"):
 		_jump_released = true
 		if _jumping and velocity.y > 0.0:
@@ -295,7 +306,7 @@ func _read_input() -> void:
 			_jumping = false
 
 	if state != State.DEAD and state != State.HURT:
-		_handle_grapple_input()
+		_update_targeting()
 		abilities.handle_input(get_physics_process_delta_time())
 
 	if Input.is_action_just_pressed(&"debug_toggle"):
@@ -354,8 +365,8 @@ func _try_jump() -> bool:
 
 func _do_ground(delta: float) -> void:
 	_apply_horizontal(delta)
+	# Stop gravity accumulating into a huge downward number while grounded.
 	velocity.y = minf(velocity.y, 0.0)
-	_heli_time = 0.0
 
 	if _try_jump():
 		_set_state(State.AIR)
@@ -373,41 +384,13 @@ func _do_air(delta: float) -> void:
 	if _coyote > 0.0 and _try_jump():
 		return
 
-	if _wants_helicopter():
-		_set_state(State.HELICOPTER)
+	# Pressing jump again in the air is the grapple. It does nothing when there
+	# is no target, so there is no free double jump — you are committed to the
+	# arc unless something is in reach.
+	if _try_grapple():
 		return
+
 	if _ledge_lock <= 0.0 and velocity.y <= 0.5 and _find_ledge():
-		_set_state(State.LEDGE_HANG)
-
-
-func _wants_helicopter() -> bool:
-	if not Input.is_action_pressed(&"jump"):
-		return false
-	if velocity.y > 0.5:
-		return false
-	if helicopter_requires_repress and not _jump_released:
-		return false
-	return true
-
-
-func _do_helicopter(delta: float) -> void:
-	_apply_horizontal(delta, helicopter_speed_scale, helicopter_air_control)
-	# Ease down to hover speed rather than snapping, so deploying mid-fall reads
-	# as the helicopter catching the player.
-	if velocity.y < -helicopter_fall_speed:
-		velocity.y = move_toward(velocity.y, -helicopter_fall_speed, 45.0 * delta)
-	else:
-		_apply_gravity(delta, 0.35)
-		velocity.y = maxf(velocity.y, -helicopter_fall_speed)
-
-	var expired := helicopter_max_time > 0.0 and _heli_time >= helicopter_max_time
-	if expired or not Input.is_action_pressed(&"jump"):
-		_set_state(State.AIR)
-		return
-	if is_on_floor():
-		_set_state(State.GROUND)
-		return
-	if _ledge_lock <= 0.0 and _find_ledge():
 		_set_state(State.LEDGE_HANG)
 
 
@@ -433,9 +416,6 @@ func _do_wall_slide(delta: float) -> void:
 
 	if _jump_buffered > 0.0:
 		_wall_jump()
-		return
-	if _wants_helicopter():
-		_set_state(State.HELICOPTER)
 		return
 	if not is_on_wall():
 		_set_state(State.AIR)
@@ -483,37 +463,74 @@ func _do_ledge_hang(delta: float) -> void:
 			global_position += step
 
 
-func _do_grapple_pull(_delta: float) -> void:
-	if _grapple == null:
-		_set_state(State.AIR)
-		return
-
-	var offset := _grapple.global_position - global_position
-	var distance := offset.length()
-	if distance <= _grapple.arrive_distance:
-		# Pop loose with upward kick, keeping some inbound speed so pulls chain.
-		velocity = offset.normalized() * _grapple.pull_speed * 0.25
-		velocity.y = maxf(velocity.y, _grapple.release_boost)
+## Flying at a locked target. Used for enemies in both styles, and for anchors
+## in HOMING style. Gravity is ignored — the dive is a straight line.
+func _do_grapple_dive(_delta: float) -> void:
+	# The target can die or be freed mid-flight, so re-check every frame.
+	if _grapple == null or not is_instance_valid(_grapple):
 		_grapple = null
 		_set_state(State.AIR)
 		return
 
-	velocity = offset / distance * _grapple.pull_speed
-	# Bail out if we slam into geometry on the way.
+	var offset := _dive_target_point() - global_position
+	var distance := offset.length()
+	if distance <= dive_arrive_distance:
+		_arrive_at_dive_target()
+		return
+
+	velocity = offset / distance * dive_speed
+
+	# Bail out if we slam into geometry on the way, rather than grinding on a wall.
 	if is_on_wall() and absf(velocity.normalized().dot(get_wall_normal())) > 0.7:
 		_grapple = null
 		_set_state(State.AIR)
 		return
-	# Same one-frame trap as the swing: the press that started the pull is still
+
+	# Same one-frame trap as the swing: the press that started the dive is still
 	# "just pressed" when this runs, so it must be locked out briefly.
-	var cancel := Input.is_action_just_pressed(&"jump")
-	if _grapple_lock <= 0.0 and Input.is_action_just_pressed(&"grapple"):
-		cancel = true
+	var cancel := _grapple_lock <= 0.0 and (
+		Input.is_action_just_pressed(&"jump") or Input.is_action_just_pressed(&"grapple")
+	)
 	if cancel:
 		_jump_buffered = 0.0
+		_grapple_buffered = 0.0
 		velocity.y = maxf(velocity.y, _jump_velocity() * 0.8)
 		_grapple = null
 		_set_state(State.AIR)
+
+
+func _dive_target_point() -> Vector3:
+	if _grapple == null:
+		return global_position
+	# Enemies are aimed at chest height so you hit the body, not the feet.
+	return _grapple.global_position + (
+		Vector3.ZERO if GrappleTargeting.is_anchor(_grapple) else Vector3.UP * 0.8
+	)
+
+
+## What happens when a dive lands. This is where the whole design lives: the same
+## action produces a bounce off an enemy or a launch off an anchor.
+func _arrive_at_dive_target() -> void:
+	var target := _grapple
+	_grapple = null
+
+	if target != null and not GrappleTargeting.is_anchor(target):
+		# Hit an enemy: damage it and bounce off, still airborne, so the next
+		# target can be locked immediately. That bounce is what makes chaining work.
+		var health := target.get_node_or_null(^"Health") as HealthComponent
+		if health != null:
+			health.damage(dive_damage)
+		velocity = Vector3.ZERO
+		velocity.y = stomp_bounce
+		play_sfx(sfx_grapple)
+		_set_state(State.AIR)
+		return
+
+	# Landed on an anchor in HOMING style: stop dead and pop upward.
+	var anchor := target as GrapplePoint
+	velocity = Vector3.ZERO
+	velocity.y = anchor.release_boost if anchor != null else dive_release_boost
+	_set_state(State.AIR)
 
 
 func _do_swing(delta: float) -> void:
@@ -564,6 +581,11 @@ func _do_swing(delta: float) -> void:
 
 func _release_swing(boosted: bool) -> void:
 	_grapple = null
+	# Clear both buffers, or the very press that let go is still queued when
+	# _do_air runs next frame and immediately hooks the same anchor again —
+	# which looks exactly like the release button doing nothing.
+	_jump_buffered = 0.0
+	_grapple_buffered = 0.0
 	if boosted:
 		velocity += Vector3.UP * swing_release_boost
 		# Same reasoning as the ledge climb: most of this velocity is momentum the
@@ -592,7 +614,7 @@ func _do_dead(delta: float) -> void:
 ## Wall contact is only known after move_and_slide, so wall states are entered here.
 func _after_move(_delta: float) -> void:
 	match state:
-		State.AIR, State.HELICOPTER:
+		State.AIR:
 			if is_on_floor():
 				_set_state(State.GROUND)
 				return
@@ -648,25 +670,46 @@ func _snap_to_ledge() -> void:
 
 # ------------------------------------------------------------------- grapple
 
-func _handle_grapple_input() -> void:
-	if state == State.GRAPPLE_PULL or state == State.SWING:
+## Refreshes the aim every frame so the HUD reticle is always live. Does not
+## fire anything — [method _try_grapple] does that.
+func _update_targeting() -> void:
+	if state == State.GRAPPLE_DIVE or state == State.SWING:
 		return
-	var target := targeting.pick(rig.camera, global_position + Vector3.UP * 1.0, [get_rid()])
-	if target == null or not Input.is_action_just_pressed(&"grapple"):
-		return
+	targeting.pick(rig.camera, global_position + Vector3.UP * 1.0, [get_rid()])
+
+
+## Fires the grapple if a target is locked and the player asked for it.
+## Returns whether it started, so the caller knows to stop processing this frame.
+##
+## Deliberately airborne-only: on the ground, jump means jump. In the air, jump
+## means "go to that thing". That is the whole input rule.
+func _try_grapple() -> bool:
+	if _jump_buffered <= 0.0 and _grapple_buffered <= 0.0:
+		return false
+	var target := targeting.current
+	if target == null or not is_instance_valid(target):
+		return false
+
+	_jump_buffered = 0.0
+	_grapple_buffered = 0.0
 	_grapple = target
 	_grapple_lock = grapple_repress_delay
 	play_sfx(sfx_grapple)
-	match target.mode:
-		GrapplePoint.Mode.PULL:
-			_set_state(State.GRAPPLE_PULL)
-		_:
-			# Start the rope at whatever length it actually is and let it reel in,
-			# so hooking something far away is a smooth pull rather than a snap.
-			var distance := global_position.distance_to(target.global_position)
-			_rope = maxf(distance, swing_min_rope)
-			_rope_target = clampf(distance, swing_min_rope, target.max_rope)
-			_set_state(State.SWING)
+
+	# Enemies are always a dive. Anchors depend on the style toggle: MOMENTUM
+	# turns them into a swing, HOMING dives at them like an enemy.
+	var anchor := target as GrapplePoint
+	if anchor == null or grapple_style == GrappleStyle.HOMING:
+		_set_state(State.GRAPPLE_DIVE)
+		return true
+
+	# Start the rope at whatever length it actually is and let it reel in, so
+	# hooking something far away is a smooth pull rather than a snap.
+	var distance := global_position.distance_to(anchor.global_position)
+	_rope = maxf(distance, swing_min_rope)
+	_rope_target = clampf(distance, swing_min_rope, anchor.max_rope)
+	_set_state(State.SWING)
+	return true
 
 
 # -------------------------------------------------------------- damage & death
@@ -767,12 +810,16 @@ func _update_visual(delta: float) -> void:
 	elif wish_dir.length_squared() > 0.01:
 		facing = wish_dir.normalized()  # stood still: face where we are steering
 
-	visual.tick(delta, facing, state == State.HELICOPTER)
+	visual.tick(delta, facing)
 
 
 ## Shows the rope while hooked on, hides it otherwise.
 func _update_rope() -> void:
-	var anchored := _grapple != null and (state == State.SWING or state == State.GRAPPLE_PULL)
+	var anchored := (
+		_grapple != null
+		and is_instance_valid(_grapple)
+		and (state == State.SWING or state == State.GRAPPLE_DIVE)
+	)
 	if anchored:
 		rope_line.draw_between(global_position + Vector3.UP * 1.0, _grapple.global_position)
 	else:
@@ -803,9 +850,6 @@ func _enter_state(which: State) -> void:
 			# down a slope would thud.
 			if _pre_move_vy < -4.0:
 				play_sfx(sfx_land)
-		State.HELICOPTER:
-			_heli_time = 0.0
-			_jumping = false
 		State.LEDGE_HANG:
 			_snap_to_ledge()
 		State.SWING:
@@ -846,6 +890,7 @@ func debug_info() -> Dictionary:
 		"floor": is_on_floor(),
 		"wall": is_on_wall(),
 		"target": target.name if target != null else "-",
-		"heli": _heli_time,
+		"kind": ("anchor" if GrappleTargeting.is_anchor(target) else "enemy") if target != null else "-",
+		"style": GrappleStyle.keys()[grapple_style],
 		"carry": abilities.carried.name if abilities.carried != null else "-",
 	}

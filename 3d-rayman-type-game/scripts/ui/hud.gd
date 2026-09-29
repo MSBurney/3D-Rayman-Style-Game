@@ -11,6 +11,9 @@ extends Control
 @export var heart_origin: Vector2 = Vector2(34.0, 34.0)
 @export var swing_colour: Color = Color(0.72, 0.45, 1.0)
 @export var pull_colour: Color = Color(1.0, 0.72, 0.28)
+## Enemies get their own reticle colour so "I am about to attack that" reads
+## differently from "I am about to swing off that" at a glance.
+@export var enemy_colour: Color = Color(1.0, 0.36, 0.36)
 @export var reticle_radius: float = 20.0
 
 var _player: Player = null
@@ -66,7 +69,10 @@ func _draw_reticle() -> void:
 		return
 
 	var at := camera.unproject_position(target.global_position)
-	var colour := pull_colour if target.mode == GrapplePoint.Mode.PULL else swing_colour
+	var colour := enemy_colour
+	var anchor := target as GrapplePoint
+	if anchor != null:
+		colour = pull_colour if _player.grapple_style == Player.GrappleStyle.HOMING else swing_colour
 	draw_arc(at, reticle_radius, 0.0, TAU, 32, colour, 2.5, true)
 	# Four ticks so the ring reads as a target and not just a circle.
 	for i in 4:
@@ -92,8 +98,8 @@ func _format_debug(info: Dictionary) -> String:
 		"speed   %.2f" % info["speed"],
 		"vert    %.2f" % info["vy"],
 		"floor   %s   wall %s" % [info["floor"], info["wall"]],
-		"target  %s" % info["target"],
-		"heli    %.2f" % info["heli"],
+		"target  %s (%s)" % [info["target"], info["kind"]],
+		"style   %s" % info["style"],
 		"carry   %s" % info["carry"],
 		"fps     %d" % Engine.get_frames_per_second(),
 	])
@@ -101,10 +107,10 @@ func _format_debug(info: Dictionary) -> String:
 func _hint_text() -> String:
 	return "\n".join([
 		"WASD move    Mouse or arrow keys look    Space jump",
-		"Space again while falling:  HELICOPTER",
-		"RMB or Q:  grapple the ringed target  (press again to let go)",
+		"Space again in the air:  dive at the ringed target  (also RMB or Q)",
+		"Ringed enemies can be dived at too — bounce off and chain to the next",
 		"Space while swinging:  fling off and keep the speed",
-		"LMB or F, tap or hold:  fist / charged fist     E:  grab & throw",
+		"E:  grab and throw a keg     Land on an enemy to stomp it",
 		"Run at a tan wall with speed:  wall run     Space:  wall jump",
 		"Jump at a high ledge:  auto grab     Space:  climb     Ctrl:  drop",
 		"F3 debug    R respawn    F5 restart    Esc free the mouse",

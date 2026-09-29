@@ -13,7 +13,7 @@ Press **F5**. You should be standing on a green plaza with two red enemies wande
 
 Fly around for five minutes before reading any code. Try to reach all four zones:
 
-- **North** — hop the platforms, then hold jump on the way down to helicopter across the big gap.
+- **North** — hop the platforms, then dive across the gap using the two floating rings.
 - **East** — sprint at the tan wall and keep going; you should run along it.
 - **West** — jump at the tall pink terraces and you will grab the lip. Press jump again to climb up.
 - **South** — a pit with floating rings over it. Press **Q** (or right-click) to hook one.
@@ -59,8 +59,8 @@ fast and a slow machine.
 The fastest way to understand a system is to break it.
 
 1. In the **Scene** panel, click the `Player` node.
-2. Look at the **Inspector** on the right. Everything is grouped: Run, Jump, Helicopter, Wall
-   moves, Ledge grab, Grapple, Combat, Carry.
+2. Look at the **Inspector** on the right. Everything is grouped: Run, Jump, Wall moves,
+   Ledge grab, Grapple, Combat, Sounds.
 3. Open **Jump** and set `Jump Height` to `6`.
 4. Press F5 and jump.
 
@@ -76,7 +76,8 @@ main way to learn what each number does. **Go and break several of them.** Sugge
 
 | Try | In group | What you should notice |
 | --- | --- | --- |
-| `Helicopter Fall Speed` → `0.2` | Helicopter | You barely descend — you can cross anything |
+| `Grapple Style` → `HOMING` | Grapple | Anchors stop being swings and become dives. This is the live design experiment — see section 4 |
+| `Dive Speed` → `6` | Grapple | The dive becomes a slow float; you can see the aim-assist tracking |
 | `Air Control` → `0.0` | Run | You cannot steer at all mid-jump; feels awful, and shows why it exists |
 | `Coyote Time` → `0.0` | Jump | Jumps off ledges start failing. This is the forgiveness you never notice until it is gone |
 | `Max Speed` → `20` | Run | Fast, but you overshoot every platform |
@@ -126,7 +127,7 @@ reference to another. That is the point: you can rewrite the HUD without opening
 
 ## 4. Read one ability (20 minutes)
 
-Open `scripts/player/player.gd` and read the header comment. Then find `_do_helicopter()`.
+Open `scripts/player/player.gd` and read the header comment. Then find `_do_grapple_dive()`.
 
 Do **not** read the whole file. The structure exists so you don't have to: one `_do_<state>()`
 function per thing the player can be doing, and `_physics_process` picks which one runs:
@@ -135,13 +136,17 @@ function per thing the player can be doing, and `_physics_process` picks which o
 match state:
     State.GROUND: _do_ground(delta)
     State.AIR: _do_air(delta)
-    State.HELICOPTER: _do_helicopter(delta)
+    State.GRAPPLE_DIVE: _do_grapple_dive(delta)
     ...
 ```
 
-`_do_helicopter()` is about fifteen lines. It does three things: steer, limit fall speed, and
-decide whether to stop helicoptering. Every state function has that shape — **move, then check if
-we should be in a different state.**
+`_do_grapple_dive()` is short. It flies straight at the locked target, bails if it hits a wall, and
+calls `_arrive_at_dive_target()` when it gets there. Every state function has that shape —
+**move, then check if we should be in a different state.**
+
+Then read `_arrive_at_dive_target()`, because the whole design of the game is in that one function:
+the *same* action produces a bounce off an enemy or a launch off an anchor. Adding a third kind of
+target would mean adding a branch there and nothing else.
 
 Two things in this file are worth understanding because they bite everyone:
 
@@ -150,14 +155,16 @@ Two things in this file are worth understanding because they bite everyone:
 `_after_move()`, not inside a state function.
 
 **A button press lasts a whole frame.** `Input.is_action_just_pressed()` stays true for every
-check within the same frame. This caused a real bug: pressing grapple attached you to a rope, then
-the swing code ran *later in that same frame*, saw the same press, and let go instantly — so
-grappling looked broken. The fix is `grapple_repress_delay`, a short lock-out after hooking on.
+check within the same frame. This has caused two real bugs. First: pressing grapple attached you to
+a rope, then the swing code ran *later in that same frame*, saw the same press, and let go
+instantly — so grappling looked broken. Second: pressing grapple to *release* a swing dropped you
+and then re-hooked the same anchor from the buffered press. The fixes are `grapple_repress_delay`
+and clearing the input buffers in `_release_swing()`.
 
-> **Try it:** give the helicopter a fuel limit. Select the Player, set `Helicopter Max Time` to
-> `1.5`. Read `_do_helicopter()` to see how `0` means unlimited. Now go and look at the north gap —
-> is it still crossable? That is level design and mechanics arguing with each other, which is most
-> of what platformer development is.
+> **Try it:** select the Player and flip `Grapple Style` between `MOMENTUM` and `HOMING`, then go
+> and play the south pit both ways. MOMENTUM makes anchors a swing you build speed on; HOMING makes
+> them a dive that stops you dead. This is a real open question on the project — which one the game
+> should keep has not been decided. Form an opinion and say which you prefer.
 
 ---
 
@@ -225,7 +232,7 @@ the grapple problem above. If you add an ability, add a check for it in
 scripts/
   game.gd          score, checkpoints, respawning
   events.gd        the signal noticeboard (autoloaded as `Events`)
-  player/          player.gd, camera, grapple targeting, fist
+  player/          player.gd, camera, grapple targeting, ledge sensor, abilities
   enemies/         walker, turret, bullet
   props/           lum, grapple point, keg, checkpoint, hazard
   ui/              hud.gd
