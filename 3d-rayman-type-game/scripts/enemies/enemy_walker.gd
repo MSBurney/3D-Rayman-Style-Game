@@ -16,6 +16,8 @@ extends CharacterBody3D
 @export var gravity: float = 24.0
 ## Dropped on death so combat feeds back into collection.
 @export var lum_drop: PackedScene
+@export var sfx_hit: AudioStream
+@export var sfx_die: AudioStream
 
 var _origin: Vector3
 var _patrol_axis: Vector3 = Vector3.RIGHT
@@ -28,6 +30,7 @@ var _dead: bool = false
 @onready var visual: Node3D = $Visual
 @onready var hurtbox: Area3D = $Hurtbox
 @onready var stompbox: Area3D = $Stompbox
+@onready var _sfx: AudioStreamPlayer3D = $Sfx
 
 func _ready() -> void:
 	_origin = global_position
@@ -128,6 +131,7 @@ func _on_stomp(body: Node3D) -> void:
 	health.damage(2)
 
 func _on_damaged(_amount: int) -> void:
+	_play(sfx_hit)
 	var tween := create_tween()
 	tween.tween_property(visual, "scale", Vector3(1.25, 0.75, 1.25), 0.05)
 	tween.tween_property(visual, "scale", Vector3.ONE, 0.12)
@@ -144,7 +148,19 @@ func _on_died() -> void:
 		var lum := lum_drop.instantiate() as Node3D
 		get_parent().add_child(lum)
 		lum.global_position = global_position + Vector3.UP * 0.8
+	_play(sfx_die)
 	var tween := create_tween()
 	tween.tween_property(visual, "scale", Vector3.ONE * 0.01, 0.22)
 	tween.parallel().tween_property(visual, "position:y", 1.2, 0.22)
-	tween.tween_callback(queue_free)
+	# Outlive the death sound — freeing the node would cut it off mid-blip.
+	await tween.finished
+	if _sfx.playing:
+		await _sfx.finished
+	queue_free()
+
+
+func _play(stream: AudioStream) -> void:
+	if stream == null:
+		return
+	_sfx.stream = stream
+	_sfx.play()

@@ -14,6 +14,11 @@ extends Node
 
 const MAIN := preload("res://scenes/main.tscn")
 
+## How many checks _run() should reach. A runtime error inside _run() silently
+## aborts it, and without this guard the report would happily print "0 failures"
+## having only run half the suite. Bump it when you add a check.
+const EXPECTED_CHECKS := 25
+
 var player: Player
 var level: Node3D
 var results: Array[String] = []
@@ -33,6 +38,11 @@ func _ready() -> void:
 	print("\n==== RESULTS ====")
 	for line in results:
 		print(line)
+	if results.size() < EXPECTED_CHECKS:
+		failures += 1
+		print("FAIL suite truncated — ran %d of %d checks. Something errored inside"
+			% [results.size(), EXPECTED_CHECKS])
+		print("     _run(); scroll up for the GDScript backtrace.")
 	print("==== %d failure(s) ====" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
@@ -215,7 +225,7 @@ func _run() -> void:
 	Input.action_release("grab")
 	await _step(5)
 	# Whichever keg the grab area actually chose is the one to watch.
-	var held := player.carried as RigidBody3D
+	var held := player.abilities.carried as RigidBody3D
 	_check("grab picks up keg", held != null,
 		"carried=%s" % (held.name if held != null else "none"))
 	Input.action_press("grab")
@@ -223,7 +233,7 @@ func _run() -> void:
 	Input.action_release("grab")
 	await _step(6)
 	var thrown_speed := held.linear_velocity.length() if held != null else 0.0
-	_check("throw releases keg", player.carried == null and thrown_speed > 3.0,
+	_check("throw releases keg", player.abilities.carried == null and thrown_speed > 3.0,
 		"kegspeed=%.2f" % thrown_speed)
 	await _step(20)
 

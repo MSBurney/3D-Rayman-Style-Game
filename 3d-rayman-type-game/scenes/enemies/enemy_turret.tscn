@@ -1,9 +1,11 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://13j0onm5mchh"]
 
-[ext_resource type="Script" path="res://scripts/enemies/enemy_turret.gd" id="1"]
-[ext_resource type="Script" path="res://scripts/components/health.gd" id="2"]
-[ext_resource type="PackedScene" path="res://scenes/fx/enemy_bullet.tscn" id="3"]
-[ext_resource type="PackedScene" path="res://scenes/props/lum.tscn" id="4"]
+[ext_resource type="Script" uid="uid://dnd5yq36nrcmr" path="res://scripts/enemies/enemy_turret.gd" id="1"]
+[ext_resource type="Script" uid="uid://0hc4op07qxx7" path="res://scripts/components/health.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://d243c40ke6oqu" path="res://scenes/fx/enemy_bullet.tscn" id="3"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="4"]
+[ext_resource type="AudioStream" uid="uid://umtxj02x8pcr" path="res://assets/audio/enemy_hit.wav" id="5"]
+[ext_resource type="AudioStream" uid="uid://b4kq7hqs5tgxp" path="res://assets/audio/enemy_die.wav" id="6"]
 
 [sub_resource type="CylinderShape3D" id="Shape_turret"]
 height = 1.7
@@ -45,6 +47,8 @@ collision_mask = 1
 script = ExtResource("1")
 bullet = ExtResource("3")
 lum_drop = ExtResource("4")
+sfx_hit = ExtResource("5")
+sfx_die = ExtResource("6")
 
 [node name="Shape" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
@@ -66,6 +70,10 @@ mesh = SubResource("Mesh_barrel")
 
 [node name="Muzzle" type="Node3D" parent="Visual"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.15, 0.95)
+
+[node name="Sfx" type="AudioStreamPlayer3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+unit_size = 16.0
 
 [node name="Health" type="Node" parent="."]
 script = ExtResource("2")

@@ -1,12 +1,12 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://bnwli4wnfxsxj"]
 
-[ext_resource type="Script" path="res://scripts/props/hazard.gd" id="haz"]
-[ext_resource type="PackedScene" path="res://scenes/props/lum.tscn" id="lum"]
-[ext_resource type="PackedScene" path="res://scenes/props/grapple_point.tscn" id="gp"]
-[ext_resource type="PackedScene" path="res://scenes/props/checkpoint.tscn" id="cp"]
-[ext_resource type="PackedScene" path="res://scenes/props/throwable_keg.tscn" id="keg"]
-[ext_resource type="PackedScene" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
-[ext_resource type="PackedScene" path="res://scenes/enemies/enemy_turret.tscn" id="turret"]
+[ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="lum"]
+[ext_resource type="PackedScene" uid="uid://dhg1pt6psdx7p" path="res://scenes/props/grapple_point.tscn" id="gp"]
+[ext_resource type="PackedScene" uid="uid://4nl2p1prnqmb" path="res://scenes/props/checkpoint.tscn" id="cp"]
+[ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
+[ext_resource type="PackedScene" uid="uid://3htouak7kni1" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
+[ext_resource type="PackedScene" uid="uid://13j0onm5mchh" path="res://scenes/enemies/enemy_turret.tscn" id="turret"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_top_color = Color(0.28, 0.48, 0.82, 1)

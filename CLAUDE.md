@@ -73,6 +73,19 @@ site, but they are worth knowing up front:
   `Condition "det == 0" is true` errors. Shrink to `Vector3.ONE * 0.01` instead.
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
+- **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
+  `Events`, so every script mentioning it fails to compile, its node loads with a null script, and
+  all its exported values read back as null — which looks exactly like broken data. Write throwaway
+  checks as a tiny `.tscn` + script and run the scene instead. Only use `--script` for tools that
+  touch no game code (see `tools/make_placeholder_sounds.gd`).
+- **Freeing a node stops any sound it is playing.** A pickup that calls `queue_free()` immediately
+  is silent. `lum.gd` and the enemies `await` the sound before freeing.
+- **Every `.tscn` needs a `uid="uid://..."` in its `[gd_scene]` header.** The editor adds one
+  automatically; a scene written as text by hand does not have one, and then references to it fall
+  back to matching by file path. That logs `invalid UID ... using text path instead` in anyone
+  else's scene that points at it, and the reference breaks outright if the file is ever moved.
+  `ext_resource` lines should carry their target's `uid=` too. Generate one with
+  `ResourceUID.id_to_text(ResourceUID.create_id())`.
 
 ## Conventions
 

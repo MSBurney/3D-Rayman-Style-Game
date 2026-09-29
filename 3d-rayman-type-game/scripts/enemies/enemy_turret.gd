@@ -12,6 +12,8 @@ extends StaticBody3D
 @export var burst: int = 1
 @export var burst_spacing: float = 0.16
 @export var lum_drop: PackedScene
+@export var sfx_hit: AudioStream
+@export var sfx_die: AudioStream
 
 var _player: Player = null
 var _cooldown: float = 0.0
@@ -20,6 +22,7 @@ var _dead: bool = false
 @onready var health: HealthComponent = $Health
 @onready var visual: Node3D = $Visual
 @onready var muzzle: Node3D = $Visual/Muzzle
+@onready var _sfx: AudioStreamPlayer3D = $Sfx
 
 func _ready() -> void:
 	health.died.connect(_on_died)
@@ -75,6 +78,7 @@ func _fire_one(direction: Vector3) -> void:
 		shot.call(&"launch", direction)
 
 func _on_damaged(_amount: int) -> void:
+	_play(sfx_hit)
 	var tween := create_tween()
 	tween.tween_property(visual, "scale", Vector3(1.2, 0.8, 1.2), 0.05)
 	tween.tween_property(visual, "scale", Vector3.ONE, 0.12)
@@ -89,6 +93,18 @@ func _on_died() -> void:
 		var lum := lum_drop.instantiate() as Node3D
 		get_parent().add_child(lum)
 		lum.global_position = global_position + Vector3.UP * 1.0
+	_play(sfx_die)
 	var tween := create_tween()
 	tween.tween_property(visual, "scale", Vector3.ONE * 0.01, 0.25)
-	tween.tween_callback(queue_free)
+	# Outlive the death sound — freeing the node would cut it off.
+	await tween.finished
+	if _sfx.playing:
+		await _sfx.finished
+	queue_free()
+
+
+func _play(stream: AudioStream) -> void:
+	if stream == null:
+		return
+	_sfx.stream = stream
+	_sfx.play()

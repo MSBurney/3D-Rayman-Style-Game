@@ -1,6 +1,6 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://dhg1pt6psdx7p"]
 
-[ext_resource type="Script" path="res://scripts/props/grapple_point.gd" id="1"]
+[ext_resource type="Script" uid="uid://bug3l6be8qjun" path="res://scripts/props/grapple_point.gd" id="1"]
 
 [sub_resource type="SphereMesh" id="Mesh_core"]
 radius = 0.4

@@ -1,6 +1,6 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://b31dptaeqyaxd"]
 
-[ext_resource type="Script" path="res://scripts/props/throwable.gd" id="1"]
+[ext_resource type="Script" uid="uid://b04gdnq8d40sj" path="res://scripts/props/throwable.gd" id="1"]
 
 [sub_resource type="CylinderShape3D" id="Shape_keg"]
 height = 1.0

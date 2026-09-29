@@ -3,7 +3,8 @@
 A movement-first 3D platformer in the spirit of Rayman 2, Rayman 3 and the cancelled Rayman 4.
 
 > **New to the project?** Start with **[docs/GUIDED_TOUR.md](docs/GUIDED_TOUR.md)** — a hands-on
-> walkthrough for developers who can code but haven't used Godot before.
+> walkthrough for developers who can code but haven't used Godot before. Then pick something from
+> **[docs/TASKS.md](docs/TASKS.md)**.
 
 The design bet: **abilities combine rather than take turns.** Every state hands off into the
 others — a swing releases into a helicopter, a helicopter ends in a ledge grab, a wall run
