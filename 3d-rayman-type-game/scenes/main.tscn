@@ -5,13 +5,14 @@
 [ext_resource type="PackedScene" uid="uid://b5papl5ibq4pg" path="res://scenes/player/player.tscn" id="3"]
 [ext_resource type="PackedScene" uid="uid://bbci0v0k12u0y" path="res://scenes/ui/hud.tscn" id="4"]
 
-[node name="Main" type="Node"]
+[node name="Main" type="Node" unique_id=1617764626]
 script = ExtResource("1")
 player = NodePath("Player")
 
-[node name="TestLevel" parent="." instance=ExtResource("2")]
+[node name="TestLevel" parent="." unique_id=1412028076 instance=ExtResource("2")]
 
-[node name="Player" parent="." instance=ExtResource("3")]
+[node name="Player" parent="." unique_id=1272398805 instance=ExtResource("3")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 10)
+grapple_style = 1
 
-[node name="HUD" parent="." instance=ExtResource("4")]
+[node name="HUD" parent="." unique_id=966758596 instance=ExtResource("4")]

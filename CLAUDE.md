@@ -42,7 +42,7 @@ file to be read.
   scripts/
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
-    player/          player.gd (the big one), camera, grapple targeting, fist
+    player/          player.gd (movement), abilities, camera, grapple targeting, ledge sensor
     enemies/         walker, turret, bullet
     props/           lum, grapple point, throwable keg, checkpoint, hazard
     ui/              hud.gd
@@ -106,5 +106,27 @@ site, but they are worth knowing up front:
 
 The renderer is deliberately **GL Compatibility**, not Forward+. Do not switch it without asking.
 
-Not built yet, on purpose: animation (the character is primitives moved by code), audio, swimming,
+Not built yet, on purpose: animation (the character is primitives moved by code), swimming,
 menus, saving. Ask before starting any of these.
+
+## Swing geometry
+
+Four constraints on the MOMENTUM swing that look arbitrary until you hit the bug they prevent:
+
+- **The rope is capped by the anchor's clearance above the ground** (`_usable_rope`). A pendulum
+  started level with its anchor swings down through almost a *full rope length* before the rope
+  catches. So a rope longer than the anchor's height simply lands you, ending the swing the instant
+  it starts. This is the single most confusing failure the swing can have.
+- **The rope takes its safe length immediately, it is not eased in.** Setting it to the exact
+  distance you hooked from leaves it taut with *zero tension*, so the player free-falls until slack
+  is taken up — about a third of a second, which from jump height reaches the floor. Hooking from
+  beyond the cap just leaves the rope over-stretched, and the constraint reels you in as part of
+  the arc. There was briefly a separate reel-in phase routed through GRAPPLE_DIVE; it was removed
+  because handing over from a straight-line dive to an arc dumped all the inbound speed at a fixed
+  radius, which read as slamming into a wall partway to the anchor.
+- **A speed cap (`swing_max_speed`) holds the pace.** A pendulum with a pump input winds itself up
+  without limit. This is the main dial for how fast the whole game feels.
+- **The apex brakes, it does not clamp.** Upward speed is bled off over `swing_apex_band` below the
+  anchor so the arc stalls and reverses on its own. Clamping to zero at the ceiling instead stops
+  the player dead, which reads as an invisible shelf. The smoke test asserts the worst single-frame
+  change stays under what gravity alone would do.

@@ -17,7 +17,7 @@ const MAIN := preload("res://scenes/main.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 26
+const EXPECTED_CHECKS := 30
 
 var player: Player
 var level: Node3D
@@ -154,7 +154,6 @@ func _run() -> void:
 	_place(swing_point.global_position + Vector3(0, -6, -4))
 	player._grapple = swing_point
 	player._rope = player.global_position.distance_to(swing_point.global_position)
-	player._rope_target = player._rope
 	player._set_state(Player.State.SWING)
 	await _step(50)
 	var rope_error: float = absf(player.global_position.distance_to(swing_point.global_position) - player._rope)
@@ -182,7 +181,15 @@ func _run() -> void:
 	await _step(1)
 	Input.action_release("grapple")
 	await _step(20)
-	_check("tap grapple stays attached", player.state == Player.State.SWING,
+	# A far hook reels in first, so poll for the swing rather than demanding it
+	# on the very next frame.
+	var reached_swing := false
+	for i in 60:
+		await get_tree().physics_frame
+		if player.state == Player.State.SWING:
+			reached_swing = true
+			break
+	_check("tap grapple reaches a swing", reached_swing,
 		"state=%s" % player.state_name())
 
 	# Pressing again is what lets go.
@@ -193,6 +200,102 @@ func _run() -> void:
 	_check("second tap releases", player.state != Player.State.SWING,
 		"state=%s" % player.state_name())
 	_release_all()
+	await _step(10)
+
+	# --- swing geometry. Both of these use HubSwing, which hangs over the hub so
+	# there is ground beneath it to test the rope's clearance cap against. The
+	# hub walkers are frozen first: they roam, and one landing a contact hit
+	# mid-swing would fail these for reasons unrelated to swing geometry.
+	var hub_walkers: Array[Node] = [
+		level.get_node("HubWalkerA"), level.get_node("HubWalkerB"),
+	]
+	for w in hub_walkers:
+		w.process_mode = Node.PROCESS_MODE_DISABLED
+
+	# A swing must stay below its anchor, not loop over the top.
+	_release_all()
+	await _step(10)
+	var hub_swing := level.get_node("HubSwing") as GrapplePoint
+	_place(hub_swing.global_position + Vector3(5, -1, 0))
+	player._grapple = hub_swing
+	player._rope = player.global_position.distance_to(hub_swing.global_position)
+	player._set_state(Player.State.SWING)
+	# Count the swinging frames as well as the peak: without that, a swing that
+	# ends immediately would sail through with a peak of -INF and prove nothing.
+	var highest := -INF
+	var swinging_frames := 0
+	for i in 150:
+		await get_tree().physics_frame
+		if player.state == Player.State.SWING:
+			swinging_frames += 1
+			highest = maxf(highest, player.global_position.y)
+	_check("swing stays below its anchor",
+		swinging_frames > 40 and highest <= hub_swing.global_position.y,
+		"frames=%d peak y=%.2f anchor y=%.2f state=%s"
+			% [swinging_frames, highest, hub_swing.global_position.y, player.state_name()])
+
+	# --- hooking from far out must not drop the player through the floor.
+	# Before the rope was capped to the anchor's ground clearance, grabbing this
+	# anchor from 9 m away put the bottom of the arc ~2 m underground.
+	_release_all()
+	await _step(10)
+	# Hooking from beyond the rope goes straight into the swing; the constraint
+	# reels you in as part of the arc. No hard stop partway, and no dive phase.
+	_place(Vector3(0, 2, 4))
+	var far_rope := player._usable_rope(hub_swing)
+	player._grapple = hub_swing
+	player._rope = far_rope
+	player._set_state(Player.State.SWING)
+	var far_frames := 0
+	var top_speed := 0.0
+	for i in 150:
+		await get_tree().physics_frame
+		if player.state != Player.State.SWING:
+			break
+		far_frames += 1
+		top_speed = maxf(top_speed, player.velocity.length())
+	_check("far hook swings without stalling", far_frames > 60,
+		"frames=%d rope=%.2f state=%s" % [far_frames, far_rope, player.state_name()])
+
+	# The speed cap is what keeps the pace down — a pumped pendulum would
+	# otherwise wind up indefinitely.
+	_check("swing respects its speed cap", top_speed <= player.swing_max_speed + 0.5,
+		"peak=%.2f cap=%.2f" % [top_speed, player.swing_max_speed])
+
+	# --- the top of the arc must ease into a reversal, not stop dead.
+	# Measured as the worst single-frame drop in upward speed while climbing: if
+	# the apex is smooth that stays at or under what gravity alone would do, and
+	# a hard clamp back to zero would show up as a big spike.
+	_release_all()
+	await _step(10)
+	player.global_position = hub_swing.global_position + Vector3(0, -5, 0)
+	player.velocity = Vector3(0, 0, player.swing_max_speed)
+	player._grapple = hub_swing
+	player._rope = 5.0
+	player._set_state(Player.State.SWING)
+	var worst_drop := 0.0
+	var previous_vy := 0.0
+	var entered_band := false
+	for i in 120:
+		await get_tree().physics_frame
+		if player.state != Player.State.SWING:
+			break
+		var head: float = (hub_swing.global_position.y - player.swing_min_hang) \
+			- player.global_position.y
+		if head < player.swing_apex_band:
+			entered_band = true
+		if previous_vy > 0.0:
+			worst_drop = maxf(worst_drop, previous_vy - player.velocity.y)
+		previous_vy = player.velocity.y
+	var gravity_step: float = player.gravity_fall / 60.0
+	_check("swing apex eases, never snaps",
+		entered_band and worst_drop <= gravity_step * 1.5,
+		"worst drop=%.3f vs gravity %.3f, reached apex band=%s"
+			% [worst_drop, gravity_step, entered_band])
+	player._grapple = null
+	player._set_state(Player.State.AIR)
+	for w in hub_walkers:
+		w.process_mode = Node.PROCESS_MODE_INHERIT
 	await _step(10)
 
 	# --- diving at an enemy: it takes damage and the player bounces off airborne,

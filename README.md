@@ -49,6 +49,14 @@ awkward on a laptop trackpad.
     you built. **HOMING** dives at them like an enemy — you stop dead and pop off. Both are
     implemented; flip the toggle in the Inspector and play them to decide which the game wants.
 
+  The MOMENTUM swing obeys three rules that exist purely for feel. It **hangs below its anchor**,
+  easing to a stall near the top and falling back rather than stopping dead. The rope is **capped
+  by the anchor's clearance above the ground**, because a pendulum started level with its anchor
+  drops almost a full rope length — an uncapped rope simply plants you in the floor. And there is a
+  **speed cap** (`Swing Max Speed`, 13 against a running speed of 7.5), because a pendulum you can
+  pump will otherwise wind itself up indefinitely. That cap is the main dial for how fast the game
+  feels.
+
   Aiming is camera-driven with assist: the ringed target is whatever is nearest the centre of the
   screen, in range and in line of sight. Anchors win ties against enemies, because this is a
   movement game first.
@@ -103,7 +111,7 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 26 behaviours (each state, damage, death, respawn, stomp, grab
+It drives the player through all 30 behaviours (each state, damage, death, respawn, stomp, grab
 and throw) and prints a PASS/FAIL table. Exit code 0 means everything passed. It caught several
 real bugs during the initial build and is worth rerunning whenever the controller changes.
 
