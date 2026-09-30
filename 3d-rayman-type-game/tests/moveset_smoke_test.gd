@@ -34,6 +34,11 @@ func _ready() -> void:
 		push_error("no player")
 		get_tree().quit(1)
 		return
+	# Pin the grapple style rather than trusting whatever main.tscn happens to
+	# hold. It is an @export, so it can be flipped in the Inspector and saved by
+	# accident — that once left every swing test silently exercising HOMING,
+	# where anchors are dives and no swinging happens at all.
+	player.grapple_style = Player.GrappleStyle.MOMENTUM
 	await _run()
 	print("\n==== RESULTS ====")
 	for line in results:
@@ -154,6 +159,7 @@ func _run() -> void:
 	_place(swing_point.global_position + Vector3(0, -6, -4))
 	player._grapple = swing_point
 	player._rope = player.global_position.distance_to(swing_point.global_position)
+	player._rope_target = player._rope
 	player._set_state(Player.State.SWING)
 	await _step(50)
 	var rope_error: float = absf(player.global_position.distance_to(swing_point.global_position) - player._rope)
@@ -219,6 +225,7 @@ func _run() -> void:
 	_place(hub_swing.global_position + Vector3(5, -1, 0))
 	player._grapple = hub_swing
 	player._rope = player.global_position.distance_to(hub_swing.global_position)
+	player._rope_target = player._rope
 	player._set_state(Player.State.SWING)
 	# Count the swinging frames as well as the peak: without that, a swing that
 	# ends immediately would sail through with a peak of -INF and prove nothing.
@@ -245,6 +252,7 @@ func _run() -> void:
 	var far_rope := player._usable_rope(hub_swing)
 	player._grapple = hub_swing
 	player._rope = far_rope
+	player._rope_target = far_rope
 	player._set_state(Player.State.SWING)
 	var far_frames := 0
 	var top_speed := 0.0
@@ -272,6 +280,7 @@ func _run() -> void:
 	player.velocity = Vector3(0, 0, player.swing_max_speed)
 	player._grapple = hub_swing
 	player._rope = 5.0
+	player._rope_target = 5.0
 	player._set_state(Player.State.SWING)
 	var worst_drop := 0.0
 	var previous_vy := 0.0

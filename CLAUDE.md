@@ -111,22 +111,48 @@ menus, saving. Ask before starting any of these.
 
 ## Swing geometry
 
+**The rule that matters most: inside a swing, use forces, not clamps.** Every hard clamp on
+`velocity` is a discontinuity the player feels. An earlier version had five stacked in one
+function — a spring, an outward-velocity cancel, drag, an apex clamp and a speed clamp — each
+overriding the last, and it buzzed. Every one of them is now either a force that fades in, or the
+single exact constraint below. If a swing ever feels rough again, look for a clamp before you look
+for a number to tune.
+
 Four constraints on the MOMENTUM swing that look arbitrary until you hit the bug they prevent:
 
 - **The rope is capped by the anchor's clearance above the ground** (`_usable_rope`). A pendulum
   started level with its anchor swings down through almost a *full rope length* before the rope
   catches. So a rope longer than the anchor's height simply lands you, ending the swing the instant
   it starts. This is the single most confusing failure the swing can have.
-- **The rope takes its safe length immediately, it is not eased in.** Setting it to the exact
-  distance you hooked from leaves it taut with *zero tension*, so the player free-falls until slack
-  is taken up — about a third of a second, which from jump height reaches the floor. Hooking from
-  beyond the cap just leaves the rope over-stretched, and the constraint reels you in as part of
-  the arc. There was briefly a separate reel-in phase routed through GRAPPLE_DIVE; it was removed
-  because handing over from a straight-line dive to an arc dumped all the inbound speed at a fixed
-  radius, which read as slamming into a wall partway to the anchor.
+- **The rope is enforced as an exact position correction, after the move, not as a spring before
+  it** (`_constrain_to_rope`, called from `_after_move`). `move_and_slide()` travels in a straight
+  line but a swing is an arc, so the body drifts off the circle every frame. A spring applied
+  *before* the move is always a frame behind: drift out, get yanked back, drift out again — a 60 Hz
+  buzz that gets worse the faster you go. Correcting the position afterwards makes the radius exact
+  and there is nothing left to yank.
+- **Only the rope's *length* changes over time, never its enforcement.** It starts at the distance
+  you hooked from and tightens at `swing_reel_speed`, so the radius is continuous. There was once a
+  separate reel-in phase routed through GRAPPLE_DIVE; it was removed because handing a
+  straight-line dive over to an arc dumped all the inbound speed at a fixed radius, which read as
+  slamming into a wall partway to the anchor.
 - **A speed cap (`swing_max_speed`) holds the pace.** A pendulum with a pump input winds itself up
   without limit. This is the main dial for how fast the whole game feels.
 - **The apex brakes, it does not clamp.** Upward speed is bled off over `swing_apex_band` below the
   anchor so the arc stalls and reverses on its own. Clamping to zero at the ceiling instead stops
   the player dead, which reads as an invisible shelf. The smoke test asserts the worst single-frame
   change stays under what gravity alone would do.
+
+## Check which grapple style you are actually playing
+
+`grapple_style` is an `@export` on the Player, so flipping it in the Inspector and saving the scene
+writes `grapple_style = 1` into `scenes/main.tscn`. That has already happened once and cost a whole
+round of debugging: an entire play session was spent judging "the momentum grapple" while actually
+playing HOMING, where anchors are dives that stop you dead and no swinging happens at all.
+
+Two ways to tell at a glance before reporting how a swing feels:
+
+- **F3** shows a `style` line.
+- **Reticle colour**: purple over an anchor means MOMENTUM, orange means HOMING. Red is an enemy.
+
+The smoke test now sets the style explicitly for the same reason — otherwise every swing check
+silently tests whatever the scene was last saved with.

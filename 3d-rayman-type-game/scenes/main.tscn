@@ -13,6 +13,5 @@ player = NodePath("Player")
 
 [node name="Player" parent="." unique_id=1272398805 instance=ExtResource("3")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 10)
-grapple_style = 1
 
 [node name="HUD" parent="." unique_id=966758596 instance=ExtResource("4")]
