@@ -17,7 +17,7 @@ const MAIN := preload("res://scenes/main.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 39
+const EXPECTED_CHECKS := 33
 
 var player: Player
 var level: Node3D
@@ -34,11 +34,6 @@ func _ready() -> void:
 		push_error("no player")
 		get_tree().quit(1)
 		return
-	# Pin the grapple style rather than trusting whatever main.tscn happens to
-	# hold. It is an @export, so it can be flipped in the Inspector and saved by
-	# accident — that once left every swing test silently exercising HOMING,
-	# where anchors are dives and no swinging happens at all.
-	player.grapple_style = Player.GrappleStyle.MOMENTUM
 	await _run()
 	print("\n==== RESULTS ====")
 	for line in results:
@@ -315,161 +310,51 @@ func _run() -> void:
 		"state=%s" % player.state_name())
 	_release_all()
 
-	# --- swing: rope constraint should hold the player near rope length.
-	# The button stays up here: swinging latches on, so a press would let go.
+	# --- the tongue on an ENEMY: the enemy comes to the player, not the other
+	# way round, and ends up carried. This is the half that makes it a Yoshi
+	# tongue rather than a grapple.
 	_release_all()
-	await _step(5)
-	var swing_point := level.get_node("DSwing1") as GrapplePoint
-	_place(swing_point.global_position + Vector3(0, -6, -4))
-	player._grapple = swing_point
-	player._rope = player.global_position.distance_to(swing_point.global_position)
-	player._rope_target = player._rope
-	player._set_state(Player.State.SWING)
-	await _step(50)
-	var rope_error: float = absf(player.global_position.distance_to(swing_point.global_position) - player._rope)
-	_check("swing holds rope length", rope_error < 2.5 and player.state == Player.State.SWING,
-		"err=%.2f state=%s" % [rope_error, player.state_name()])
+	await _step(10)
+	var prey := level.get_node("HubWalkerB") as Node3D
+	var prey_start := prey.global_position
+	_place(prey_start + Vector3(0, 0.6, 7))
+	await _step(40)
+	var player_before := player.global_position
+	player.abilities.tongue_grab(prey)
+	for i in 150:
+		await get_tree().physics_frame
+		if player.abilities.carried != null:
+			break
+	var player_moved := player_before.distance_to(player.global_position)
+	var prey_moved := prey_start.distance_to(prey.global_position)
+	_check("tongue drags the enemy, not the player",
+		player.abilities.carried == prey and prey_moved > player_moved,
+		"enemy moved %.2f, player moved %.2f, carried=%s"
+			% [prey_moved, player_moved,
+				player.abilities.carried.name if player.abilities.carried else "none"])
 
-	# --- releasing a swing with jump should fling, not drop
-	Input.action_press("jump")
+	# Pressing grapple while holding something throws it.
+	Input.action_press("grapple")
 	await _step(3)
 	_release_all()
-	_check("swing release flings", player.state == Player.State.AIR,
-		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
-	await _step(10)
-
-	# --- a normal CLICK on a swing point must work, not just a held button.
-	# Regression test: attaching on press and detaching on release meant a tap
-	# latched on for one frame and let go, so grappling looked simply broken.
-	_release_all()
-	await _step(10)
-	_place(Vector3(0, 4, 24))
-	player.rig.yaw = 0.0
-	player.rig.pitch = 0.55
-	await _step(4)
-	Input.action_press("grapple")
-	await _step(1)
-	Input.action_release("grapple")
-	await _step(20)
-	# A far hook reels in first, so poll for the swing rather than demanding it
-	# on the very next frame.
-	var reached_swing := false
-	for i in 60:
-		await get_tree().physics_frame
-		if player.state == Player.State.SWING:
-			reached_swing = true
-			break
-	_check("tap grapple reaches a swing", reached_swing,
-		"state=%s" % player.state_name())
-
-	# Pressing again is what lets go.
-	Input.action_press("grapple")
-	await _step(2)
-	Input.action_release("grapple")
 	await _step(6)
-	_check("second tap releases", player.state != Player.State.SWING,
-		"state=%s" % player.state_name())
+	_check("grapple throws what you are carrying", player.abilities.carried == null,
+		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
+	await _step(60)
+
+	# --- the tongue on an ANCHOR still pulls the player to it.
 	_release_all()
 	await _step(10)
-
-	# --- swing geometry. Both of these use HubSwing, which hangs over the hub so
-	# there is ground beneath it to test the rope's clearance cap against. The
-	# hub walkers are frozen first: they roam, and one landing a contact hit
-	# mid-swing would fail these for reasons unrelated to swing geometry.
-	var hub_walkers: Array[Node] = [
-		level.get_node("HubWalkerA"), level.get_node("HubWalkerB"),
-	]
-	for w in hub_walkers:
-		w.process_mode = Node.PROCESS_MODE_DISABLED
-
-	# A swing must stay below its anchor, not loop over the top.
+	var anchor := level.get_node("HubPull") as GrapplePoint
+	_place(Vector3(0, 2, 0))
+	await _step(10)
+	player._grapple = anchor
+	player._set_state(Player.State.GRAPPLE_DIVE)
+	await _step(4)
+	_check("tongue pulls the player to an anchor", player.velocity.length() > 5.0,
+		"speed=%.2f" % player.velocity.length())
+	await _step(80)
 	_release_all()
-	await _step(10)
-	var hub_swing := level.get_node("HubSwing") as GrapplePoint
-	_place(hub_swing.global_position + Vector3(5, -1, 0))
-	player._grapple = hub_swing
-	player._rope = player.global_position.distance_to(hub_swing.global_position)
-	player._rope_target = player._rope
-	player._set_state(Player.State.SWING)
-	# Count the swinging frames as well as the peak: without that, a swing that
-	# ends immediately would sail through with a peak of -INF and prove nothing.
-	var highest := -INF
-	var swinging_frames := 0
-	for i in 150:
-		await get_tree().physics_frame
-		if player.state == Player.State.SWING:
-			swinging_frames += 1
-			highest = maxf(highest, player.global_position.y)
-	_check("swing stays below its anchor",
-		swinging_frames > 40 and highest <= hub_swing.global_position.y,
-		"frames=%d peak y=%.2f anchor y=%.2f state=%s"
-			% [swinging_frames, highest, hub_swing.global_position.y, player.state_name()])
-
-	# --- hooking from far out must not drop the player through the floor.
-	# Before the rope was capped to the anchor's ground clearance, grabbing this
-	# anchor from 9 m away put the bottom of the arc ~2 m underground.
-	_release_all()
-	await _step(10)
-	# Hooking from beyond the rope goes straight into the swing; the constraint
-	# reels you in as part of the arc. No hard stop partway, and no dive phase.
-	_place(Vector3(0, 2, 4))
-	var far_rope := player._usable_rope(hub_swing)
-	player._grapple = hub_swing
-	player._rope = far_rope
-	player._rope_target = far_rope
-	player._set_state(Player.State.SWING)
-	var far_frames := 0
-	var top_speed := 0.0
-	for i in 150:
-		await get_tree().physics_frame
-		if player.state != Player.State.SWING:
-			break
-		far_frames += 1
-		top_speed = maxf(top_speed, player.velocity.length())
-	_check("far hook swings without stalling", far_frames > 60,
-		"frames=%d rope=%.2f state=%s" % [far_frames, far_rope, player.state_name()])
-
-	# The speed cap is what keeps the pace down — a pumped pendulum would
-	# otherwise wind up indefinitely.
-	_check("swing respects its speed cap", top_speed <= player.swing_max_speed + 0.5,
-		"peak=%.2f cap=%.2f" % [top_speed, player.swing_max_speed])
-
-	# --- the top of the arc must ease into a reversal, not stop dead.
-	# Measured as the worst single-frame drop in upward speed while climbing: if
-	# the apex is smooth that stays at or under what gravity alone would do, and
-	# a hard clamp back to zero would show up as a big spike.
-	_release_all()
-	await _step(10)
-	player.global_position = hub_swing.global_position + Vector3(0, -5, 0)
-	player.velocity = Vector3(0, 0, player.swing_max_speed)
-	player._grapple = hub_swing
-	player._rope = 5.0
-	player._rope_target = 5.0
-	player._set_state(Player.State.SWING)
-	var worst_drop := 0.0
-	var previous_vy := 0.0
-	var entered_band := false
-	for i in 120:
-		await get_tree().physics_frame
-		if player.state != Player.State.SWING:
-			break
-		var head: float = (hub_swing.global_position.y - player.swing_min_hang) \
-			- player.global_position.y
-		if head < player.swing_apex_band:
-			entered_band = true
-		if previous_vy > 0.0:
-			worst_drop = maxf(worst_drop, previous_vy - player.velocity.y)
-		previous_vy = player.velocity.y
-	var gravity_step: float = player.gravity_fall / 60.0
-	_check("swing apex eases, never snaps",
-		entered_band and worst_drop <= gravity_step * 1.5,
-		"worst drop=%.3f vs gravity %.3f, reached apex band=%s"
-			% [worst_drop, gravity_step, entered_band])
-	player._grapple = null
-	player._set_state(Player.State.AIR)
-	for w in hub_walkers:
-		w.process_mode = Node.PROCESS_MODE_INHERIT
-	await _step(10)
 
 	# --- diving at an enemy: it takes damage and the player bounces off airborne,
 	# which is what lets one dive chain into the next.
@@ -490,23 +375,6 @@ func _run() -> void:
 	_check("dive bounces the player", player.state != Player.State.GRAPPLE_DIVE,
 		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
 	await _step(20)
-
-	# --- the style toggle: in HOMING an anchor should be dived at, not swung on.
-	_release_all()
-	await _step(10)
-	player.grapple_style = Player.GrappleStyle.HOMING
-	_place(Vector3(0, 4, 24))
-	player.rig.yaw = 0.0
-	player.rig.pitch = 0.55
-	await _step(4)
-	Input.action_press("grapple")
-	await _step(2)
-	_release_all()
-	_check("HOMING style dives at anchors", player.state == Player.State.GRAPPLE_DIVE,
-		"state=%s" % player.state_name())
-	player.grapple_style = Player.GrappleStyle.MOMENTUM
-	await _step(30)
-	_release_all()
 
 	# --- wall run along the tan wall in zone B (face at z=5, spans x 25..45).
 	# Capsule edge starts 0.05 m off the face so contact happens immediately.

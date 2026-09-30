@@ -76,7 +76,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.6, 9)
 
 [node name="HubPull" parent="." unique_id=378655029 instance=ExtResource("gp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12.986776, -12)
-mode = 1
 
 [node name="HubSwing" parent="." unique_id=940519423 instance=ExtResource("gp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 15.062862, 4)
@@ -260,7 +259,6 @@ patrol_distance = 6.0
 
 [node name="DPull" parent="." unique_id=485688579 instance=ExtResource("gp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 16, 58)
-mode = 1
 
 [node name="DTower" type="CSGBox3D" parent="." unique_id=1405853941]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 12.5, 66)

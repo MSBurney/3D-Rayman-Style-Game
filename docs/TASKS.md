@@ -43,9 +43,9 @@ A platform that slides between two points, carrying the player.
 
 ---
 
-### 3. Sound effects for the wall run and the swing
+### 3. Sound effects for the wall run and the tongue
 There is an audio system already — see `play_sfx()` in `player.gd` and the `Sounds` group in the
-Inspector. Nothing plays for wall running or swinging yet.
+Inspector. Nothing plays for wall running, or for grabbing and throwing with the tongue.
 
 - Add new `@export var sfx_*: AudioStream` slots and call `play_sfx()` from the right state.
 - Generate new placeholder blips by editing the recipe list in
@@ -54,7 +54,7 @@ Inspector. Nothing plays for wall running or swinging yet.
 *Watch out:* a wall run is continuous, not a one-shot. You will need a looping sound that starts on
 entering `WALL_RUN` and stops on leaving, rather than one blip per frame.
 
-*Done when:* wall running and swinging both sound like something is happening.
+*Done when:* wall running and the tongue both sound like something is happening.
 
 ---
 
@@ -106,7 +106,7 @@ So a crate mostly needs a `Health` child and a death reaction.
 
 ### 8. Second level
 Duplicate `test_level.tscn` and build something that demands *combining* moves — a gap you can only
-clear by swinging, flinging off at the right moment, and catching a ledge.
+clear by tongue-pulling to an anchor, slamming for height, and catching a ledge.
 
 That combination is the whole point of the project. Read the design rule at the top of `player.gd`.
 

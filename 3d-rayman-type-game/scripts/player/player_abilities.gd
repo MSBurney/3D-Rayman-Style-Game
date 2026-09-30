@@ -13,20 +13,82 @@ extends Node
 ## stays visible in one place.
 
 @export_group("Carry")
-## How close you must be to pick something up.
+## How close you must be to pick something up by hand.
 @export var grab_radius: float = 2.2
 @export var throw_speed: float = 16.0
 ## Upward part of a throw, so objects arc instead of skidding along the floor.
 @export var throw_lift: float = 4.0
 
+@export_group("Tongue")
+## How fast a grabbed enemy is dragged toward the player.
+@export var tongue_reel_speed: float = 22.0
+## How close it has to get before it counts as caught.
+@export var tongue_catch_distance: float = 1.2
+## Give up if it takes longer than this — the target may be stuck on geometry.
+@export var tongue_timeout: float = 2.0
+## Damage dealt instead, when a target is too fixed to drag (a turret).
+@export var tongue_lash_damage: int = 1
+
 ## What we are currently holding, or null. Read by the HUD and the respawn code.
 var carried: Node3D = null
+## The enemy currently being reeled in, or null. It is not "carried" yet.
+var tethered: Node3D = null
+
+var _tongue_time: float = 0.0
 
 @onready var _player: Player = get_parent() as Player
 
 
-func handle_input(_delta: float) -> void:
+func handle_input(delta: float) -> void:
+	_tick_tongue(delta)
 	_handle_grab()
+
+
+## Starts dragging an enemy toward the player. Targets that cannot be picked up
+## are lashed for damage instead — a turret is bolted down, so the tongue hurts
+## it rather than moving it, which keeps such enemies killable.
+func tongue_grab(target: Node3D) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	if not target.has_method(&"pick_up"):
+		var health := target.get_node_or_null(^"Health") as HealthComponent
+		if health != null:
+			health.damage(tongue_lash_damage)
+		return
+	tethered = target
+	_tongue_time = 0.0
+	if target.has_method(&"tongue_pulled"):
+		target.call(&"tongue_pulled", _player)
+
+
+## Drags the tethered enemy in. Moving the *target* rather than the player is
+## the whole point of this version of the grapple.
+func _tick_tongue(delta: float) -> void:
+	if tethered == null:
+		return
+	if not is_instance_valid(tethered) or carried != null:
+		tethered = null
+		return
+
+	_tongue_time += delta
+	var hold := _player.hold_point
+	var goal := hold.global_position if hold != null else _player.global_position
+	var offset := goal - tethered.global_position
+	var distance := offset.length()
+
+	if distance <= tongue_catch_distance:
+		var caught := tethered
+		tethered = null
+		carried = caught
+		caught.call(&"pick_up", _player)
+		return
+
+	# Give up rather than dragging something forever if it is wedged on scenery.
+	if _tongue_time > tongue_timeout:
+		tethered = null
+		return
+
+	tethered.global_position += offset / distance * tongue_reel_speed * delta
 
 
 func _handle_grab() -> void:

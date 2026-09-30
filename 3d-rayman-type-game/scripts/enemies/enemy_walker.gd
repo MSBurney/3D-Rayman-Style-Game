@@ -18,12 +18,24 @@ extends CharacterBody3D
 @export var sfx_hit: AudioStream
 @export var sfx_die: AudioStream
 
+@export_group("Being thrown")
+## Damage this does to whatever it lands on when thrown by the player.
+@export var thrown_damage: int = 2
+## How far that damage reaches from the landing point.
+@export var thrown_radius: float = 3.0
+
 var _origin: Vector3
 var _patrol_axis: Vector3 = Vector3.RIGHT
 var _direction: float = 1.0
 var _player: Player = null
 var _chasing: bool = false
 var _dead: bool = false
+## Set while the player.s tongue is dragging us in — the player owns our
+## position during that, so our own movement code stands down.
+var _tethered: bool = false
+var _held: bool = false
+var _thrown: bool = false
+var _carrier: Player = null
 
 @onready var health: HealthComponent = $Health
 @onready var visual: Node3D = $Visual
@@ -40,6 +52,27 @@ func _ready() -> void:
 	stompbox.body_entered.connect(_on_stomp)
 
 func _physics_process(delta: float) -> void:
+	# Being reeled in by the tongue: the player is moving us, so do nothing and
+	# do not fight it.
+	if _tethered:
+		return
+
+	# Held: ride the carrier's hold point.
+	if _held:
+		if _carrier != null and is_instance_valid(_carrier):
+			var hold := _carrier.hold_point
+			if hold != null:
+				global_position = hold.global_position
+		return
+
+	# Thrown: fly until we hit something, then burst.
+	if _thrown:
+		velocity.y -= gravity * delta
+		move_and_slide()
+		if get_slide_collision_count() > 0 or is_on_floor() or is_on_wall():
+			_land_thrown()
+		return
+
 	if _dead:
 		velocity.x = move_toward(velocity.x, 0.0, acceleration * delta)
 		velocity.z = move_toward(velocity.z, 0.0, acceleration * delta)
@@ -163,3 +196,66 @@ func _play(stream: AudioStream) -> void:
 		return
 	_sfx.stream = stream
 	_sfx.play()
+
+
+# ------------------------------------------------------- being grabbed & thrown
+#
+# These four methods are the same interface the throwable keg exposes, so the
+# player's carry code treats a grabbed enemy exactly like any other object it
+# picked up. Nothing in player_abilities.gd knows this is an enemy.
+
+## The tongue has latched on and is dragging us in.
+func tongue_pulled(_by: Player) -> void:
+	if _dead:
+		return
+	_tethered = true
+	_stop_hurting_the_player()
+
+
+## We reached the player and are now being carried.
+func pick_up(by: Player) -> void:
+	if _dead:
+		return
+	_tethered = false
+	_held = true
+	_carrier = by
+	velocity = Vector3.ZERO
+	_stop_hurting_the_player()
+
+
+## Launched. We fly until we hit something, then burst and damage the area.
+func throw(impulse: Vector3) -> void:
+	_held = false
+	_tethered = false
+	_carrier = null
+	_thrown = true
+	velocity = impulse
+	# Collide with the world again so there is something to land on, but stay
+	# off the player's layer so we do not shove them as we leave.
+	collision_layer = 0
+	collision_mask = 1
+
+
+## Landing after a throw: hurt whatever is nearby, then die.
+func _land_thrown() -> void:
+	if _dead:
+		return
+	_thrown = false
+	for node in get_tree().get_nodes_in_group(&"enemy"):
+		var other := node as Node3D
+		if other == null or other == self:
+			continue
+		if other.global_position.distance_to(global_position) > thrown_radius:
+			continue
+		var other_health := other.get_node_or_null(^"Health") as HealthComponent
+		if other_health != null:
+			other_health.damage(thrown_damage)
+	health.damage(health.current)
+
+
+## Hitboxes off. A grabbed enemy must not damage the player it is stuck to.
+func _stop_hurting_the_player() -> void:
+	hurtbox.set_deferred(&"monitoring", false)
+	stompbox.set_deferred(&"monitoring", false)
+	collision_layer = 0
+	collision_mask = 0

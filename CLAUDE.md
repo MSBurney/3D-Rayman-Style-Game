@@ -109,53 +109,25 @@ The renderer is deliberately **GL Compatibility**, not Forward+. Do not switch i
 Not built yet, on purpose: animation (the character is primitives moved by code), swimming,
 menus, saving. Ask before starting any of these.
 
-## Swing geometry
+## The tongue
 
-**The rule that matters most: inside a swing, use forces, not clamps.** Every hard clamp on
-`velocity` is a discontinuity the player feels. An earlier version had five stacked in one
-function — a spring, an outward-velocity cancel, drag, an apex clamp and a speed clamp — each
-overriding the last, and it buzzed. Every one of them is now either a force that fades in, or the
-single exact constraint below. If a swing ever feels rough again, look for a clamp before you look
-for a number to tune.
+The grapple is a **Yoshi-style tongue**: an attack and a way of moving things, not a way of moving
+yourself. One button, and what happens depends on whether the target can be moved:
 
-Four constraints on the MOMENTUM swing that look arbitrary until you hit the bug they prevent:
+- **Anchor** (fixed to the level) — the player is pulled to it. `State.GRAPPLE_DIVE` in `player.gd`.
+- **Enemy** (not fixed) — it is pulled to the player and ends up carried. `PlayerAbilities.tongue_grab`.
+  Press the button again to throw it; it bursts on landing and damages nearby enemies.
+- **Target with no `pick_up()`** (a turret, bolted down) — lashed for damage instead, so such
+  enemies stay killable rather than being immune.
 
-- **The rope is capped by the anchor's clearance above the ground** (`_usable_rope`). A pendulum
-  started level with its anchor swings down through almost a *full rope length* before the rope
-  catches. So a rope longer than the anchor's height simply lands you, ending the swing the instant
-  it starts. This is the single most confusing failure the swing can have.
-- **The rope is enforced as an exact position correction, after the move, not as a spring before
-  it** (`_constrain_to_rope`, called from `_after_move`). `move_and_slide()` travels in a straight
-  line but a swing is an arc, so the body drifts off the circle every frame. A spring applied
-  *before* the move is always a frame behind: drift out, get yanked back, drift out again — a 60 Hz
-  buzz that gets worse the faster you go. Correcting the position afterwards makes the radius exact
-  and there is nothing left to yank.
-- **Only the rope's *length* changes over time, never its enforcement.** It starts at the distance
-  you hooked from and tightens at `swing_reel_speed`, so the radius is continuous. There was once a
-  separate reel-in phase routed through GRAPPLE_DIVE; it was removed because handing a
-  straight-line dive over to an arc dumped all the inbound speed at a fixed radius, which read as
-  slamming into a wall partway to the anchor.
-- **A speed cap (`swing_max_speed`) holds the pace.** A pendulum with a pump input winds itself up
-  without limit. This is the main dial for how fast the whole game feels.
-- **The apex brakes, it does not clamp.** Upward speed is bled off over `swing_apex_band` below the
-  anchor so the arc stalls and reverses on its own. Clamping to zero at the ceiling instead stops
-  the player dead, which reads as an invisible shelf. The smoke test asserts the worst single-frame
-  change stays under what gravity alone would do.
+A grabbed enemy exposes the same `pick_up()` / `throw()` pair the throwable keg does, so the carry
+code treats it like any other held object and knows nothing about enemies.
 
-## Check which grapple style you are actually playing
-
-`grapple_style` is an `@export` on the Player, so flipping it in the Inspector and saving the scene
-writes `grapple_style = 1` into `scenes/main.tscn`. That has already happened once and cost a whole
-round of debugging: an entire play session was spent judging "the momentum grapple" while actually
-playing HOMING, where anchors are dives that stop you dead and no swinging happens at all.
-
-Two ways to tell at a glance before reporting how a swing feels:
-
-- **F3** shows a `style` line.
-- **Reticle colour**: purple over an anchor means MOMENTUM, orange means HOMING. Red is an enemy.
-
-The smoke test now sets the style explicitly for the same reason — otherwise every swing check
-silently tests whatever the scene was last saved with.
+**There used to be a swing**, a pendulum on the jump button, and it was removed on 2026-09-30. It
+worked and was fully tested, but a pendulum is *sustained momentum management* while a jump is a
+*single impulse*, and no amount of tuning reconciled that. Several rounds were spent smoothing feel
+before the real problem — the ability was bound to the wrong kind of input — was identified. If a
+feel complaint survives two or three rounds of tuning, question the input model before the numbers.
 
 ## Slam and combo
 

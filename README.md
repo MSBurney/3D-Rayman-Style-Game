@@ -9,7 +9,7 @@ point; now heading somewhere of its own.
 
 The design bet: **abilities combine rather than take turns**, and **weight is a resource**. Height
 becomes stored energy you spend on a slam; momentum carries between moves. Every state hands off into the
-others — a swing releases into a dive, a dive bounces off an enemy into another dive, a wall run
+others — a slam bounce feeds the next slam, a tongue-grabbed enemy becomes a thrown weapon, a wall run
 launches a grapple. Levels are meant to be solved by stringing the moveset together, not by
 performing one scripted move per obstacle.
 
@@ -23,8 +23,7 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | Look | Mouse or arrow keys | Right stick |
 | Jump | `Space` | A |
 | **Ground slam** | `Space` again in the air | A again |
-| **Grapple / dive** | `Q` or `RMB` | RB |
-| Fling off a swing | `Space` mid-swing | A |
+| **Tongue** | `Q` or `RMB` — again to throw what you hold | RB |
 | Grab & throw | `E` | B |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
 | Debug readout | `F3` | — |
@@ -60,39 +59,25 @@ awkward on a laptop trackpad.
   gained from the *combo* instead: every third slam in an unbroken chain throws you 50% higher than
   a jump and hits harder with a wider, red-tinted shockwave. Touching down without slamming resets
   the chain, so a run of slams is something you sustain rather than something that just happens.
-- **Grapple** — one verb for everything. Press `Q` and you go to the ringed
-  target, from the ground or the air. What happens on arrival depends on what you hit:
-  - **Enemy (red ring)** — you strike it and bounce off still airborne, so one dive chains straight
-    into the next. This is the game's only ranged offence.
-  - **Anchor (purple or orange ring)** — depends on the `Grapple Style` toggle on the Player.
-    **MOMENTUM** turns anchors into a swing: pump the arc, `Space` flings you off with everything
-    you built. **HOMING** dives at them like an enemy — you stop dead and pop off. Both are
-    implemented; flip the toggle in the Inspector and play them to decide which the game wants.
-
-  The MOMENTUM swing obeys three rules that exist purely for feel. It **hangs below its anchor**,
-  easing to a stall near the top and falling back rather than stopping dead. The rope is **capped
-  by the anchor's clearance above the ground**, because a pendulum started level with its anchor
-  drops almost a full rope length — an uncapped rope simply plants you in the floor. And there is a
-  **speed cap** (`Swing Max Speed`, 13 against a running speed of 7.5), because a pendulum you can
-  pump will otherwise wind itself up indefinitely. That cap is the main dial for how fast the game
-  feels.
+- **Tongue** — press `Q` and it reaches for the ringed target. One button, and what happens depends
+  on whether the target can be moved:
+  - **Anchor (purple ring)** — bolted to the level, so *you* are pulled to *it*. Traversal.
+  - **Enemy (red ring)** — not bolted down, so *it* is pulled to *you*, and you end up carrying it.
+    Press `Q` again to throw it; it bursts on landing and hurts whatever is nearby.
+  - **A turret** cannot be dragged, so the tongue lashes it for damage instead.
 
   Aiming is camera-driven with assist: the ringed target is whatever is nearest the centre of the
-  screen, in range and in line of sight. Anchors win ties against enemies, because this is a
-  movement game first.
+  screen, in range and in line of sight. Anchors win ties against enemies.
+
+  Modelled on Yoshi.s tongue and the Mario Galaxy 2 spin-grab rather than on a grapple hook — it is
+  an attack and a way of rearranging the level, not a way of swinging around it.
 - **Combat** — dive at enemies, stomp them from above, or throw a keg at them.
 
-The **thrown fist** and the **helicopter** were both removed on 2026-09-29 — they were the most
-Rayman-specific parts of the moveset, and the game is moving toward its own identity. With the
-helicopter gone there is no mid-air save, so committing to an arc actually means something.
-
-The grapple briefly shared the jump button. It is back on `Q` as of 2026-09-30, deliberately
-freeing jump for weight-based air moves — the character is being redesigned around being **heavy**,
-and heaviness needs the jump button to itself.
-
-**The MOMENTUM swing is on hold.** It works and is tested, but a pendulum is sustained momentum
-management while a jump is a discrete impulse, and the two do not sit well on one button. The
-grapple *dive* is unaffected and is the game's traversal and offence in the meantime.
+Three things have been cut as the game found its own shape: the **thrown fist** and the
+**helicopter** (2026-09-29), and the **grapple swing** (2026-09-30). The first two were the most
+Rayman-specific moves in the set. The swing worked and was fully tested, but a pendulum is
+sustained momentum management while a jump is a single impulse, and binding one to the other never
+read right. Reframing the grapple as a tongue solved it by making it an *action*, not a *state*.
 
 ## Test level
 
@@ -103,7 +88,7 @@ One hub with four zones, each built around a mechanic:
 | North | Rising platforms, then a gap with two anchors | Jumping, then **diving** across |
 | East | Pit spanned by a tan wall, then a shaft | **Wall run**, then **wall jump** |
 | West | Three terraces with 3.3 m lips | **Ledge grab** (too high to jump onto) |
-| South | Chain of anchors over a pit, tower | **Grappling** (nothing else crosses it) |
+| South | Chain of anchors over a pit, tower | **Tongue pulls** (nothing else crosses it) |
 
 Tan surfaces are the runnable walls. Falling into a pit respawns you at the last checkpoint.
 
@@ -138,7 +123,7 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 39 behaviours (each state, damage, death, respawn, stomp, grab
+It drives the player through all 33 behaviours (each state, damage, death, respawn, stomp, grab
 and throw) and prints a PASS/FAIL table. Exit code 0 means everything passed. It caught several
 real bugs during the initial build and is worth rerunning whenever the controller changes.
 

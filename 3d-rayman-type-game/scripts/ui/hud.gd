@@ -9,8 +9,7 @@ extends Control
 @export var heart_radius: float = 11.0
 @export var heart_spacing: float = 30.0
 @export var heart_origin: Vector2 = Vector2(34.0, 34.0)
-@export var swing_colour: Color = Color(0.72, 0.45, 1.0)
-@export var pull_colour: Color = Color(1.0, 0.72, 0.28)
+@export var anchor_colour: Color = Color(0.72, 0.45, 1.0)
 ## Enemies get their own reticle colour so "I am about to attack that" reads
 ## differently from "I am about to swing off that" at a glance.
 @export var enemy_colour: Color = Color(1.0, 0.36, 0.36)
@@ -69,10 +68,9 @@ func _draw_reticle() -> void:
 		return
 
 	var at := camera.unproject_position(target.global_position)
-	var colour := enemy_colour
-	var anchor := target as GrapplePoint
-	if anchor != null:
-		colour = pull_colour if _player.grapple_style == Player.GrappleStyle.HOMING else swing_colour
+	# Purple over an anchor (you get pulled to it), red over an enemy (it gets
+	# pulled to you). Two outcomes, two colours.
+	var colour := anchor_colour if GrappleTargeting.is_anchor(target) else enemy_colour
 	draw_arc(at, reticle_radius, 0.0, TAU, 32, colour, 2.5, true)
 	# Four ticks so the ring reads as a target and not just a circle.
 	for i in 4:
@@ -99,9 +97,9 @@ func _format_debug(info: Dictionary) -> String:
 		"vert    %.2f" % info["vy"],
 		"floor   %s   wall %s" % [info["floor"], info["wall"]],
 		"target  %s (%s)" % [info["target"], info["kind"]],
-		"style   %s" % info["style"],
 		"slam    %s" % info["slam"],
 		"carry   %s" % info["carry"],
+		"tongue  %s" % info["tongue"],
 		"fps     %d" % Engine.get_frames_per_second(),
 	])
 
@@ -109,9 +107,9 @@ func _hint_text() -> String:
 	return "\n".join([
 		"WASD move    Mouse or arrow keys look    Space jump",
 		"Space again in the air:  SLAM down — the further you fall, the harder",
-		"Q or RMB:  dive at the ringed target  (press again to let go)",
-		"Ringed enemies can be dived at too — bounce off and chain to the next",
-		"Space while swinging:  fling off and keep the speed",
+		"Q or RMB:  TONGUE.  Purple target: you are pulled to it",
+		"             Red target: the enemy is pulled to YOU, then carried",
+		"             Press Q again to throw what you are holding",
 		"E:  grab and throw a keg     Land on an enemy to stomp it",
 		"Run at a tan wall with speed:  wall run     Space:  wall jump",
 		"Jump at a high ledge:  auto grab     Space:  climb     Ctrl:  drop",

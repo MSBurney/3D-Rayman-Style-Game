@@ -76,7 +76,7 @@ main way to learn what each number does. **Go and break several of them.** Sugge
 
 | Try | In group | What you should notice |
 | --- | --- | --- |
-| `Grapple Style` → `HOMING` | Grapple | Anchors stop being swings and become dives. This is the live design experiment — see section 4 |
+| `Tongue Reel Speed` → `4` | Abilities node | Watch an enemy get dragged in slowly — the tongue is easiest to understand at low speed |
 | `Dive Speed` → `6` | Grapple | The dive becomes a slow float; you can see the aim-assist tracking |
 | `Air Control` → `0.0` | Run | You cannot steer at all mid-jump; feels awful, and shows why it exists |
 | `Coyote Time` → `0.0` | Jump | Jumps off ledges start failing. This is the forgiveness you never notice until it is gone |
@@ -155,16 +155,15 @@ Two things in this file are worth understanding because they bite everyone:
 `_after_move()`, not inside a state function.
 
 **A button press lasts a whole frame.** `Input.is_action_just_pressed()` stays true for every
-check within the same frame. This has caused two real bugs. First: pressing grapple attached you to
-a rope, then the swing code ran *later in that same frame*, saw the same press, and let go
-instantly — so grappling looked broken. Second: pressing grapple to *release* a swing dropped you
-and then re-hooked the same anchor from the buffered press. The fixes are `grapple_repress_delay`
-and clearing the input buffers in `_release_swing()`.
+check within the same frame. If one function reacts to a press by changing state, and the new
+state runs *later in the same frame*, it sees the same press and can undo the change immediately.
+The grapple needed `grapple_repress_delay` for exactly this: the press that fired the tongue was
+still "just pressed" when the tongue code ran, so it cancelled itself.
 
-> **Try it:** select the Player and flip `Grapple Style` between `MOMENTUM` and `HOMING`, then go
-> and play the south pit both ways. MOMENTUM makes anchors a swing you build speed on; HOMING makes
-> them a dive that stops you dead. This is a real open question on the project — which one the game
-> should keep has not been decided. Form an opinion and say which you prefer.
+> **Try it:** find a walker and press `Q` at it, then press `Q` again to throw it. Then aim at a
+> purple anchor and press `Q`. Same button, opposite outcomes — you move, or the target moves.
+> Read `_try_grapple()` in `player.gd` to see where that fork is made, and `tongue_grab()` in
+> `player_abilities.gd` for the half that drags enemies.
 
 ---
 
