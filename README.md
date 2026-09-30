@@ -1,12 +1,14 @@
 # 3D Rayman Style Game
 
-A movement-first 3D platformer in the spirit of Rayman 2, Rayman 3 and the cancelled Rayman 4.
+A movement-first 3D platformer about being **heavy**. Started from Rayman 2 and 3 as a reference
+point; now heading somewhere of its own.
 
 > **New to the project?** Start with **[docs/GUIDED_TOUR.md](docs/GUIDED_TOUR.md)** — a hands-on
 > walkthrough for developers who can code but haven't used Godot before. Then pick something from
 > **[docs/TASKS.md](docs/TASKS.md)**.
 
-The design bet: **abilities combine rather than take turns.** Every state hands off into the
+The design bet: **abilities combine rather than take turns**, and **weight is a resource**. Height
+becomes stored energy you spend on a slam; momentum carries between moves. Every state hands off into the
 others — a swing releases into a dive, a dive bounces off an enemy into another dive, a wall run
 launches a grapple. Levels are meant to be solved by stringing the moveset together, not by
 performing one scripted move per obstacle.
@@ -20,7 +22,8 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | Move | `WASD` | Left stick |
 | Look | Mouse or arrow keys | Right stick |
 | Jump | `Space` | A |
-| **Grapple / dive** | `Space` again in the air (also `RMB` or `Q`) | A again, or RB |
+| **Ground slam** | `Space` again in the air | A again |
+| **Grapple / dive** | `Q` or `RMB` | RB |
 | Fling off a swing | `Space` mid-swing | A |
 | Grab & throw | `E` | B |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
@@ -40,8 +43,25 @@ awkward on a laptop trackpad.
   on** — grabbing is for lips *above* your jump, caught on the way down.
 - **Wall run / wall jump** — run along a wall with enough speed and it carries you; jump off it to
   cross gaps or climb a shaft. Triggered by momentum, not by holding into the wall.
-- **Grapple** — one verb for everything. Press jump again in the air and you go to the ringed
-  target. What happens on arrival depends on what you hit, and that is the whole design:
+- **Ground slam** — press jump again in mid-air to drive yourself into the ground. This is the
+  character's defining move, because the character is **heavy**, and the slam is what turns that
+  weight into something useful.
+
+  Everything about it scales with how far you fell, measured from the highest point you reached
+  since last touching the ground. Damage, shockwave radius and rebound height all grow with the
+  drop. A hop is worth almost nothing; a fall from a tower is worth a lot. That is the point:
+  **height becomes a resource worth going and fetching**, not just a place you happen to be.
+
+  The impact hits everything within the shockwave, not only what was underneath, and shoves it
+  away. An expanding ring is drawn at the real radius that was used, so the scaling is visible
+  rather than something you have to infer.
+
+  **The rebound always returns you to jump height**, so a slam never costs you ground. Height is
+  gained from the *combo* instead: every third slam in an unbroken chain throws you 50% higher than
+  a jump and hits harder with a wider, red-tinted shockwave. Touching down without slamming resets
+  the chain, so a run of slams is something you sustain rather than something that just happens.
+- **Grapple** — one verb for everything. Press `Q` and you go to the ringed
+  target, from the ground or the air. What happens on arrival depends on what you hit:
   - **Enemy (red ring)** — you strike it and bounce off still airborne, so one dive chains straight
     into the next. This is the game's only ranged offence.
   - **Anchor (purple or orange ring)** — depends on the `Grapple Style` toggle on the Player.
@@ -64,8 +84,15 @@ awkward on a laptop trackpad.
 
 The **thrown fist** and the **helicopter** were both removed on 2026-09-29 — they were the most
 Rayman-specific parts of the moveset, and the game is moving toward its own identity. With the
-helicopter gone there is no mid-air save: a second jump does nothing unless something is targetable,
-so committing to an arc actually means something.
+helicopter gone there is no mid-air save, so committing to an arc actually means something.
+
+The grapple briefly shared the jump button. It is back on `Q` as of 2026-09-30, deliberately
+freeing jump for weight-based air moves — the character is being redesigned around being **heavy**,
+and heaviness needs the jump button to itself.
+
+**The MOMENTUM swing is on hold.** It works and is tested, but a pendulum is sustained momentum
+management while a jump is a discrete impulse, and the two do not sit well on one button. The
+grapple *dive* is unaffected and is the game's traversal and offence in the meantime.
 
 ## Test level
 
@@ -100,7 +127,7 @@ share a lot of velocity maths and constantly interrupt each other.
 ## Tuning
 
 Every feel number is an `@export` on the player, grouped in the inspector (Run, Jump, Wall moves,
-Ledge grab, Grapple, Combat, Sounds). Select the Player node and edit them there — no
+Ledge grab, Grapple, Slam, Combat, Sounds). Select the Player node and edit them there — no
 code changes needed. Enemies, lums and grapple points expose their own knobs the same way.
 
 ## Smoke test
@@ -111,7 +138,7 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 30 behaviours (each state, damage, death, respawn, stomp, grab
+It drives the player through all 39 behaviours (each state, damage, death, respawn, stomp, grab
 and throw) and prints a PASS/FAIL table. Exit code 0 means everything passed. It caught several
 real bugs during the initial build and is worth rerunning whenever the controller changes.
 

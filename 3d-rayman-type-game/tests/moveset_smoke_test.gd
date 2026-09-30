@@ -17,7 +17,7 @@ const MAIN := preload("res://scenes/main.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 30
+const EXPECTED_CHECKS := 39
 
 var player: Player
 var level: Node3D
@@ -67,12 +67,20 @@ func _check(label: String, ok: bool, detail: String = "") -> void:
 	print("  ", line)
 
 
+## Teleports the player and clears everything a previous test might have left
+## behind. The timers matter as much as the position: a leftover coyote window
+## turns the next jump press into a late ground jump instead of a slam, and a
+## stale combo count makes the chain tests read a tick that never happened.
 func _place(at: Vector3) -> void:
 	player.global_position = at
 	player.velocity = Vector3.ZERO
 	player._grapple = null
 	player._ledge_lock = 0.0
 	player._wall_lock = 0.0
+	player._coyote = 0.0
+	player._jump_buffered = 0.0
+	player._grapple_buffered = 0.0
+	player.slam_combo = 0
 	player._set_state(Player.State.AIR)
 
 
@@ -107,9 +115,165 @@ func _run() -> void:
 	Input.action_press("jump")
 	await _step(2)
 	_release_all()
-	_check("no mid-air jump without a target", player.velocity.y < before_vy,
+	# Jump in mid-air now means SLAM. What it must never be is a second jump.
+	_check("mid-air jump slams, never lifts",
+		player.velocity.y < before_vy and player.state == Player.State.SLAM,
 		"vy %.2f -> %.2f state=%s" % [before_vy, player.velocity.y, player.state_name()])
 	await _step(40)
+
+	# --- jump must NOT fire the grapple. It was briefly bound there; it is now
+	# back on its own button so jump is free for weight-based air moves.
+	_release_all()
+	await _step(4)
+	_place(Vector3(0, 4, 24))
+	player.rig.yaw = 0.0
+	player.rig.pitch = 0.55
+	await _step(6)
+	var had_target := player.targeting.current != null
+	Input.action_press("jump")
+	await _step(6)
+	_release_all()
+	# With a target in range and the grapple back on its own button, jump must
+	# slam rather than hook.
+	_check("jump slams instead of grappling",
+		had_target and player.state == Player.State.SLAM,
+		"target_present=%s state=%s" % [had_target, player.state_name()])
+	await _step(10)
+
+	# --- ground slam. Jump in mid-air drives you down, and the payoff scales
+	# with how far you fell, which is what makes height worth going to get.
+	#
+	# Run on the zone B perch, not the hub. A slam kills whatever its shockwave
+	# catches, and slamming near the hub quietly destroyed the walker the stomp
+	# test needs hundreds of lines later. Freezing the walkers was not enough:
+	# PROCESS_MODE_DISABLED stops them moving, not from being damaged. The perch
+	# top is 12 m up with nothing within 15 m, which also gives a real drop.
+	const PERCH_TOP := Vector3(48, 12, -7)
+
+	_release_all()
+	await _step(4)
+	_place(PERCH_TOP + Vector3(0, 14, 0))
+	await _step(10)
+	Input.action_press("jump")
+	await _step(3)
+	_release_all()
+	_check("jump in air starts a slam", player.state == Player.State.SLAM,
+		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
+
+	var slam_power_high := 0.0
+	var bounced_high := 0.0
+	for i in 200:
+		await get_tree().physics_frame
+		if player.state == Player.State.SLAM:
+			slam_power_high = player.slam_power()
+		else:
+			bounced_high = player.velocity.y
+			break
+	_check("big fall lands at full power", slam_power_high > 0.95,
+		"power=%.2f" % slam_power_high)
+	_check("slam bounces the player up", bounced_high > 0.0,
+		"vy after impact=%.2f" % bounced_high)
+	await _step(60)
+
+	# A short hop must be worth much less than a tower drop, or height is not a
+	# resource at all and the whole mechanic collapses into one flat move.
+	_release_all()
+	await _step(20)
+	_place(PERCH_TOP + Vector3(0, 0.5, 0))
+	await _step(40)
+	Input.action_press("jump")
+	await _step(6)
+	_release_all()
+	await _step(6)
+	Input.action_press("jump")
+	await _step(3)
+	_release_all()
+	var slam_power_low := 1.0
+	for i in 90:
+		await get_tree().physics_frame
+		if player.state == Player.State.SLAM:
+			slam_power_low = player.slam_power()
+		elif slam_power_low < 1.0:
+			break
+	_check("small hop slams weakly", slam_power_low < slam_power_high * 0.6,
+		"hop power=%.2f vs drop power=%.2f" % [slam_power_low, slam_power_high])
+	await _step(30)
+
+	# --- the combo: chained slams rebound to jump height, and every third one
+	# throws you noticeably higher. Slamming from a standstill on flat ground,
+	# so each bounce is identical apart from the combo.
+	# A chain never touches the ground in between — the rebound keeps you
+	# airborne, so each slam is just another press. No jumping involved.
+	_release_all()
+	await _step(20)
+	_place(PERCH_TOP + Vector3(0, 6, 0))
+	# Start from a known count. The earlier slam tests already advanced it, and
+	# leaving it non-zero made the loop below "see" a combo tick on its first
+	# frame and record a falling velocity as if it were a rebound.
+	player.slam_combo = 0
+	await _step(6)
+	# Watch the combo counter rather than polling for the SLAM state. After a
+	# bounce the player is only centimetres above the floor, so the next slam can
+	# begin and finish inside a two-frame wait — any sampling that looks for the
+	# state misses it. The counter ticking is the one unambiguous signal that an
+	# impact just happened, so read the rebound on exactly that frame.
+	var bounce_speeds: Array[float] = []
+	for slam_index in 3:
+		# Wait until properly airborne and falling, then press ONCE. Pressing on
+		# every frame does not register at all — holding the button across frame
+		# boundaries never produces a fresh just_pressed, so the slam never fires.
+		for i in 200:
+			await get_tree().physics_frame
+			if player.state == Player.State.AIR and player.velocity.y < -1.0:
+				break
+		var before_combo := player.slam_combo
+		Input.action_press("jump")
+		await _step(3)
+		_release_all()
+		# The combo ticking is the unambiguous "an impact just happened" signal,
+		# and the rebound is on the velocity that same frame.
+		for i in 200:
+			await get_tree().physics_frame
+			if player.slam_combo > before_combo:
+				bounce_speeds.append(player.velocity.y)
+				break
+
+	var plain_bounce := sqrt(2.0 * player.gravity_rise * player.jump_height)
+	_check("slam rebounds to jump height",
+		bounce_speeds.size() >= 2 and absf(bounce_speeds[0] - plain_bounce) < 1.0,
+		"bounce=%.2f expected=%.2f" % [
+			bounce_speeds[0] if bounce_speeds.size() > 0 else -1.0, plain_bounce])
+	_check("every third slam bounces higher",
+		bounce_speeds.size() == 3 and bounce_speeds[2] > bounce_speeds[0] + 1.0,
+		"bounces=%s combo=%d" % [str(bounce_speeds), player.slam_combo])
+
+	# Landing normally has to break the chain, or the combo would just tick up
+	# forever and every third landing would randomly launch the player.
+	_release_all()
+	await _step(90)
+	_check("landing resets the combo", player.slam_combo == 0,
+		"combo=%d state=%s" % [player.slam_combo, player.state_name()])
+
+	# --- the shockwave hits things standing nearby, not only underfoot.
+	_release_all()
+	await _step(10)
+	# DWalker, not BWalker: the shockwave kills what it hits, and BWalker is the
+	# fixture the dive test needs later on.
+	var shock_enemy := level.get_node("DWalker") as Node3D
+	var shock_health := shock_enemy.get_node("Health") as HealthComponent
+	var shock_hp: int = shock_health.current
+	# Land beside it, not on it, so a stomp cannot be what does the damage.
+	_place(shock_enemy.global_position + Vector3(2.0, 16, 0))
+	await _step(8)
+	Input.action_press("jump")
+	await _step(3)
+	_release_all()
+	await _step(90)
+	var shock_gone := not is_instance_valid(shock_health)
+	_check("slam shockwave reaches sideways",
+		shock_gone or shock_health.current < shock_hp,
+		"hp %d -> %s" % [shock_hp, "killed" if shock_gone else str(shock_health.current)])
+	await _step(20)
 
 	# --- ledge grab on the zone C terrace (lip at y=3.3, wall face at x=-15).
 	# x must clear the capsule of the wall (> -14.6) but stay inside the 0.75 m
@@ -335,7 +499,7 @@ func _run() -> void:
 	player.rig.yaw = 0.0
 	player.rig.pitch = 0.55
 	await _step(4)
-	Input.action_press("jump")
+	Input.action_press("grapple")
 	await _step(2)
 	_release_all()
 	_check("HOMING style dives at anchors", player.state == Player.State.GRAPPLE_DIVE,

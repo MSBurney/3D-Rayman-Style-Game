@@ -100,6 +100,7 @@ func _format_debug(info: Dictionary) -> String:
 		"floor   %s   wall %s" % [info["floor"], info["wall"]],
 		"target  %s (%s)" % [info["target"], info["kind"]],
 		"style   %s" % info["style"],
+		"slam    %s" % info["slam"],
 		"carry   %s" % info["carry"],
 		"fps     %d" % Engine.get_frames_per_second(),
 	])
@@ -107,7 +108,8 @@ func _format_debug(info: Dictionary) -> String:
 func _hint_text() -> String:
 	return "\n".join([
 		"WASD move    Mouse or arrow keys look    Space jump",
-		"Space again in the air:  dive at the ringed target  (also RMB or Q)",
+		"Space again in the air:  SLAM down — the further you fall, the harder",
+		"Q or RMB:  dive at the ringed target  (press again to let go)",
 		"Ringed enemies can be dived at too — bounce off and chain to the next",
 		"Space while swinging:  fling off and keep the speed",
 		"E:  grab and throw a keg     Land on an enemy to stomp it",

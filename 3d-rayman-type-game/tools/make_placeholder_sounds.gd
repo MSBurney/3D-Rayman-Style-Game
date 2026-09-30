@@ -28,6 +28,7 @@ func _init() -> void:
 	_write("lum_red",    520.0, 1040.0, 0.30, Wave.SINE,   0.35)
 	_write("jump",       320.0,  640.0, 0.13, Wave.SQUARE, 0.22)
 	_write("land",       220.0,   90.0, 0.10, Wave.SQUARE, 0.20)
+	_write("slam",       520.0,   40.0, 0.28, Wave.NOISE,  0.38)
 	_write("hurt",       400.0,  140.0, 0.26, Wave.SQUARE, 0.28)
 	_write("enemy_hit",  300.0,  520.0, 0.10, Wave.SQUARE, 0.25)
 	_write("enemy_die",  520.0,   80.0, 0.34, Wave.NOISE,  0.28)

@@ -17,5 +17,10 @@ signal player_respawned
 signal checkpoint_reached(point: Node3D)
 signal enemy_died(enemy: Node3D)
 
+## The player ground-slammed. `force` runs 0..1 with how far they fell, so
+## breakable floors and pressure plates can require a genuinely big drop rather
+## than any old landing. Nothing listens yet — this is the hook for weight props.
+signal slam_landed(at: Vector3, force: float)
+
 ## Toggled by F3; the HUD listens and shows the movement debug readout.
 signal debug_toggled(on: bool)

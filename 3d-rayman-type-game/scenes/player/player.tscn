@@ -12,6 +12,8 @@
 [ext_resource type="AudioStream" uid="uid://b1px3s34nnwq7" path="res://assets/audio/land.wav" id="10"]
 [ext_resource type="AudioStream" uid="uid://sq2bk7e8j38k" path="res://assets/audio/hurt.wav" id="11"]
 [ext_resource type="AudioStream" uid="uid://d3sqrugu81owp" path="res://assets/audio/grapple.wav" id="12"]
+[ext_resource type="AudioStream" uid="uid://bllyjbgknmpqv" path="res://assets/audio/slam.wav" id="14"]
+[ext_resource type="PackedScene" uid="uid://xwhp0bfervqw" path="res://scenes/fx/shockwave.tscn" id="15"]
 
 [sub_resource type="CapsuleShape3D" id="Shape_player"]
 radius = 0.4
@@ -91,6 +93,8 @@ sfx_jump = ExtResource("9")
 sfx_land = ExtResource("10")
 sfx_hurt = ExtResource("11")
 sfx_grapple = ExtResource("12")
+shockwave_fx = ExtResource("15")
+sfx_slam = ExtResource("14")
 
 [node name="Shape" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)

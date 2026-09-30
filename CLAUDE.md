@@ -156,3 +156,26 @@ Two ways to tell at a glance before reporting how a swing feels:
 
 The smoke test now sets the style explicitly for the same reason — otherwise every swing check
 silently tests whatever the scene was last saved with.
+
+## Slam and combo
+
+- **Fall distance is the currency.** Damage, shockwave radius and the *visible ring* all scale with
+  how far you fell, measured from the highest point since last grounded (`Player.slam_power()`).
+  A hop is worth ~0.08, a tower drop 1.00.
+- **The rebound is fixed at jump height, not scaled.** Letting fall distance drive the bounce too
+  made one blurry reward; separating them keeps both legible. Height is gained from the combo.
+- **Every third slam in an unbroken chain** bounces 50% higher with a wider, red shockwave.
+  Touching the ground without slamming resets the count, in `_enter_state(State.GROUND)`.
+- **A slam impact clears `_coyote`.** The landing touches the floor for a frame, which refills the
+  coyote window, and a press in the next tenth of a second would then read as a late ground jump
+  rather than the next slam — silently breaking every chain.
+- **The shockwave ring is not additive.** The palette is bright pastel and additive blending
+  saturates straight to white, throwing away the colour that distinguishes a combo hit.
+
+### Testing input in the smoke test
+
+`Input.action_press()` on **every** frame never produces a fresh `just_pressed` — holding across
+frame boundaries registers nothing at all, so the move simply never fires and the test looks like a
+gameplay bug. Press **once**, wait, then release. And `_place()` resets the timers (`_coyote`,
+`_jump_buffered`, `slam_combo`) for the same reason: leftover state from a previous check turns the
+next press into a different move entirely.
