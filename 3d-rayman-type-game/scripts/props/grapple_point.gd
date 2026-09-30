@@ -13,8 +13,10 @@ const GROUP := "grapple_points"
 @export var pull_speed: float = 26.0
 ## How close counts as "arrived".
 @export var arrive_distance: float = 1.2
-## Upward kick on arrival so a pull can flow into a jump or a second hook.
-@export var release_boost: float = 6.0
+## How high the player bounces off this anchor, as a multiple of the height
+## their own `dive_bounce_height_scale` gives. 1.0 is an ordinary anchor; raise
+## it on one you want to act as a launcher for a long gap.
+@export var bounce_scale: float = 1.0
 
 @export_group("Look")
 @export var spin_speed: float = 1.5

@@ -61,17 +61,34 @@ awkward on a laptop trackpad.
   the chain, so a run of slams is something you sustain rather than something that just happens.
 - **Tongue** — press `Q` and it reaches for the ringed target. One button, and what happens depends
   on whether the target can be moved:
-  - **Anchor (purple ring)** — bolted to the level, so *you* are pulled to *it*. Traversal.
+  - **Anchor (purple ring)** — bolted to the level, so *you* are pulled to *it*, and then you
+    **bounce off it to jump height**, like a trampoline bolted to the sky. The bounce is what makes
+    the pull worth doing: it carries part of your inbound speed through, so you are thrown out past
+    the anchor and into the next one rather than parked above it. Same rule as the slam — no ability
+    should quietly cost you altitude.
   - **Enemy (red ring)** — not bolted down, so *it* is pulled to *you*, and you end up carrying it.
-    Press `Q` again to throw it; it bursts on landing and hurts whatever is nearby.
+    Press `Q` again to throw it.
   - **A turret** cannot be dragged, so the tongue lashes it for damage instead.
+- **Throwing** — a thrown object is not a lob, it is a **rocket**. Modelled on the Yoshi egg in
+  Super Mario 64 DS: it picks the nearest enemy, sets off straight at it at 34 m/s, and steers to
+  stay on it. You are not meant to aim well; you are meant to throw in roughly the right direction
+  and watch it connect.
+
+  If it misses, it **ricochets** — up to four surfaces, keeping most of its speed, and picking a
+  fresh target after every bounce. That is what makes a miss interesting rather than a waste: the
+  throw that sailed past comes back off the wall looking for someone else. Each bounce on the way
+  also adds damage, so working the walls pays.
+
+  It bursts at the end with a ring at its real radius, hurting everything in reach. Applies to
+  anything throwable — a tongue-grabbed enemy and a hand-grabbed keg use the same `ThrownFlight`
+  component.
 
   Aiming is camera-driven with assist: the ringed target is whatever is nearest the centre of the
   screen, in range and in line of sight. Anchors win ties against enemies.
 
   Modelled on Yoshi.s tongue and the Mario Galaxy 2 spin-grab rather than on a grapple hook — it is
   an attack and a way of rearranging the level, not a way of swinging around it.
-- **Combat** — dive at enemies, stomp them from above, or throw a keg at them.
+- **Combat** — slam them, stomp them from above, or throw something at them.
 
 Three things have been cut as the game found its own shape: the **thrown fist** and the
 **helicopter** (2026-09-29), and the **grapple swing** (2026-09-30). The first two were the most
@@ -100,6 +117,7 @@ scripts/
   events.gd            autoloaded signal bus (`Events`)
   player/              player.gd (state machine), camera, grapple targeting, ledge sensor
   enemies/             walker, turret, bullet
+  components/          health, thrown_flight (homing + ricochet for anything thrown)
   props/               lum, grapple point, throwable keg, checkpoint, hazard
   ui/                  hud.gd (hearts, lums, grapple reticle, F3 debug)
 scenes/                one scene per script, plus levels/test_level.tscn
@@ -123,9 +141,10 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 33 behaviours (each state, damage, death, respawn, stomp, grab
-and throw) and prints a PASS/FAIL table. Exit code 0 means everything passed. It caught several
-real bugs during the initial build and is worth rerunning whenever the controller changes.
+It drives the player through all 37 behaviours (each state, damage, death, respawn, stomp, grab
+and throw, plus the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
+means everything passed. It caught several real bugs during the initial build and is worth
+rerunning whenever the controller changes.
 
 ## Not done yet
 

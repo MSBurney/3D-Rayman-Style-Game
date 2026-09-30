@@ -12,7 +12,7 @@ tell when it works.
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS`.
+If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 37).
 
 ---
 
@@ -62,7 +62,7 @@ entering `WALL_RUN` and stops on leaving, rather than one blip per frame.
 `hud.gd` already reads `player.debug_info()` for the F3 overlay. Show a small, always-visible label
 naming the current state.
 
-*Done when:* the label reads GROUND / AIR / SWING / GRAPPLE_DIVE etc. as you move, without F3.
+*Done when:* the label reads GROUND / AIR / SLAM / GRAPPLE_DIVE etc. as you move, without F3.
 
 ---
 
@@ -97,8 +97,14 @@ on that function explains why.
 ### 7. Breakable crates
 A prop that shatters when hit by a thrown keg.
 
-`throwable.gd` already has impact damage, and it damages anything with a child node named `Health`.
-So a crate mostly needs a `Health` child and a death reaction.
+A thrown object bursts at the end of its flight and damages everything nearby in the `enemy` or
+`breakable` groups that has a child node named `Health`. So a crate needs three things: a `Health`
+child, `add_to_group(&"breakable")` in its `_ready()`, and a reaction to `Health`'s `died` signal.
+
+*Watch out:* a throw **homes at enemies only**, so it will not seek out your crate — you have to
+throw at it, or catch it in the burst of a throw aimed at something else. Making throws home at
+breakables too means adding `breakable` to `_pick_target()` in `thrown_flight.gd`; try it and see
+whether it makes aiming better or just noisier.
 
 *Done when:* a thrown keg destroys it but walking into it does not.
 

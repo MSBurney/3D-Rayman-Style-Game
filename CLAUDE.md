@@ -42,6 +42,7 @@ file to be read.
   scripts/
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
+    components/      health, thrown_flight (drop-in Nodes, no matching scene)
     player/          player.gd (movement), abilities, camera, grapple targeting, ledge sensor
     enemies/         walker, turret, bullet
     props/           lum, grapple point, throwable keg, checkpoint, hazard
@@ -50,7 +51,9 @@ file to be read.
   tests/             moveset smoke test
 ```
 
-Every script has a matching scene in the same relative path. `scenes/main.tscn` is what runs.
+Every script has a matching scene in the same relative path, *except* `scripts/components/` —
+those are plain Nodes you add as a child of something else, so they have no scene of their own.
+`scenes/main.tscn` is what runs.
 
 ## Things that will bite you
 
@@ -114,14 +117,59 @@ menus, saving. Ask before starting any of these.
 The grapple is a **Yoshi-style tongue**: an attack and a way of moving things, not a way of moving
 yourself. One button, and what happens depends on whether the target can be moved:
 
-- **Anchor** (fixed to the level) — the player is pulled to it. `State.GRAPPLE_DIVE` in `player.gd`.
+- **Anchor** (fixed to the level) — the player is pulled to it, then **bounces off it to
+  `jump_height`**. `State.GRAPPLE_DIVE` in `player.gd`.
 - **Enemy** (not fixed) — it is pulled to the player and ends up carried. `PlayerAbilities.tongue_grab`.
-  Press the button again to throw it; it bursts on landing and damages nearby enemies.
+  Press the button again to throw it. See **Thrown objects** below for what a throw does.
 - **Target with no `pick_up()`** (a turret, bolted down) — lashed for damage instead, so such
   enemies stay killable rather than being immune.
 
 A grabbed enemy exposes the same `pick_up()` / `throw()` pair the throwable keg does, so the carry
 code treats it like any other held object and knows nothing about enemies.
+
+**Arriving at an anchor bounces, at exactly `jump_height`, and it must.** The first version added a
+flat 6 m/s kick, which is *less* than a jump — so every pull set you down slightly lower than you
+started. It did what it was asked and was completely unsatisfying, which was the whole complaint.
+Same rule as the slam's rebound: **no ability should quietly cost you altitude.** It also carries
+part of the inbound speed through (`dive_bounce_keep`), because the dive flew *at* the anchor, so
+keeping some throws you out past it and into the next one. Zero it and you hang directly above the
+anchor with nowhere to go, which reads as a full stop rather than a launch. The bounce routes
+through `Player.bounce()` — the same function enemies call when you stomp them.
+
+## Thrown objects
+
+A throw is a **rocket, not a lob** (Yoshi egg, Super Mario 64 DS). `ThrownFlight`
+(`scripts/components/thrown_flight.gd`) is a drop-in child Node that owns the whole flight; both
+the walker and the keg add one and just react to its `exploded` signal. Four things in it look like
+arbitrary choices and are actually requirements:
+
+- **It moves the parent itself, by raycast and `global_position`.** Neither normal option works:
+  `move_and_slide()` *stops* at a wall and slides along it, which is the opposite of a ricochet, and
+  a `RigidBody3D`'s solver fights a constant-speed steer. So the keg stays **frozen for its whole
+  flight** and the walker's own `_physics_process` returns early while `_thrown`. If a thrown object
+  ever stutters or sinks into the floor, something re-enabled its normal movement.
+- **A constant turn rate cannot hit anything.** Turn radius is `speed / turn_rate` — about 6 m at
+  the defaults — and a projectile physically *orbits* any target inside that radius until it times
+  out and bursts several metres away. That reads as the homing being broken, not as a near miss.
+  `home_tighten_range` is the fix: scale the turn rate up as the gap closes.
+- **Steering alone cannot aim the throw.** A 90° turn takes about a sixth of a second, by which
+  time the object has gone ten metres the wrong way. `home_launch_snap` swings the direction onto
+  the target *before* it has travelled at all, which is what makes the throw read as a shot.
+- **After a bounce, stand the body off the surface by its own radius.** Otherwise next frame's ray
+  starts inside the wall and reflects straight back into it — the projectile sticks and buzzes
+  against the surface instead of leaving it.
+
+Two more that bite in the *test*, not in the game:
+
+- **A thrown walker frees itself when it bursts**, taking its `Flight` child with it. Read anything
+  off that node afterwards and you get `Invalid access ... on a base object of type 'previously
+  freed'`. Record what you need from the `exploded` signal as it happens instead.
+- **Homing throws kill things all over the level**, so no enemy placed in a scene can be assumed
+  alive later in the suite. The stomp check used to read `HubWalkerA` and began reporting "walker
+  missing" the moment throws started homing; it now spawns its own walker. Note the hub plaza is
+  only 30x30 centred on the origin (x and z from -15 to 15, top face at y=0) — spawn a test object
+  outside that and it drops into the pit, and the check then fails for a reason that has nothing to
+  do with what it is testing.
 
 **There used to be a swing**, a pendulum on the jump button, and it was removed on 2026-09-30. It
 worked and was fully tested, but a pendulum is *sustained momentum management* while a jump is a

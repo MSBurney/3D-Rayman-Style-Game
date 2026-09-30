@@ -15,9 +15,11 @@ extends Node
 @export_group("Carry")
 ## How close you must be to pick something up by hand.
 @export var grab_radius: float = 2.2
-@export var throw_speed: float = 16.0
-## Upward part of a throw, so objects arc instead of skidding along the floor.
-@export var throw_lift: float = 4.0
+## How far above horizontal a throw sets off, as rise over forward run. Only the
+## DIRECTION is decided here — the speed belongs to the thrown object's own
+## `Flight` node (see thrown_flight.gd), because a thrown thing rockets at a
+## fixed pace and steers itself rather than being lobbed at a chosen strength.
+@export var throw_rise: float = 0.22
 
 @export_group("Tongue")
 ## How fast a grabbed enemy is dragged toward the player.
@@ -126,7 +128,7 @@ func throw_carried() -> void:
 	var thrown := carried
 	carried = null
 	if thrown.has_method(&"throw"):
-		var aim := _flat(_player.facing) * throw_speed + Vector3.UP * throw_lift
+		var aim := _flat(_player.facing) + Vector3.UP * throw_rise
 		thrown.call(&"throw", aim)
 
 

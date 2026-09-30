@@ -9,15 +9,26 @@ extends RigidBody3D
 @export var min_impact_speed: float = 7.0
 @export var break_on_impact: bool = true
 
+@export_group("Being thrown")
+## How far the burst at the end of a throw reaches.
+@export var burst_radius: float = 2.6
+## Ring drawn at the burst, the same scene the player's slam uses.
+@export var burst_fx: PackedScene
+
 var _carrier: Player = null
 var _armed: bool = false
 var _spent: bool = false
 var _home: Transform3D
 var _layer: int = 0
 var _mask: int = 0
+var _spin: Tween = null
+
+## Drives us while we are in the air after a throw. See thrown_flight.gd.
+@onready var flight: ThrownFlight = $Flight
 
 func _ready() -> void:
 	add_to_group(&"throwable")
+	flight.exploded.connect(_on_flight_exploded)
 	_home = global_transform
 	_layer = collision_layer
 	_mask = collision_mask
@@ -43,22 +54,80 @@ func pick_up(by: Player) -> void:
 	collision_layer = 0
 	collision_mask = 0
 
+## Launched. The keg becomes a homing, ricocheting projectile rather than a
+## thrown physics object.
+##
+## Note it stays FROZEN for the whole flight. ThrownFlight sets our position
+## every frame, and an unfrozen RigidBody3D would have the solver fighting it
+## for control — the keg would sink, tumble and refuse to reflect cleanly. Only
+## the direction of `impulse` is used; the flight owns the speed.
+##
+## (The old code unfroze here and set `linear_velocity` deferred, because a
+## velocity assigned on the same frame a body unfreezes is discarded by the
+## solver. That trap is gone with the velocity, but it is worth knowing: it
+## still applies to `return_home`, and to any other body you unfreeze.)
 func throw(impulse: Vector3) -> void:
 	_carrier = null
-	collision_layer = _layer
-	collision_mask = _mask
-	freeze = false
-	_armed = true
-	# A velocity set on the same frame the body unfreezes is discarded by the
-	# solver, which turns a throw into a limp drop. Apply it once it's awake.
-	_apply_throw.call_deferred(impulse)
+	# Nothing to collide with while flying: the flight raycasts for surfaces
+	# itself, and staying off every layer keeps us from shoving the thrower.
+	collision_layer = 0
+	collision_mask = 0
+	_armed = false
+	flight.launch(impulse)
+	_spin_in_flight()
 
 
-func _apply_throw(impulse: Vector3) -> void:
+## Tumbles the keg as it flies. Pure decoration, but a projectile that holds one
+## orientation for its whole arc looks switched off.
+func _spin_in_flight() -> void:
+	_spin = create_tween().set_loops()
+	_spin.tween_property(self, "rotation", rotation + Vector3(TAU, TAU * 0.6, 0.0), 0.7)
+
+
+## End of the flight: hurt everything in reach, then break apart.
+func _on_flight_exploded(where: Vector3) -> void:
 	if _spent:
 		return
-	linear_velocity = impulse
-	angular_velocity = Vector3(randf_range(-6.0, 6.0), randf_range(-4.0, 4.0), randf_range(-6.0, 6.0))
+	global_position = where
+	if _spin != null and _spin.is_valid():
+		_spin.kill()
+	_spawn_burst(where)
+
+	# Groups rather than an Area3D, for the same reason grabbing a resting keg
+	# walks the `throwable` group: an Area3D added and queried in the same frame
+	# reports nothing, and a burst has to resolve immediately.
+	#
+	# `breakable` is the hook for props that are not enemies — put a Health child
+	# on a crate and add it to that group and a thrown object will smash it.
+	for group in [&"enemy", &"breakable"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var other := node as Node3D
+			if other == null:
+				continue
+			if other.global_position.distance_to(where) > burst_radius:
+				continue
+			var health := other.get_node_or_null(^"Health") as HealthComponent
+			if health != null:
+				health.damage(damage)
+
+	if break_on_impact:
+		_shatter()
+	else:
+		# Not a breakable one, so hand it back to the physics engine where it
+		# landed and let it settle normally.
+		collision_layer = _layer
+		collision_mask = _mask
+		set_deferred(&"freeze", false)
+
+
+func _spawn_burst(where: Vector3) -> void:
+	if burst_fx == null:
+		return
+	var ring := burst_fx.instantiate() as Node3D
+	get_tree().current_scene.add_child(ring)
+	ring.global_position = where
+	if ring.has_method(&"play"):
+		ring.call(&"play", burst_radius, flight.bounces_used > 0)
 
 func _on_body_entered(body: Node) -> void:
 	if not _armed or _spent:
@@ -90,6 +159,10 @@ func _shatter() -> void:
 func return_home() -> void:
 	_carrier = null
 	_armed = false
+	# Might be called mid-flight, so stop the flight without letting it burst.
+	flight.cancel()
+	if _spin != null and _spin.is_valid():
+		_spin.kill()
 	freeze = false
 	collision_layer = _layer
 	collision_mask = _mask

@@ -5,6 +5,8 @@
 [ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="3"]
 [ext_resource type="AudioStream" uid="uid://umtxj02x8pcr" path="res://assets/audio/enemy_hit.wav" id="4"]
 [ext_resource type="AudioStream" uid="uid://b4kq7hqs5tgxp" path="res://assets/audio/enemy_die.wav" id="5"]
+[ext_resource type="Script" uid="uid://dfuayvvlm5rqd" path="res://scripts/components/thrown_flight.gd" id="6"]
+[ext_resource type="PackedScene" uid="uid://xwhp0bfervqw" path="res://scenes/fx/shockwave.tscn" id="7"]
 
 [sub_resource type="CapsuleShape3D" id="Shape_body"]
 radius = 0.45
@@ -58,6 +60,7 @@ script = ExtResource("1")
 lum_drop = ExtResource("3")
 sfx_hit = ExtResource("4")
 sfx_die = ExtResource("5")
+burst_fx = ExtResource("7")
 
 [node name="Shape" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
@@ -114,3 +117,7 @@ monitorable = false
 
 [node name="Shape" type="CollisionShape3D" parent="Stompbox"]
 shape = SubResource("Shape_stomp")
+
+[node name="Flight" type="Node" parent="."]
+script = ExtResource("6")
+radius = 0.5

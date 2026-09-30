@@ -13,16 +13,24 @@ extends Node
 ## awkward to arrange through input alone.
 
 const MAIN := preload("res://scenes/main.tscn")
+## Spawned fresh for the throw and stomp checks. The level's own walkers cannot
+## be relied on any more: a homing throw kills whatever it finds, so by halfway
+## through the suite there may be none left standing.
+const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 33
+const EXPECTED_CHECKS := 37
 
 var player: Player
 var level: Node3D
 var results: Array[String] = []
 var failures: int = 0
+## Counted from ThrownFlight's `exploded` signal. It has to be recorded as it
+## happens: a thrown walker frees itself when it bursts, so reading anything off
+## its Flight node afterwards is an access to an already-freed object.
+var bursts: int = 0
 
 func _ready() -> void:
 	var main: Node = MAIN.instantiate()
@@ -77,6 +85,10 @@ func _place(at: Vector3) -> void:
 	player._grapple_buffered = 0.0
 	player.slam_combo = 0
 	player._set_state(Player.State.AIR)
+
+
+func _on_burst(_where: Vector3) -> void:
+	bursts += 1
 
 
 func _release_all() -> void:
@@ -353,27 +365,89 @@ func _run() -> void:
 	await _step(4)
 	_check("tongue pulls the player to an anchor", player.velocity.length() > 5.0,
 		"speed=%.2f" % player.velocity.length())
+
+	# Arriving bounces the player to jump height. Polled frame by frame rather
+	# than read after a fixed wait, because gravity starts eating the bounce the
+	# very next frame — waiting 40 frames and reading vy measures nothing.
+	var arrival_vy := 0.0
+	for i in 150:
+		await _step(1)
+		if player.state != Player.State.GRAPPLE_DIVE:
+			arrival_vy = player.velocity.y
+			break
+	var want_bounce := sqrt(2.0 * player.gravity_rise
+		* player.jump_height * player.dive_bounce_height_scale)
+	_check("anchor bounce reaches jump height", absf(arrival_vy - want_bounce) < 0.6,
+		"vy=%.2f expected=%.2f" % [arrival_vy, want_bounce])
 	await _step(80)
 	_release_all()
 
-	# --- diving at an enemy: it takes damage and the player bounces off airborne,
-	# which is what lets one dive chain into the next.
-	_release_all()
-	await _step(10)
-	var dive_enemy := level.get_node("BWalker") as Node3D
-	var dive_enemy_health := dive_enemy.get_node("Health") as HealthComponent
-	var dive_enemy_hp: int = dive_enemy_health.current
-	_place(dive_enemy.global_position + Vector3(0, 6, 0))
-	player._grapple = dive_enemy
-	player._set_state(Player.State.GRAPPLE_DIVE)
-	await _step(40)
-	var dive_enemy_gone := not is_instance_valid(dive_enemy_health)
-	_check("dive damages an enemy",
-		dive_enemy_gone or dive_enemy_health.current < dive_enemy_hp,
-		"hp %d -> %s" % [dive_enemy_hp,
-			"killed" if dive_enemy_gone else str(dive_enemy_health.current)])
-	_check("dive bounces the player", player.state != Player.State.GRAPPLE_DIVE,
-		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
+	# --- a thrown object is a homing, ricocheting rocket (thrown_flight.gd).
+	#
+	# Both walkers here are spawned rather than borrowed from the level, and set
+	# far enough apart that one burst cannot reach the other's test.
+
+	# First: it must actually ricochet, and the bounce count must be what ends
+	# the flight. Homing is switched off so it has nothing to chase and has to
+	# use the floor, and the rebound is weakened so the second hit comes quickly
+	# instead of after a three-second lob.
+	# The projectiles below all spawn inside the hub plaza, which is 30x30 centred
+	# on the origin: x and z from -15 to 15, top face at y=0. Anything spawned
+	# outside that drops into the pit volume, and the check then fails for that
+	# reason rather than for the one it is testing.
+	#
+	# The player is parked on the zone D tower out of the way — these checks do
+	# not involve them, and a hub walker wandering into them costs a heart that
+	# the damage checks further down then have to account for.
+	_place(Vector3(11, 14, 66))
+	var bouncer := WALKER.instantiate() as Node3D
+	level.add_child(bouncer)
+	bouncer.global_position = Vector3(-11, 6, -10)
+	await _step(4)
+	var bouncer_flight := bouncer.get_node("Flight") as ThrownFlight
+	bouncer_flight.homing = false
+	bouncer_flight.max_bounces = 1
+	bouncer_flight.bounce_energy = 0.15
+	bursts = 0
+	bouncer_flight.exploded.connect(_on_burst)
+	bouncer.call(&"throw", Vector3.DOWN)
+	await _step(20)
+	_check("thrown object ricochets off a surface",
+		bouncer_flight.bounces_used >= 1 and bouncer_flight.flying,
+		"bounces=%d flying=%s" % [bouncer_flight.bounces_used, bouncer_flight.flying])
+	await _step(120)
+	_check("running out of ricochets bursts it", bursts == 1, "bursts=%d" % bursts)
+
+	# Then: speed and homing. The missile is aimed 90 degrees away from its
+	# victim on purpose — if it connects, that can only be the steering.
+	var victim := WALKER.instantiate() as Node3D
+	level.add_child(victim)
+	victim.global_position = Vector3(11, 0.8, 11)
+	await _step(4)
+	var victim_health := victim.get_node("Health") as HealthComponent
+
+	var missile := WALKER.instantiate() as Node3D
+	level.add_child(missile)
+	missile.global_position = Vector3(3, 2, 11)
+	await _step(4)
+	var missile_flight := missile.get_node("Flight") as ThrownFlight
+	missile.call(&"throw", Vector3.FORWARD)
+	await _step(2)
+	var locked_on: bool = missile_flight.target == victim
+
+	var was_at: Vector3 = missile.global_position
+	await _step(1)
+	var rocket_speed := was_at.distance_to(missile.global_position) * 60.0
+	_check("thrown object rockets rather than lobs", rocket_speed > 20.0,
+		"speed=%.1f m/s" % rocket_speed)
+	_check("thrown object homes at an enemy", locked_on,
+		"target=%s" % (missile_flight.target.name if missile_flight.target else "none"))
+
+	await _step(100)
+	var victim_gone := not is_instance_valid(victim_health)
+	_check("homing throw reaches its target",
+		victim_gone or victim_health.current < victim_health.max_health,
+		"victim %s" % ("killed" if victim_gone else "hp %d" % victim_health.current))
 	await _step(20)
 
 	# --- wall run along the tan wall in zone B (face at z=5, spans x 25..45).
@@ -404,8 +478,12 @@ func _run() -> void:
 	await _step(3)
 	Input.action_release("grab")
 	await _step(6)
+	# A thrown keg is frozen and driven by its Flight node, but a kinematic
+	# RigidBody3D still reports the velocity implied by its movement — so this
+	# reads the rocket speed, and the threshold is set high enough to catch the
+	# flight silently not starting and the keg just dropping.
 	var thrown_speed := held.linear_velocity.length() if held != null else 0.0
-	_check("throw releases keg", player.abilities.carried == null and thrown_speed > 3.0,
+	_check("throw releases keg", player.abilities.carried == null and thrown_speed > 20.0,
 		"kegspeed=%.2f" % thrown_speed)
 	await _step(20)
 
@@ -444,22 +522,28 @@ func _run() -> void:
 		"state=%s hp=%d" % [player.state_name(), player.health.current])
 	await _step(140)
 
-	# --- stomping a walker
-	var walker := level.get_node_or_null("HubWalkerA")
-	if walker != null:
-		var walker_health := walker.get_node("Health") as HealthComponent
-		var hp_before: int = walker_health.current
-		_place((walker as Node3D).global_position + Vector3(0, 3.0, 0))
-		player.velocity = Vector3(0, -6, 0)
-		await _step(30)
-		# A stomp does 2 damage to a 2 HP walker, so the node is usually gone by
-		# now — read health only while it's still valid.
-		var killed := not is_instance_valid(walker_health)
-		var hp_after := -1 if killed else walker_health.current
-		_check("stomp hurts walker", killed or hp_after < hp_before,
-			"hp %d -> %d%s" % [hp_before, hp_after, " (killed)" if killed else ""])
-	else:
-		_check("stomp hurts walker", false, "walker missing")
+	# --- stomping a walker.
+	#
+	# Spawned, not borrowed from the level. This check used to read HubWalkerA
+	# and started failing with "walker missing" the moment throws became homing:
+	# an earlier check throws a walker, the throw seeks out and bursts on another
+	# one, and nothing placed in the level is guaranteed to still be alive by the
+	# time the suite gets here. Its own walker makes the check independent.
+	var walker := WALKER.instantiate() as Node3D
+	level.add_child(walker)
+	walker.global_position = Vector3(-4, 0.2, 12)
+	await _step(10)
+	var walker_health := walker.get_node("Health") as HealthComponent
+	var hp_before: int = walker_health.current
+	_place(walker.global_position + Vector3(0, 3.0, 0))
+	player.velocity = Vector3(0, -6, 0)
+	await _step(30)
+	# A stomp does 2 damage to a 2 HP walker, so the node is usually gone by
+	# now — read health only while it's still valid.
+	var killed := not is_instance_valid(walker_health)
+	var hp_after := -1 if killed else walker_health.current
+	_check("stomp hurts walker", killed or hp_after < hp_before,
+		"hp %d -> %d%s" % [hp_before, hp_after, " (killed)" if killed else ""])
 
 	# --- enemies and turrets survive a long idle without erroring
 	await _step(120)

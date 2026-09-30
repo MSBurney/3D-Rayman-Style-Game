@@ -81,6 +81,8 @@ main way to learn what each number does. **Go and break several of them.** Sugge
 | `Air Control` → `0.0` | Run | You cannot steer at all mid-jump; feels awful, and shows why it exists |
 | `Coyote Time` → `0.0` | Jump | Jumps off ledges start failing. This is the forgiveness you never notice until it is gone |
 | `Max Speed` → `20` | Run | Fast, but you overshoot every platform |
+| `Home Turn Rate` → `1.5` | `Flight` node inside `enemy_walker.tscn` | Grab an enemy, throw it, and watch the throw curve lazily past its victim and orbit it. That is the bug `Home Tighten Range` exists to stop — see the comment on it |
+| `Max Bounces` → `12` | same `Flight` node | Throw into an empty corner and watch it work the walls for ages |
 
 Set them back afterwards (or just don't save the scene).
 
@@ -144,9 +146,12 @@ match state:
 calls `_arrive_at_dive_target()` when it gets there. Every state function has that shape —
 **move, then check if we should be in a different state.**
 
-Then read `_arrive_at_dive_target()`, because the whole design of the game is in that one function:
-the *same* action produces a bounce off an enemy or a launch off an anchor. Adding a third kind of
-target would mean adding a branch there and nothing else.
+Then read `_arrive_at_dive_target()`. It is four lines of substance and a lot of comment, because
+the comment is the interesting part: the bounce is set to exactly `jump_height`, and the reason why
+is a feel bug that shipped once. An earlier version gave a flat 6 m/s kick, which is *less* than a
+jump, so every pull quietly set you down lower than you started. Notice it calls
+`Player.bounce()` — the same function an enemy calls when you stomp it — rather than setting
+`velocity.y` by hand.
 
 Two things in this file are worth understanding because they bite everyone:
 
@@ -164,6 +169,12 @@ still "just pressed" when the tongue code ran, so it cancelled itself.
 > purple anchor and press `Q`. Same button, opposite outcomes — you move, or the target moves.
 > Read `_try_grapple()` in `player.gd` to see where that fork is made, and `tongue_grab()` in
 > `player_abilities.gd` for the half that drags enemies.
+>
+> **Then try throwing badly on purpose.** Grab a walker, turn away from everything, and throw. The
+> object picks its own victim and rockets at it; if there is nothing to chase it ricochets off the
+> walls a few times and bursts. That is `scripts/components/thrown_flight.gd`, and it is a good
+> example of a **component**: a plain `Node` you add as a child of something to give it a
+> behaviour. The keg and the walker both have one, and neither script knows the other exists.
 
 ---
 
@@ -219,7 +230,7 @@ table. Run it after changing anything in `player.gd`:
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-25 checks, a few seconds. It has already caught several bugs that looked fine in play, including
+37 checks, a few seconds. It has already caught several bugs that looked fine in play, including
 the grapple problem above. If you add an ability, add a check for it in
 `tests/moveset_smoke_test.gd` — copy an existing one, they are all the same shape.
 

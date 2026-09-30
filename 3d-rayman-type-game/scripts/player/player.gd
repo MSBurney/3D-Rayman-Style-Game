@@ -134,10 +134,15 @@ signal state_changed(from: State, to: State)
 @export var dive_speed: float = 26.0
 ## How close counts as having arrived.
 @export var dive_arrive_distance: float = 1.2
-## Upward kick when a dive ends on an anchor, so it can chain into another.
-@export var dive_release_boost: float = 6.0
-## Damage a dive does to an enemy.
-@export var dive_damage: int = 2
+## Height of the bounce off an anchor, as a multiple of `jump_height`. At 1.0 a
+## pull returns exactly as much height as a jump would, so hooking an anchor
+## never costs altitude. Individual anchors can scale this further.
+@export var dive_bounce_height_scale: float = 1.0
+## Fraction of the dive's speed carried through the bounce as horizontal travel.
+## This is what makes it read as a bounce rather than a lift: the dive flew AT
+## the anchor, so keeping some of that throws you out past it. At 0.0 you hang
+## straight above the anchor with nowhere to go.
+@export var dive_bounce_keep: float = 0.3
 ## Grace period after hooking on, before the grapple button can let go again.
 ## Without it the button press that attaches you is still "just pressed" when the
 ## swing/pull code runs later in the SAME frame, so you detach instantly.
@@ -628,35 +633,37 @@ func _do_grapple_dive(_delta: float) -> void:
 func _dive_target_point() -> Vector3:
 	if _grapple == null:
 		return global_position
-	# Enemies are aimed at chest height so you hit the body, not the feet.
-	return _grapple.global_position + (
-		Vector3.ZERO if GrappleTargeting.is_anchor(_grapple) else Vector3.UP * 0.8
-	)
+	return _grapple.global_position
 
 
-## What happens when a dive lands. This is where the whole design lives: the same
-## action produces a bounce off an enemy or a launch off an anchor.
+## Reaching the anchor. You bounce off it, like a trampoline bolted to the sky.
+##
+## Only anchors ever get here: `_try_grapple` sends enemies to the tongue
+## instead, because an enemy is not bolted down and so it comes to you.
+##
+## The bounce goes to exactly `jump_height`, for the same reason the slam's
+## rebound does — an ability should never quietly cost you altitude. The version
+## before this added a flat 6 m/s kick, which is *less* than a jump, so every
+## pull ended by setting you down slightly lower than you started. That was
+## correct as specified and completely unsatisfying, which is the whole reason
+## this function changed: arriving has to feel like a launch, not a full stop.
 func _arrive_at_dive_target() -> void:
-	var target := _grapple
-	_grapple = null
+	var anchor := _grapple as GrapplePoint
+	var height := jump_height * dive_bounce_height_scale
+	if anchor != null:
+		height *= anchor.bounce_scale
 
-	if target != null and not GrappleTargeting.is_anchor(target):
-		# Hit an enemy: damage it and bounce off, still airborne, so the next
-		# target can be locked immediately. That bounce is what makes chaining work.
-		var health := target.get_node_or_null(^"Health") as HealthComponent
-		if health != null:
-			health.damage(dive_damage)
-		velocity = Vector3.ZERO
-		velocity.y = stomp_bounce
-		play_sfx(sfx_grapple)
-		_set_state(State.AIR)
-		return
+	# Carry part of the inbound speed through, so the bounce throws you out past
+	# the anchor and into the next one.
+	var flat := _flatten(velocity) * dive_speed * dive_bounce_keep
+	velocity.x = flat.x
+	velocity.z = flat.z
+	play_sfx(sfx_grapple)
 
-	# Landed on an anchor in HOMING style: stop dead and pop upward.
-	var anchor := target as GrapplePoint
-	velocity = Vector3.ZERO
-	velocity.y = anchor.release_boost if anchor != null else dive_release_boost
-	_set_state(State.AIR)
+	# bounce() is what enemies call when you stomp them: it sets the upward
+	# speed, clears the grapple and puts us back in AIR, and marks the jump as
+	# already released so holding the button cannot cut the bounce short.
+	bounce(sqrt(2.0 * gravity_rise * height))
 
 
 func _do_hurt(delta: float) -> void:

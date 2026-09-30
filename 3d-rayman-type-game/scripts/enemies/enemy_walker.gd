@@ -19,10 +19,17 @@ extends CharacterBody3D
 @export var sfx_die: AudioStream
 
 @export_group("Being thrown")
-## Damage this does to whatever it lands on when thrown by the player.
+## Damage the burst does to everything in reach of it.
 @export var thrown_damage: int = 2
-## How far that damage reaches from the landing point.
+## How far that damage reaches from the burst point.
 @export var thrown_radius: float = 3.0
+## Extra damage per surface the throw ricocheted off before bursting, so a throw
+## that bounced its way across the room is worth more than one that hit a wall
+## straight away. The ricochet is a skill, so it should pay.
+@export var thrown_bonus_per_bounce: int = 1
+## Ring drawn at the burst, the same one the player's slam uses. Without it the
+## burst is invisible and the radius is something you have to guess at.
+@export var burst_fx: PackedScene
 
 var _origin: Vector3
 var _patrol_axis: Vector3 = Vector3.RIGHT
@@ -42,10 +49,13 @@ var _carrier: Player = null
 @onready var hurtbox: Area3D = $Hurtbox
 @onready var stompbox: Area3D = $Stompbox
 @onready var _sfx: AudioStreamPlayer3D = $Sfx
+## Drives us while we are in the air after a throw. See thrown_flight.gd.
+@onready var flight: ThrownFlight = $Flight
 
 func _ready() -> void:
 	_origin = global_position
 	_patrol_axis = global_transform.basis.x.normalized()
+	flight.exploded.connect(_on_flight_exploded)
 	health.died.connect(_on_died)
 	health.damaged.connect(_on_damaged)
 	hurtbox.body_entered.connect(_on_hurtbox_entered)
@@ -65,12 +75,9 @@ func _physics_process(delta: float) -> void:
 				global_position = hold.global_position
 		return
 
-	# Thrown: fly until we hit something, then burst.
+	# Thrown: the Flight child owns our position while we rocket and ricochet, so
+	# our own movement code must not run at all or the two fight each other.
 	if _thrown:
-		velocity.y -= gravity * delta
-		move_and_slide()
-		if get_slide_collision_count() > 0 or is_on_floor() or is_on_wall():
-			_land_thrown()
 		return
 
 	if _dead:
@@ -172,6 +179,10 @@ func _on_died() -> void:
 	if _dead:
 		return
 	_dead = true
+	# Killed mid-flight by something else's burst: stop steering so the death
+	# animation is not dragged across the room.
+	_thrown = false
+	flight.cancel()
 	hurtbox.set_deferred(&"monitoring", false)
 	stompbox.set_deferred(&"monitoring", false)
 	collision_layer = 0
@@ -223,34 +234,62 @@ func pick_up(by: Player) -> void:
 	_stop_hurting_the_player()
 
 
-## Launched. We fly until we hit something, then burst and damage the area.
+## Launched. We become a homing, ricocheting projectile until the Flight child
+## says we are done, then burst.
+##
+## `impulse` is only read for its direction — ThrownFlight sets the speed, which
+## is why a thrown enemy rockets rather than arcs.
 func throw(impulse: Vector3) -> void:
 	_held = false
 	_tethered = false
 	_carrier = null
 	_thrown = true
-	velocity = impulse
-	# Collide with the world again so there is something to land on, but stay
-	# off the player's layer so we do not shove them as we leave.
+	velocity = Vector3.ZERO
+	# Nothing to collide with: the flight raycasts for surfaces itself, and
+	# staying off every layer means we cannot shove the player on the way out.
 	collision_layer = 0
-	collision_mask = 1
+	collision_mask = 0
+	flight.launch(impulse)
 
 
-## Landing after a throw: hurt whatever is nearby, then die.
-func _land_thrown() -> void:
+## End of the flight: hurt everything in reach, then die.
+func _on_flight_exploded(where: Vector3) -> void:
 	if _dead:
 		return
 	_thrown = false
-	for node in get_tree().get_nodes_in_group(&"enemy"):
-		var other := node as Node3D
-		if other == null or other == self:
-			continue
-		if other.global_position.distance_to(global_position) > thrown_radius:
-			continue
-		var other_health := other.get_node_or_null(^"Health") as HealthComponent
-		if other_health != null:
-			other_health.damage(thrown_damage)
+	global_position = where
+
+	# Each ricochet on the way here adds damage, so a throw that worked the
+	# walls is worth more than one that hit the first thing in front of it.
+	var damage := thrown_damage + flight.bounces_used * thrown_bonus_per_bounce
+	_spawn_burst(where)
+
+	# `breakable` is the hook for props that are not enemies: a crate with a
+	# Health child in that group is smashed by a thrown object.
+	for group in [&"enemy", &"breakable"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var other := node as Node3D
+			if other == null or other == self:
+				continue
+			if other.global_position.distance_to(where) > thrown_radius:
+				continue
+			var other_health := other.get_node_or_null(^"Health") as HealthComponent
+			if other_health != null:
+				other_health.damage(damage)
+
 	health.damage(health.current)
+
+
+## Draws the ring at the real burst radius, so the reach is visible rather than
+## inferred. Same scene and same call as the player's slam shockwave.
+func _spawn_burst(where: Vector3) -> void:
+	if burst_fx == null:
+		return
+	var ring := burst_fx.instantiate() as Node3D
+	get_tree().current_scene.add_child(ring)
+	ring.global_position = where
+	if ring.has_method(&"play"):
+		ring.call(&"play", thrown_radius, flight.bounces_used > 0)
 
 
 ## Hitboxes off. A grabbed enemy must not damage the player it is stuck to.
