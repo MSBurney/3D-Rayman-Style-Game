@@ -1,20 +1,23 @@
 class_name GrapplePoint
 extends Node3D
 
-## An anchor the player can pull themselves to with the tongue.
+## An anchor the player swings from.
 ##
-## Anchors are fixed to the level, so the tongue moves the player instead of the
-## anchor. Enemies are the other way round — see PlayerAbilities.tongue_grab.
+## Anchors are bolted to the level, so hooking one moves the *player* — they are
+## the pendulum half of the grapple. Enemies are the other way round: they get
+## dragged to you. See `Player._do_swing` and `PlayerAbilities.tongue_grab`.
+##
+## Worth knowing when you place one: the rope is as long as the distance you
+## hooked from, and nothing shortens it for you. So an anchor is only useful if
+## there is room to swing *beneath* it — put them high, over the gap they are
+## meant to cross, not level with the ledge you jump from.
 
 const GROUP := "grapple_points"
 
 @export var enabled: bool = true
 
-@export var pull_speed: float = 26.0
-## How close counts as "arrived".
-@export var arrive_distance: float = 1.2
 ## How high the player bounces off this anchor, as a multiple of the height
-## their own `dive_bounce_height_scale` gives. 1.0 is an ordinary anchor; raise
+## their own `anchor_bounce_height_scale` gives. 1.0 is an ordinary anchor; raise
 ## it on one you want to act as a launcher for a long gap.
 @export var bounce_scale: float = 1.0
 

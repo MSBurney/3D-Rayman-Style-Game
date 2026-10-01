@@ -23,7 +23,9 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | Look | Mouse or arrow keys | Right stick |
 | Jump | `Space` | A |
 | **Ground slam** | `Space` again in the air | A again |
-| **Tongue** | `Q` or `RMB` — again to throw what you hold | RB |
+| **Tongue / swing** | `Q` or `RMB` — **hold** on an anchor to swing | RB |
+| **Jump off the rope** | `Space` while swinging | A |
+| **Reel rope in / out** | `E` / `Ctrl` while swinging | B / LB |
 | Grab & throw | `E` | B |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
 | Debug readout | `F3` | — |
@@ -61,14 +63,32 @@ awkward on a laptop trackpad.
   the chain, so a run of slams is something you sustain rather than something that just happens.
 - **Tongue** — press `Q` and it reaches for the ringed target. One button, and what happens depends
   on whether the target can be moved:
-  - **Anchor (purple ring)** — bolted to the level, so *you* are pulled to *it*, and then you
-    **bounce off it to jump height**, like a trampoline bolted to the sky. The bounce is what makes
-    the pull worth doing: it carries part of your inbound speed through, so you are thrown out past
-    the anchor and into the next one rather than parked above it. Same rule as the slam — no ability
-    should quietly cost you altitude.
+  - **Anchor (purple ring)** — bolted to the level, so *you* are the one that moves: you **swing**
+    from it. See below.
   - **Enemy (red ring)** — not bolted down, so *it* is pulled to *you*, and you end up carrying it.
     Press `Q` again to throw it.
   - **A turret** cannot be dragged, so the tongue lashes it for damage instead.
+- **Swing** — hold `Q` on an anchor and you are on a rope. **Nothing about it is capped**, and that
+  is the entire point: the fun of a grapple is abusing its physics to get somewhere you have no
+  business being.
+
+  | | |
+  | --- | --- |
+  | hold `Q` | stay attached; let go and you keep **every bit** of the speed you built |
+  | stick | pumps along the arc, with no speed limit at all |
+  | `E` / `Ctrl` | reel the rope in and out |
+  | `Space` | leave the rope with a jump added **on top of** the swing's speed |
+
+  A free drop through the arc already reaches about 22 m/s — three times running speed — and the
+  pump has no ceiling above that. The rope is **one-sided**: it pulls but never pushes, so with
+  enough speed you go clean over the top of the anchor and loop around it. Reeling in while moving
+  fast trades rope for speed, which is the main exploit on offer. Reel all the way in and you arrive
+  at the anchor and bounce off it at jump height.
+
+  This is the mechanic's third version. The first put the pendulum on the jump button — wrong kind
+  of input. The second had five caps stacked in one function, each added to answer a feel complaint,
+  and between them they removed the only reason to use a swing at all. If it ever feels wrong again,
+  the fix is to take something away.
 - **Throwing** — a thrown object is not a lob, it is a **rocket**. Modelled on the Yoshi egg in
   Super Mario 64 DS: it picks the nearest enemy, sets off straight at it at 34 m/s, and steers to
   stay on it. You are not meant to aim well; you are meant to throw in roughly the right direction
@@ -86,15 +106,18 @@ awkward on a laptop trackpad.
   Aiming is camera-driven with assist: the ringed target is whatever is nearest the centre of the
   screen, in range and in line of sight. Anchors win ties against enemies.
 
-  Modelled on Yoshi.s tongue and the Mario Galaxy 2 spin-grab rather than on a grapple hook — it is
-  an attack and a way of rearranging the level, not a way of swinging around it.
+  The enemy half is modelled on Yoshi's tongue and the Mario Galaxy 2 spin-grab: an attack and a way
+  of rearranging the level, not only a way of moving yourself.
 - **Combat** — slam them, stomp them from above, or throw something at them.
 
-Three things have been cut as the game found its own shape: the **thrown fist** and the
-**helicopter** (2026-09-29), and the **grapple swing** (2026-09-30). The first two were the most
-Rayman-specific moves in the set. The swing worked and was fully tested, but a pendulum is
-sustained momentum management while a jump is a single impulse, and binding one to the other never
-read right. Reframing the grapple as a tongue solved it by making it an *action*, not a *state*.
+Two moves have been cut as the game found its own shape: the **thrown fist** and the **helicopter**
+(2026-09-29), the two most Rayman-specific moves in the set.
+
+The grapple is the thing that has been reworked most, and the record is worth keeping. It was a
+pendulum on the jump button (wrong kind of input, cut), then a capped pendulum (five limits in one
+function, cut), then a pull-and-bounce with no swing at all — which worked exactly as specified and
+was dull, because **the caps were what was wrong, not the pendulum.** It is now a swing again with
+nothing capped. The enemy-grabbing half survived all of it unchanged.
 
 ## Test level
 
@@ -102,10 +125,10 @@ One hub with four zones, each built around a mechanic:
 
 | Direction | Zone | Teaches |
 | --- | --- | --- |
-| North | Rising platforms, then a gap with two anchors | Jumping, then **diving** across |
+| North | Rising platforms, then a gap with two anchors | Jumping, then **swinging** across |
 | East | Pit spanned by a tan wall, then a shaft | **Wall run**, then **wall jump** |
 | West | Three terraces with 3.3 m lips | **Ledge grab** (too high to jump onto) |
-| South | Chain of anchors over a pit, tower | **Tongue pulls** (nothing else crosses it) |
+| South | Chain of anchors over a pit, tower | **Swinging** (nothing else crosses it) |
 
 Tan surfaces are the runnable walls. Falling into a pit respawns you at the last checkpoint.
 
@@ -141,7 +164,7 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 37 behaviours (each state, damage, death, respawn, stomp, grab
+It drives the player through all 42 behaviours (each state, damage, death, respawn, stomp, grab
 and throw, plus the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
 means everything passed. It caught several real bugs during the initial build and is worth
 rerunning whenever the controller changes.

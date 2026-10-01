@@ -98,6 +98,9 @@ func _format_debug(info: Dictionary) -> String:
 		"floor   %s   wall %s" % [info["floor"], info["wall"]],
 		"target  %s (%s)" % [info["target"], info["kind"]],
 		"slam    %s" % info["slam"],
+		# Rope length and whether it is pulling. Worth watching while swinging:
+		# "slack" means the rope is doing nothing and you are in free flight.
+		"rope    %s" % info["rope"],
 		"carry   %s" % info["carry"],
 		"tongue  %s" % info["tongue"],
 		"fps     %d" % Engine.get_frames_per_second(),

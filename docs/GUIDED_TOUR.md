@@ -16,7 +16,8 @@ Fly around for five minutes before reading any code. Try to reach all four zones
 - **North** — hop the platforms, then dive across the gap using the two floating rings.
 - **East** — sprint at the tan wall and keep going; you should run along it.
 - **West** — jump at the tall pink terraces and you will grab the lip. Press jump again to climb up.
-- **South** — a pit with floating rings over it. Press **Q** (or right-click) to hook one.
+- **South** — a pit with floating rings over it. **Hold Q** (or right-click) to hook one and swing
+  across. Hold a direction to pump the arc, `E` to reel the rope in, `Space` to launch off it.
 
 Press **F3** for a live readout of your state, speed and current grapple target. Leave it on — it
 is the single most useful thing for understanding what the code is doing.
@@ -77,7 +78,8 @@ main way to learn what each number does. **Go and break several of them.** Sugge
 | Try | In group | What you should notice |
 | --- | --- | --- |
 | `Tongue Reel Speed` → `4` | Abilities node | Watch an enemy get dragged in slowly — the tongue is easiest to understand at low speed |
-| `Dive Speed` → `6` | Grapple | The dive becomes a slow float; you can see the aim-assist tracking |
+| `Swing Pump Accel` → `80` | Grapple > Swing | Hold a direction while swinging and you wind up absurdly fast. Nothing stops you, which is the point |
+| `Swing Reel Speed` → `3` | Grapple > Swing | Makes it obvious what `E` and `Ctrl` do to the rope |
 | `Air Control` → `0.0` | Run | You cannot steer at all mid-jump; feels awful, and shows why it exists |
 | `Coyote Time` → `0.0` | Jump | Jumps off ledges start failing. This is the forgiveness you never notice until it is gone |
 | `Max Speed` → `20` | Run | Fast, but you overshoot every platform |
@@ -129,7 +131,7 @@ reference to another. That is the point: you can rewrite the HUD without opening
 
 ## 4. Read one ability (20 minutes)
 
-Open `scripts/player/player.gd` and read the header comment. Then find `_do_grapple_dive()`.
+Open `scripts/player/player.gd` and read the header comment. Then find `_do_swing()`.
 
 Do **not** read the whole file. The structure exists so you don't have to: one `_do_<state>()`
 function per thing the player can be doing, and `_physics_process` picks which one runs:
@@ -138,20 +140,29 @@ function per thing the player can be doing, and `_physics_process` picks which o
 match state:
     State.GROUND: _do_ground(delta)
     State.AIR: _do_air(delta)
-    State.GRAPPLE_DIVE: _do_grapple_dive(delta)
+    State.SWING: _do_swing(delta)
     ...
 ```
 
-`_do_grapple_dive()` is short. It flies straight at the locked target, bails if it hits a wall, and
-calls `_arrive_at_dive_target()` when it gets there. Every state function has that shape —
-**move, then check if we should be in a different state.**
+`_do_swing()` has that shape every state function has — **move, then check whether we should be in
+a different state.** It is also the most commented function in the project, because almost
+everything in it is there to stop someone helpfully adding a limit back. Read the comment block at
+the top before the code: the swing has been built three times, and twice it was cut because a feel
+complaint got answered with a cap.
 
-Then read `_arrive_at_dive_target()`. It is four lines of substance and a lot of comment, because
-the comment is the interesting part: the bounce is set to exactly `jump_height`, and the reason why
-is a feel bug that shipped once. An earlier version gave a flat 6 m/s kick, which is *less* than a
-jump, so every pull quietly set you down lower than you started. Notice it calls
-`Player.bounce()` — the same function an enemy calls when you stomp it — rather than setting
-`velocity.y` by hand.
+Then read `_constrain_to_rope()`, which is where the actual rope lives. Three things to notice:
+
+1. It runs from `_after_move()`, not from the state function. `move_and_slide()` travels in a
+   straight line and a swing is an arc, so the body drifts off the circle every frame and is put
+   back afterwards. Doing it the obvious way — a spring applied *before* the move — is always a
+   frame behind and buzzes at 60 Hz.
+2. It is **one-sided**: closer to the anchor than the rope is long and it does nothing. A rope pulls,
+   it does not push. That one `if` is what lets you loop over the top of the anchor.
+3. It removes only the velocity pointing *along* the rope, never speed in general.
+
+> **Try it:** hold `Q` on a purple anchor from somewhere high, do nothing else, and watch the
+> `speed` line on the F3 readout. A free drop through the arc reaches about 22 m/s — `Max Speed`,
+> the number that governs running, is 7.5. Then let go at the bottom and see that you keep it.
 
 Two things in this file are worth understanding because they bite everyone:
 
@@ -230,7 +241,7 @@ table. Run it after changing anything in `player.gd`:
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-37 checks, a few seconds. It has already caught several bugs that looked fine in play, including
+42 checks, a few seconds. It has already caught several bugs that looked fine in play, including
 the grapple problem above. If you add an ability, add a check for it in
 `tests/moveset_smoke_test.gd` — copy an existing one, they are all the same shape.
 

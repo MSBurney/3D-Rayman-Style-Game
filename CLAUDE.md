@@ -117,8 +117,7 @@ menus, saving. Ask before starting any of these.
 The grapple is a **Yoshi-style tongue**: an attack and a way of moving things, not a way of moving
 yourself. One button, and what happens depends on whether the target can be moved:
 
-- **Anchor** (fixed to the level) — the player is pulled to it, then **bounces off it to
-  `jump_height`**. `State.GRAPPLE_DIVE` in `player.gd`.
+- **Anchor** (fixed to the level) — the player **swings** from it. `State.SWING` in `player.gd`.
 - **Enemy** (not fixed) — it is pulled to the player and ends up carried. `PlayerAbilities.tongue_grab`.
   Press the button again to throw it. See **Thrown objects** below for what a throw does.
 - **Target with no `pick_up()`** (a turret, bolted down) — lashed for damage instead, so such
@@ -127,14 +126,69 @@ yourself. One button, and what happens depends on whether the target can be move
 A grabbed enemy exposes the same `pick_up()` / `throw()` pair the throwable keg does, so the carry
 code treats it like any other held object and knows nothing about enemies.
 
-**Arriving at an anchor bounces, at exactly `jump_height`, and it must.** The first version added a
-flat 6 m/s kick, which is *less* than a jump — so every pull set you down slightly lower than you
-started. It did what it was asked and was completely unsatisfying, which was the whole complaint.
-Same rule as the slam's rebound: **no ability should quietly cost you altitude.** It also carries
-part of the inbound speed through (`dive_bounce_keep`), because the dive flew *at* the anchor, so
-keeping some throws you out past it and into the next one. Zero it and you hang directly above the
-anchor with nowhere to go, which reads as a full stop rather than a launch. The bounce routes
-through `Player.bounce()` — the same function enemies call when you stomp them.
+## The swing: do not cap it
+
+**Read this before touching `_do_swing`.** The swing has been built three times and cut twice, and
+both times it was cut for the same reason dressed differently:
+
+1. **A pendulum on the jump button.** Wrong *kind* of input — a pendulum is sustained momentum
+   management, a jump is one impulse. Several rounds went into smoothing feel before anyone noticed
+   the ability was simply bound to the wrong button.
+2. **A pendulum with five caps in one function** — a speed limit, an apex clamp, drag, an
+   outward-velocity cancel and a spring. Each was added to answer a feel complaint, and together
+   they removed the only reason to use a swing.
+
+The author's own diagnosis, and it is the one to keep: *"the fun part WAS the ability to mess with
+the physics of the grapple and exploiting it to make high jumps and far jumps — removing all of
+that with the caps killed the fun of the mechanic."*
+
+So: **nothing in the swing caps speed.** Not the pump, not gravity, not the release, not the top of
+the arc. Four places enforce that, and each will look like an oversight until you know why:
+
+- **`swing_gravity` is its own number and does not go through `_apply_gravity()`.** That helper
+  softens gravity near the apex and clamps the fall to `max_fall_speed`. Both are caps.
+- **`_apply_horizontal` takes a `keep_momentum` flag, and `_do_air` passes it.** Normally it steers
+  speed *toward* `max_speed`, which brakes as readily as it accelerates — so a 22 m/s release decayed
+  back to walking pace in about half a second. Above `max_speed` the stick may now redirect momentum
+  but never brake it. **This one is easy to reintroduce by accident**, because it does not live in
+  the swing at all.
+- **The swing-jump sets `_jumping = false`.** A normal jump is cut short when you release the
+  button, and you *have* to release the button to let go of the rope — so a cuttable swing-jump
+  halved itself every single time.
+- **The slack-rope push is added acceleration, never `move_toward(max_speed)`.** Same cap wearing a
+  disguise.
+
+Three geometry rules that look arbitrary until you hit the bug they prevent:
+
+- **The rope is an exact position correction applied AFTER the move** (`_constrain_to_rope`, called
+  from `_after_move`), not a spring applied before it. `move_and_slide()` travels in a straight line
+  but a swing is an arc, so the body drifts off the circle every frame. A spring before the move is
+  always a frame behind: drift out, get yanked back, drift out again — a 60 Hz buzz that gets worse
+  the faster you go, and that buzz was most of why version two felt rough. The smoke test asserts
+  the radius error stays under 0.15 m; it currently measures 0.002 m.
+- **The rope is ONE-SIDED.** It pulls, it never pushes: closer to the anchor than the rope is long
+  and it does nothing at all. That is what lets you swing over the top of the anchor and loop around
+  it. Being pinned below the anchor was half of what made the old swing feel like a cage.
+- **The constraint removes only the OUTWARD velocity**, never speed in general. A rope cannot
+  stretch, so the component along it goes to zero and everything along the arc is untouched — so the
+  constraint itself takes no energy out of the swing.
+
+**Only the rope's *length* changes over time, never its enforcement**, which is what keeps the
+radius continuous. It starts at the distance you hooked from and is then the player's to change with
+`grab` / `drop`. Reeling in while moving fast is the main exploit on offer: the same angular rate on
+a shorter rope is a faster one. Reel all the way in and you arrive at the anchor and bounce off it,
+at *at least* `jump_height` — same rule as the slam's rebound, **no ability should quietly cost you
+altitude.** An earlier version gave a flat 6 m/s kick, less than a jump, so arriving set you down
+lower than you started.
+
+Note `grab` doubles as reel-in, so `player.gd` passes `allow_grab = false` to
+`PlayerAbilities.handle_input` while swinging — otherwise reeling also tries to pick up every keg
+you pass.
+
+**There is no cap on rope length relative to the anchor's height above the ground, on purpose.**
+That means hooking an anchor level with you swings you down into the floor. The old code capped it
+and that cap is gone with the rest. The answer is level design — put anchors *high*, over the gap
+they are meant to cross — and the reel.
 
 ## Thrown objects
 
@@ -171,11 +225,11 @@ Two more that bite in the *test*, not in the game:
   outside that and it drops into the pit, and the check then fails for a reason that has nothing to
   do with what it is testing.
 
-**There used to be a swing**, a pendulum on the jump button, and it was removed on 2026-09-30. It
-worked and was fully tested, but a pendulum is *sustained momentum management* while a jump is a
-*single impulse*, and no amount of tuning reconciled that. Several rounds were spent smoothing feel
-before the real problem — the ability was bound to the wrong kind of input — was identified. If a
-feel complaint survives two or three rounds of tuning, question the input model before the numbers.
+**The lesson from the two cut versions**, worth more than the mechanic itself: when a feel complaint
+survives two or three rounds of tuning, stop tuning. Ask instead whether the ability is on the right
+*kind* of input (sustained vs impulse, held vs tapped) and whether the thing being "smoothed" is the
+thing that made it fun. Both times the swing was fixed by taking something away, never by adding a
+number.
 
 ## Slam and combo
 

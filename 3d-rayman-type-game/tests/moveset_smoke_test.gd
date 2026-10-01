@@ -21,7 +21,7 @@ const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 37
+const EXPECTED_CHECKS := 42
 
 var player: Player
 var level: Node3D
@@ -78,6 +78,7 @@ func _place(at: Vector3) -> void:
 	player.global_position = at
 	player.velocity = Vector3.ZERO
 	player._grapple = null
+	player._rope_taut = false
 	player._ledge_lock = 0.0
 	player._wall_lock = 0.0
 	player._coyote = 0.0
@@ -89,6 +90,42 @@ func _place(at: Vector3) -> void:
 
 func _on_burst(_where: Vector3) -> void:
 	bursts += 1
+
+
+## Attaches to an anchor exactly as `_try_grapple` would, and holds the button.
+##
+## The swing is held, not toggled, so the button has to stay down for the whole
+## check — a `_release_all()` in the middle of one ends it. The repress lock is
+## set for the same reason the real code sets it: without it the press that
+## attached us is still down on the next frame and the swing lets go instantly.
+func _start_swing(anchor: GrapplePoint) -> void:
+	Input.action_press("grapple")
+	player._grapple = anchor
+	player._rope_length = clampf(
+		player.global_position.distance_to(anchor.global_position),
+		player.swing_min_rope, player.swing_max_rope)
+	player._grapple_lock = player.grapple_repress_delay
+	player._set_state(Player.State.SWING)
+
+
+## Hangs at rest from the bottom of the arc, optionally holds a direction, and
+## returns the speed reached. Used to compare a pumped swing against a dead one.
+##
+## At the bottom the rope is vertical, so every horizontal direction is fully
+## tangential to it — which is why this does not care where the camera points.
+func _pump_from_rest(anchor: GrapplePoint, pump: bool) -> float:
+	_place(anchor.global_position + Vector3(0, -10.5, 0))
+	await _step(2)
+	_start_swing(anchor)
+	player.velocity = Vector3.ZERO
+	if pump:
+		Input.action_press("move_right")
+	await _step(30)
+	var speed := player.velocity.length()
+	Input.action_release("move_right")
+	_release_all()
+	await _step(20)
+	return speed
 
 
 func _release_all() -> void:
@@ -310,24 +347,169 @@ func _run() -> void:
 	_check("finds a grapple target", pull_target != null,
 		"target=%s" % (pull_target.name if pull_target != null else "none"))
 
-	# Aim is camera-driven, so drive the state directly rather than fight the camera.
-	var pull_point := level.get_node("HubPull") as GrapplePoint
-	player._grapple = pull_point
-	player._set_state(Player.State.GRAPPLE_DIVE)
-	await _step(4)
-	_check("dive moves player", player.velocity.length() > 5.0,
-		"speed=%.2f" % player.velocity.length())
-	await _step(60)
-	_check("dive releases", player.state != Player.State.GRAPPLE_DIVE,
-		"state=%s" % player.state_name())
+	# --- the swing. Everything here is about there being NO speed cap, because
+	# capping it is what killed the mechanic twice. See Player._do_swing.
+	var anchor := level.get_node("HubPull") as GrapplePoint
+	var anchor_at := anchor.global_position
+
+	# Hooking from level with the anchor gives a horizontal rope, so the whole
+	# swing happens in open air above the hub rather than scraping the floor.
+	_place(anchor_at + Vector3(10.5, -0.2, 0))
+	await _step(2)
+	_start_swing(anchor)
+	_check("hooking an anchor starts a swing",
+		player.state == Player.State.SWING
+			and absf(player._rope_length - 10.5) < 0.4,
+		"state=%s rope=%.2f" % [player.state_name(), player._rope_length])
+
+	# Swing down through the arc under gravity alone and watch the speed. A
+	# pendulum dropping 10.5 m should reach about sqrt(2*g*h) = 23 m/s, which is
+	# three times `max_speed` — if anything is quietly clamping, this is the
+	# check that notices.
+	var peak_speed := 0.0
+	var worst_radius_error := 0.0
+	for i in 90:
+		await _step(1)
+		if player.state != Player.State.SWING:
+			break
+		peak_speed = maxf(peak_speed, player.velocity.length())
+		if player._rope_taut:
+			var radius := player.global_position.distance_to(anchor.global_position)
+			worst_radius_error = maxf(worst_radius_error, absf(radius - player._rope_length))
+	_check("a swing is not speed capped", peak_speed > player.max_speed * 2.5,
+		"peak=%.1f m/s vs max_speed %.1f" % [peak_speed, player.max_speed])
+
+	# The rope is enforced as an exact position correction after the move, not as
+	# a spring before it. A spring is always a frame behind and buzzes at 60 Hz,
+	# which is what made the previous swing feel rough. Exact means exact.
+	_check("the rope holds an exact radius", worst_radius_error < 0.15,
+		"worst error=%.3f m" % worst_radius_error)
+
+	# Releasing keeps every bit of it. This is the payoff, and it is also what
+	# `keep_momentum` in _apply_horizontal protects: without that, the air
+	# control brakes a fast release back to walking pace within half a second.
+	var speed_before_release := Vector2(player.velocity.x, player.velocity.z).length()
 	_release_all()
+	await _step(20)
+	var speed_after_release := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("releasing keeps the swing's momentum",
+		player.state != Player.State.SWING
+			and speed_after_release > speed_before_release * 0.9,
+		"%.1f -> %.1f m/s over 20 frames" % [speed_before_release, speed_after_release])
+	await _step(40)
+
+	# Pumping. Started from rest at the bottom of the arc, where the rope is
+	# vertical and so EVERY horizontal direction is tangential to it — which
+	# makes this work whichever way the camera happens to be pointing.
+	var pumped := await _pump_from_rest(anchor, true)
+	var unpumped := await _pump_from_rest(anchor, false)
+	_check("pumping accelerates past max_speed",
+		pumped > unpumped + 1.0 and pumped > player.max_speed,
+		"pumped=%.1f unpumped=%.1f max_speed=%.1f"
+			% [pumped, unpumped, player.max_speed])
+
+	# The rope only pulls, it never pushes. Fired straight up from below the
+	# anchor, the rope goes slack and the player flies clean over the top of it
+	# instead of being pinned underneath — being pinned below the anchor was half
+	# of what made the old swing feel like a cage.
+	# Offset sideways, not straight below: fired directly at the anchor the
+	# player reaches it and gets the arrival bounce instead, which is a different
+	# check. 6 m to the side means the closest approach is 6 m, well clear of
+	# `swing_min_rope`, and the rope catches again 8 m above the anchor.
+	_place(anchor_at + Vector3(6, -8, 0))
+	await _step(2)
+	_start_swing(anchor)
+	player.velocity = Vector3(0, 26, 0)
+	var highest := player.global_position.y
+	for i in 100:
+		await _step(1)
+		if player.state != Player.State.SWING:
+			break
+		highest = maxf(highest, player.global_position.y)
+	_check("the rope is one-sided, so you can rise above the anchor",
+		highest > anchor_at.y + 1.0,
+		"reached y=%.1f vs anchor y=%.1f" % [highest, anchor_at.y])
+	_release_all()
+	await _step(20)
+
+	# Reeling in. Trading rope for speed is the main exploit the swing offers, so
+	# the rope length has to actually be the player's to change.
+	_place(anchor_at + Vector3(12, -1, 0))
+	await _step(2)
+	_start_swing(anchor)
+	var rope_before := player._rope_length
+	Input.action_press("grab")
+	await _step(20)
+	var rope_after := player._rope_length
+	_check("reeling in shortens the rope", rope_after < rope_before - 2.0,
+		"%.1f -> %.1f m" % [rope_before, rope_after])
+
+	# Reel all the way in and you arrive at the anchor, which bounces you off it.
+	var bounce_vy := 0.0
+	for i in 200:
+		await _step(1)
+		if player.state != Player.State.SWING:
+			bounce_vy = player.velocity.y
+			break
+	var want_bounce := sqrt(2.0 * player.gravity_rise
+		* player.jump_height * player.anchor_bounce_height_scale)
+	_check("reeling all the way in bounces off the anchor",
+		bounce_vy >= want_bounce - 0.6,
+		"vy=%.2f, at least %.2f expected" % [bounce_vy, want_bounce])
+	_release_all()
+	await _step(30)
+
+	# Jumping off adds a jump ON TOP of the swing rather than replacing it, which
+	# is where the absurd long jumps come from.
+	_place(anchor_at + Vector3(10.5, -0.2, 0))
+	await _step(2)
+	_start_swing(anchor)
+	await _step(45)
+
+	# Sampled on the exact frame the swing ends, not after a fixed wait: a press
+	# does not necessarily land before the same frame's _physics_process, and
+	# waiting instead lets gravity eat the gain being measured.
+	Input.action_press("jump")
+	var gained := 0.0
+	var flat_on_rope := 0.0
+	var flat_after := 0.0
+	for i in 10:
+		var vy_on_rope := player.velocity.y
+		var flat_now := Vector2(player.velocity.x, player.velocity.z).length()
+		await _step(1)
+		if player.state != Player.State.SWING:
+			gained = player.velocity.y - vy_on_rope
+			flat_on_rope = flat_now
+			flat_after = Vector2(player.velocity.x, player.velocity.z).length()
+			break
+	Input.action_release("jump")
+	# "Adds on top" is measured as the vertical GAIN plus the horizontal speed
+	# surviving, not as total speed going up: part way down the arc the swing is
+	# travelling downward, so an upward impulse legitimately makes the magnitude
+	# of the velocity smaller while being strictly better to have.
+	_check("jumping off adds a jump on top of the swing",
+		player.state != Player.State.SWING
+			and gained > player._jump_velocity() * 0.85
+			and flat_after > flat_on_rope * 0.9,
+		"vy +%.1f (a jump is %.1f), horizontal %.1f -> %.1f"
+			% [gained, player._jump_velocity(), flat_on_rope, flat_after])
+	_release_all()
+	await _step(40)
 
 	# --- the tongue on an ENEMY: the enemy comes to the player, not the other
 	# way round, and ends up carried. This is the half that makes it a Yoshi
 	# tongue rather than a grapple.
+	# Spawned, not borrowed from the level. The swing checks above fly the player
+	# all over the hub and drop them from the anchor's height, which lands on and
+	# kills the hub walkers often enough that reading one here failed with "Node
+	# not found: HubWalkerB". Nothing placed in the level survives this suite
+	# reliably — see the note on the stomp check.
 	_release_all()
 	await _step(10)
-	var prey := level.get_node("HubWalkerB") as Node3D
+	var prey := WALKER.instantiate() as Node3D
+	level.add_child(prey)
+	prey.global_position = Vector3(-10, 0.2, 8)
+	await _step(10)
 	var prey_start := prey.global_position
 	_place(prey_start + Vector3(0, 0.6, 7))
 	await _step(40)
@@ -353,34 +535,6 @@ func _run() -> void:
 	_check("grapple throws what you are carrying", player.abilities.carried == null,
 		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
 	await _step(60)
-
-	# --- the tongue on an ANCHOR still pulls the player to it.
-	_release_all()
-	await _step(10)
-	var anchor := level.get_node("HubPull") as GrapplePoint
-	_place(Vector3(0, 2, 0))
-	await _step(10)
-	player._grapple = anchor
-	player._set_state(Player.State.GRAPPLE_DIVE)
-	await _step(4)
-	_check("tongue pulls the player to an anchor", player.velocity.length() > 5.0,
-		"speed=%.2f" % player.velocity.length())
-
-	# Arriving bounces the player to jump height. Polled frame by frame rather
-	# than read after a fixed wait, because gravity starts eating the bounce the
-	# very next frame — waiting 40 frames and reading vy measures nothing.
-	var arrival_vy := 0.0
-	for i in 150:
-		await _step(1)
-		if player.state != Player.State.GRAPPLE_DIVE:
-			arrival_vy = player.velocity.y
-			break
-	var want_bounce := sqrt(2.0 * player.gravity_rise
-		* player.jump_height * player.dive_bounce_height_scale)
-	_check("anchor bounce reaches jump height", absf(arrival_vy - want_bounce) < 0.6,
-		"vy=%.2f expected=%.2f" % [arrival_vy, want_bounce])
-	await _step(80)
-	_release_all()
 
 	# --- a thrown object is a homing, ricocheting rocket (thrown_flight.gd).
 	#

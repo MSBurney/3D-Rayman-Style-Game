@@ -12,7 +12,7 @@ tell when it works.
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 37).
+If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 42).
 
 ---
 
@@ -62,7 +62,7 @@ entering `WALL_RUN` and stops on leaving, rather than one blip per frame.
 `hud.gd` already reads `player.debug_info()` for the F3 overlay. Show a small, always-visible label
 naming the current state.
 
-*Done when:* the label reads GROUND / AIR / SLAM / GRAPPLE_DIVE etc. as you move, without F3.
+*Done when:* the label reads GROUND / AIR / SLAM / SWING etc. as you move, without F3.
 
 ---
 
@@ -112,7 +112,7 @@ whether it makes aiming better or just noisier.
 
 ### 8. Second level
 Duplicate `test_level.tscn` and build something that demands *combining* moves — a gap you can only
-clear by tongue-pulling to an anchor, slamming for height, and catching a ledge.
+clear by swinging off an anchor, slamming for height, and catching a ledge.
 
 That combination is the whole point of the project. Read the design rule at the top of `player.gd`.
 

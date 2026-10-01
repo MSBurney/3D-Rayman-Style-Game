@@ -41,9 +41,13 @@ var _tongue_time: float = 0.0
 @onready var _player: Player = get_parent() as Player
 
 
-func handle_input(delta: float) -> void:
+## `allow_grab` is false while the player is swinging, because the grab button
+## doubles as the reel there. Passed in rather than checked here so that player.gd
+## stays the one place that knows what the buttons currently mean.
+func handle_input(delta: float, allow_grab: bool = true) -> void:
 	_tick_tongue(delta)
-	_handle_grab()
+	if allow_grab:
+		_handle_grab()
 
 
 ## Starts dragging an enemy toward the player. Targets that cannot be picked up
