@@ -1,30 +1,5 @@
 [gd_scene format=3 uid="uid://sgwr4vku1sa8"]
 
-; A scene built for ONE question: does weight-and-momentum feel right?
-;
-; Deliberately contains no grapple anchors. An earlier round of this project was
-; spent judging one grapple style while actually playing another, and a scene
-; with every mechanic in it cannot answer a question about one of them.
-;
-; The layout is a single line along Z so it is easy to reason about:
-;
-;    z -65..-55   start shelf, 9.1 m up
-;    z -55..-12   GENTLE RAMP, 12 degrees  -> builds speed, but you can stand on it
-;    z -12..+12   plaza, y=0               -> enemies, kegs, room to turn around
-;    z +12..+24   THE GAP                  -> 12 m, only crossable with ramp speed
-;                                              (three crumbling slabs bridge it,
-;                                               and your own weight breaks them)
-;    z +24..+42   landing shelf            -> the reward, with a checkpoint
-;
-;    x +15..+36   STEEP RAMP, 30 degrees   -> too steep to stand on, you slide
-;    x +36..+48   high shelf, 12 m up      -> slam back down from here
-;
-; The two ramp angles are chosen against the thresholds that fall out of
-; `slope_gravity` (see the Weight group in player.gd): 12 degrees is past the
-; point where a slope beats `momentum_friction`, so it builds speed, but short of
-; the ~27 degrees where it beats `deceleration`. 30 degrees is past both, so you
-; cannot stand still on it at all.
-
 [ext_resource type="PackedScene" uid="uid://4nl2p1prnqmb" path="res://scenes/props/checkpoint.tscn" id="cp"]
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
 [ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
@@ -54,126 +29,138 @@ albedo_color = Color(0.46, 0.6, 0.4, 1)
 [sub_resource type="StandardMaterial3D" id="MatRamp"]
 albedo_color = Color(0.82, 0.68, 0.36, 1)
 
-[sub_resource type="StandardMaterial3D" id="MatSteep"]
-albedo_color = Color(0.86, 0.5, 0.32, 1)
-
 [sub_resource type="StandardMaterial3D" id="MatShelf"]
 albedo_color = Color(0.6, 0.56, 0.66, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatSteep"]
+albedo_color = Color(0.86, 0.5, 0.32, 1)
 
 [sub_resource type="BoxShape3D" id="ShapePit"]
 size = Vector3(500, 100, 500)
 
-[node name="MomentumPlayground" type="Node3D"]
+[node name="MomentumPlayground" type="Node3D" unique_id=1984197559]
 
-[node name="Environment" type="WorldEnvironment" parent="."]
+[node name="Environment" type="WorldEnvironment" parent="." unique_id=1760119430]
 environment = SubResource("Env")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1186927395]
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 40, 0)
 shadow_enabled = true
 shadow_bias = 0.2
 shadow_normal_bias = 3.0
 
-[node name="Plaza" type="CSGBox3D" parent="."]
+[node name="Plaza" type="CSGBox3D" parent="." unique_id=1127727881]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0)
 use_collision = true
 size = Vector3(30, 2, 24)
 material = SubResource("MatFlat")
 
-[node name="GentleRamp" type="CSGBox3D" parent="."]
+[node name="GentleRamp" type="CSGBox3D" parent="." unique_id=137112579]
 transform = Transform3D(1, 0, 0, 0, 0.97815, -0.20791, 0, 0.20791, 0.97815, 0, 3.5959, -33.727)
 use_collision = true
 size = Vector3(14, 2, 44)
 material = SubResource("MatRamp")
 
-[node name="StartShelf" type="CSGBox3D" parent="."]
+[node name="StartShelf" type="CSGBox3D" parent="." unique_id=1808180973]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8.148, -60)
 use_collision = true
 size = Vector3(14, 2, 10)
 material = SubResource("MatShelf")
 
-[node name="SteepRamp" type="CSGBox3D" parent="."]
+[node name="SteepRamp" type="CSGBox3D" parent="." unique_id=1497420619]
 transform = Transform3D(0.86603, -0.5, 0, 0.5, 0.86603, 0, 0, 0, 1, 25.892, 5.134, 0)
 use_collision = true
 size = Vector3(24, 2, 14)
 material = SubResource("MatSteep")
 
-[node name="HighShelf" type="CSGBox3D" parent="."]
+[node name="SteepRamp2" type="CSGBox3D" parent="." unique_id=764018829]
+transform = Transform3D(0.8660288, 0.50000197, 0, -0.50000197, 0.8660288, 0, 0, 0, 1, -25.714691, 5.134, 0)
+use_collision = true
+size = Vector3(24, 2, 14)
+material = SubResource("MatSteep")
+
+[node name="HighShelf" type="CSGBox3D" parent="." unique_id=1444406521]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 41.8, 11, 0)
 use_collision = true
 size = Vector3(12, 2, 14)
 material = SubResource("MatShelf")
 
-[node name="LandingShelf" type="CSGBox3D" parent="."]
+[node name="HighShelf2" type="CSGBox3D" parent="." unique_id=427151520]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -41.58813, 11, 0)
+use_collision = true
+size = Vector3(12, 2, 14)
+material = SubResource("MatShelf")
+
+[node name="LandingShelf" type="CSGBox3D" parent="." unique_id=811139014]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 33)
 use_collision = true
 size = Vector3(30, 2, 18)
 material = SubResource("MatFlat")
 
-[node name="Catwalk" type="CSGBox3D" parent="."]
+[node name="Catwalk" type="CSGBox3D" parent="." unique_id=950680946]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13.5, -1, 18)
 use_collision = true
 size = Vector3(3, 2, 12)
 material = SubResource("MatShelf")
 
-[node name="SlabA" parent="." instance=ExtResource("crumb")]
+[node name="SlabA" parent="." unique_id=841097212 instance=ExtResource("crumb")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 14)
 
-[node name="SlabB" parent="." instance=ExtResource("crumb")]
+[node name="SlabB" parent="." unique_id=579827725 instance=ExtResource("crumb")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 18)
 
-[node name="SlabC" parent="." instance=ExtResource("crumb")]
+[node name="SlabC" parent="." unique_id=632895595 instance=ExtResource("crumb")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 22)
 
-[node name="StartCheckpoint" parent="." instance=ExtResource("cp")]
+[node name="StartCheckpoint" parent="." unique_id=693631459 instance=ExtResource("cp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9.5, -59)
 
-[node name="PlazaCheckpoint" parent="." instance=ExtResource("cp")]
+[node name="PlazaCheckpoint" parent="." unique_id=1180155193 instance=ExtResource("cp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0.4, -8)
 
-[node name="LandingCheckpoint" parent="." instance=ExtResource("cp")]
+[node name="LandingCheckpoint" parent="." unique_id=255203356 instance=ExtResource("cp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 33)
 
-[node name="HighCheckpoint" parent="." instance=ExtResource("cp")]
+[node name="HighCheckpoint" parent="." unique_id=1905164014 instance=ExtResource("cp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 41, 12.4, 0)
 
-[node name="WalkerA" parent="." instance=ExtResource("walker")]
+[node name="WalkerA" parent="." unique_id=1667999314 instance=ExtResource("walker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.1, 4)
 patrol_distance = 5.0
 
-[node name="WalkerB" parent="." instance=ExtResource("walker")]
+[node name="WalkerB" parent="." unique_id=293240718 instance=ExtResource("walker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.1, 4)
 patrol_distance = 5.0
 
-[node name="WalkerC" parent="." instance=ExtResource("walker")]
+[node name="WalkerC" parent="." unique_id=2004185474 instance=ExtResource("walker")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 36)
 patrol_distance = 6.0
 
-[node name="KegA" parent="." instance=ExtResource("keg")]
+[node name="KegA" parent="." unique_id=1741840943 instance=ExtResource("keg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 0.6, -4)
 
-[node name="KegB" parent="." instance=ExtResource("keg")]
+[node name="KegB" parent="." unique_id=1153256922 instance=ExtResource("keg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 0.6, -4)
 
-[node name="LumRampA" parent="." instance=ExtResource("lum")]
+[node name="LumRampA" parent="." unique_id=2128796835 instance=ExtResource("lum")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7.4, -47)
 
-[node name="LumRampB" parent="." instance=ExtResource("lum")]
+[node name="LumRampB" parent="." unique_id=656946497 instance=ExtResource("lum")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.3, -37)
 
-[node name="LumRampC" parent="." instance=ExtResource("lum")]
+[node name="LumRampC" parent="." unique_id=127636925 instance=ExtResource("lum")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.2, -27)
 
-[node name="LumGapA" parent="." instance=ExtResource("lum")]
+[node name="LumGapA" parent="." unique_id=432541994 instance=ExtResource("lum")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.2, 16)
 
-[node name="LumGapB" parent="." instance=ExtResource("lum")]
+[node name="LumGapB" parent="." unique_id=750782103 instance=ExtResource("lum")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.6, 20)
 
-[node name="LumLanding" parent="." instance=ExtResource("lum")]
+[node name="LumLanding" parent="." unique_id=906679622 instance=ExtResource("lum")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 30)
 
-[node name="KillPlane" type="Area3D" parent="."]
+[node name="KillPlane" type="Area3D" parent="." unique_id=1991189429]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -80, 0)
 collision_layer = 16
 collision_mask = 2
@@ -181,5 +168,5 @@ monitorable = false
 script = ExtResource("haz")
 instant_kill = true
 
-[node name="Shape" type="CollisionShape3D" parent="KillPlane"]
+[node name="Shape" type="CollisionShape3D" parent="KillPlane" unique_id=2029243725]
 shape = SubResource("ShapePit")

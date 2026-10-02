@@ -258,7 +258,7 @@ table. Run it after changing anything in `player.gd`:
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-48 checks, a few seconds. It has already caught several bugs that looked fine in play, including
+53 checks, a few seconds. It has already caught several bugs that looked fine in play, including
 the grapple problem above. If you add an ability, add a check for it in
 `tests/moveset_smoke_test.gd` — copy an existing one, they are all the same shape.
 

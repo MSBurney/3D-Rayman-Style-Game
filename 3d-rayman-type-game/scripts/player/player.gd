@@ -15,7 +15,7 @@ extends CharacterBody3D
 ##   3. var declarations  — internal bookkeeping (timers, the current rope, etc.)
 ##   4. _physics_process  — the heartbeat. Read this to see the order of events.
 ##   5. _do_<state>()     — one function per state. Want to change the wall run?
-##                          Go to _do_wall_run(). That is the whole trick.
+##                          Go to _do_wall_slide(). That is the whole trick.
 ##   6. helpers           — wall/ledge transitions, damage, plumbing
 ##
 ## ─── THE REST OF THE PLAYER ──────────────────────────────────────────────────
@@ -69,11 +69,21 @@ extends CharacterBody3D
 
 enum State {
 	GROUND,
+	## Ducked and still. The gateway to three moves rather than a move itself:
+	## jump out of it for a backflip, build speed for a slide, and it is where
+	## a ground pound lands.
+	CROUCH,
+	## Ducked and moving — the forward slide. Almost frictionless on purpose, so
+	## slopes do the work.
+	SLIDE,
 	AIR,
-	WALL_RUN,
+	## Clinging to a wall, Mario-style, waiting for a wall kick. There used to be
+	## a WALL_RUN as well; see the wall section for why it went.
 	WALL_SLIDE,
 	LEDGE_HANG,
 	SWING,
+	## The ground pound. Still called SLAM throughout — same move, and renaming
+	## eleven exports would have been churn for nothing.
 	SLAM,
 	HURT,
 	DEAD,
@@ -120,18 +130,63 @@ signal state_changed(from: State, to: State)
 @export var coyote_time: float = 0.12
 @export var jump_buffer: float = 0.14
 
+@export_subgroup("Jump chain")
+## Mario's double and triple jump. Land and jump again inside this window and the
+## next jump is the bigger one; let the window lapse and you are back to an
+## ordinary jump. This is the one number that decides whether chaining feels
+## generous or fiddly.
+@export var jump_chain_window: float = 0.22
+## Height of the second jump in a chain, as a multiple of `jump_height`.
+@export var double_jump_scale: float = 1.35
+## ...and the third, which is the payoff.
+@export var triple_jump_scale: float = 1.85
+## A triple jump needs you to actually be going somewhere, as Mario's does. Stops
+## the biggest jump in the game being available while standing on the spot.
+@export var triple_jump_min_speed: float = 3.0
+
+@export_subgroup("Crouch moves")
+## Below this speed, crouching ducks you on the spot; at or above it you slide.
+@export var slide_min_speed: float = 3.5
+## A slide ends when it drops below this, leaving you crouched.
+@export var slide_stop_speed: float = 1.2
+## Friction while sliding. Note what it has to beat is not `deceleration` but
+## `momentum_friction` (3.5), which already preserves ground momentum above
+## `max_speed` — so a slide set anywhere near that is barely different from just
+## running, which is how this started out at 2.0 and read as nothing. Far lower
+## than both, which is the point: a
+## slide is for keeping speed and for letting a slope give you more.
+@export var slide_friction: float = 1.0
+## How much of the stick still steers a slide. Low — it is a commitment.
+@export_range(0.0, 1.0) var slide_control: float = 0.12
+## Backflip: crouch standing still, then jump. Goes up a long way and backwards.
+@export var backflip_height: float = 4.2
+@export var backflip_push: float = 5.0
+## Long jump: crouch while running, then jump. Low and very long.
+@export var long_jump_height: float = 1.5
+@export var long_jump_push: float = 17.0
+## Side flip: at speed, flick the stick back the way you came and jump.
+##
+## Triggered on the INPUT reversing, not on the velocity reversing. On a heavy
+## character the velocity cannot turn round quickly by design, so waiting for it
+## would mean the move never fires.
+@export var side_flip_height: float = 3.6
+@export var side_flip_push: float = 6.0
+## How opposed the stick has to be to count, as a dot product against current
+## travel. -0.5 is about a 120 degree flick.
+@export var side_flip_dot: float = -0.5
+
 @export_group("Wall moves")
-@export var wall_run_speed: float = 9.0
-@export var wall_run_time: float = 1.1
-## Gravity multiplier while wall running. Slightly above 0 so it always decays.
-@export_range(0.0, 1.0) var wall_run_gravity_scale: float = 0.12
-## Minimum horizontal speed needed to start a run rather than a slide.
-@export var wall_run_min_speed: float = 4.5
+## Mario's wall kick. There used to be a Rayman-style wall RUN here as well —
+## run along a wall and it carries you — and it was removed when the moveset went
+## Mario, because Mario has no equivalent and the two read as the same surface
+## doing two different things.
 @export var wall_slide_speed: float = 4.0
-@export var wall_jump_up: float = 9.0
-@export var wall_jump_push: float = 7.5
+@export var wall_jump_up: float = 10.5
+@export var wall_jump_push: float = 8.0
 ## Input is ignored briefly after a wall jump so it actually leaves the wall.
 @export var wall_jump_lock: float = 0.16
+## A wall only catches you if its face is this close to vertical.
+@export var wall_cling_max_tilt: float = 0.4
 
 @export_group("Ledge grab")
 ## Note: how a ledge is *detected* (reach, height band) is tuned on the
@@ -190,14 +245,18 @@ signal state_changed(from: State, to: State)
 @export var anchor_bounce_keep: float = 0.6
 
 @export_group("Slam")
-## Jump in mid-air to drive yourself into the ground. The character is heavy, so
-## this is the move that turns that weight into something useful: height becomes
-## stored energy, and the slam spends it on damage, a shockwave and a bounce.
+## The GROUND POUND. Crouch in mid-air to drive yourself into the floor.
 ##
-## Everything below scales with how far you fell, measured from the highest
-## point you reached since last touching the ground. A short hop does very
-## little; a drop from a tower does a lot. That is what makes height a resource
-## worth going and fetching rather than just a place you happen to be.
+## It used to be on jump-in-air and it used to bounce you back up to jump height,
+## with every third one in a chain throwing you 50% higher. All of that is gone:
+## the bounce conflicted with Mario's double and triple jump, which need the jump
+## button free in mid-air. A pound now simply ends on the ground, as Mario's does.
+##
+## What was kept is the fall-distance scaling, because that is the one part that
+## carried the weight-is-a-resource idea: everything below scales with how far
+## you fell, measured from the highest point since you last touched the ground. A
+## short hop does very little; a drop from a tower does a lot. That is what makes
+## height a resource worth going and fetching rather than just somewhere you are.
 @export var slam_speed: float = 30.0
 ## The fall that counts as "full power". Longer falls do not add more.
 @export var slam_power_height: float = 12.0
@@ -209,20 +268,9 @@ signal state_changed(from: State, to: State)
 @export var slam_radius_max: float = 7.0
 ## How hard the shockwave shoves enemies away from the impact.
 @export var slam_knockback: float = 9.0
-## Rebound height, as a multiple of a normal jump. 1.0 means a slam always
-## returns you to exactly jump height — you never lose ground by slamming, but
-## you do not gain any either. The gain comes from the combo below.
-@export var slam_bounce_height_scale: float = 1.0
-
-@export_subgroup("Combo")
-## Every Nth slam in an unbroken chain is the big one. Landing normally — that
-## is, touching the ground without slamming — resets the count.
-@export var slam_combo_interval: int = 3
-## Rebound of that big slam, again as a multiple of jump height.
-@export var slam_combo_bounce_scale: float = 1.5
-## Its shockwave is widened by this, on top of the usual fall scaling.
-@export var slam_combo_radius_scale: float = 1.6
-@export var slam_combo_damage_bonus: int = 2
+## How long you are stuck on the floor after landing one. Mario's pound has a
+## recovery; without one you can cancel straight out of it and it reads weightless.
+@export var slam_recover_time: float = 0.22
 ## Horizontal speed kept during the drop. Low on purpose — committing to a slam
 ## should mean committing to where it lands.
 @export_range(0.0, 1.0) var slam_air_control: float = 0.15
@@ -287,9 +335,15 @@ var _coyote: float = 0.0
 var _jump_buffered: float = 0.0
 var _jumping: bool = false
 var _jump_released: bool = true
-var _wall_time: float = 0.0
+## How many jumps of the current chain are already behind us: 0 means the next
+## one is an ordinary jump, 1 a double, 2 a triple. Read by the HUD.
+var jump_chain: int = 0
+## How long the chain stays alive now that we are back on the ground. Set on
+## landing, counted down while grounded, and when it runs out the chain is lost.
+var _chain_window: float = 0.0
+## Stuck-on-the-floor time left after a ground pound.
+var _slam_recover: float = 0.0
 var _wall_normal: Vector3 = Vector3.ZERO
-var _wall_dir: Vector3 = Vector3.ZERO
 var _wall_lock: float = 0.0
 var _ledge_lock: float = 0.0
 var _grapple: Node3D = null
@@ -307,8 +361,8 @@ var _pre_move_vy: float = 0.0
 ## Highest point reached since last touching the ground. The slam measures its
 ## power against this, so a fall counts from wherever you actually came down from.
 var _air_peak_y: float = 0.0
-## How many slams deep the current unbroken chain is. Read by the HUD.
-var slam_combo: int = 0
+
+
 
 @onready var rig: PlayerCamera = $CameraRig
 @onready var health: HealthComponent = $Health
@@ -343,8 +397,9 @@ func _physics_process(delta: float) -> void:
 	# To change how an ability feels, edit its _do_ function below.
 	match state:
 		State.GROUND: _do_ground(delta)
+		State.CROUCH: _do_crouch(delta)
+		State.SLIDE: _do_slide(delta)
 		State.AIR: _do_air(delta)
-		State.WALL_RUN: _do_wall_run(delta)
 		State.WALL_SLIDE: _do_wall_slide(delta)
 		State.LEDGE_HANG: _do_ledge_hang(delta)
 		State.SWING: _do_swing(delta)
@@ -394,6 +449,15 @@ func _tick_timers(delta: float) -> void:
 	_ledge_lock -= delta
 	_grapple_lock -= delta
 	_grapple_buffered -= delta
+	_slam_recover -= delta
+
+	# The jump chain only decays on the ground. Let the window lapse without
+	# jumping again and the chain is lost, which is what stops the triple jump
+	# from being available any time you happen to touch down.
+	if is_on_floor():
+		_chain_window -= delta
+		if _chain_window <= 0.0:
+			jump_chain = 0
 
 
 func _read_input() -> void:
@@ -508,6 +572,14 @@ func _jump_velocity() -> float:
 
 ## Jumps only if a press is waiting in the buffer. Returns whether it jumped, so
 ## callers can tell whether to change state.
+##
+## Handles Mario's jump chain: land and jump again quickly and you get the double
+## jump, then the triple. `jump_chain` counts how many are already behind you
+## and `_chain_window` is how long the chain stays alive once you are grounded.
+##
+## Also handles the side flip, because it is a jump too — just one that throws
+## you the other way. Keeping both here means every exit from GROUND goes through
+## one function and no state has to know the difference.
 func _try_jump() -> bool:
 	if _jump_buffered <= 0.0:
 		return false
@@ -515,9 +587,90 @@ func _try_jump() -> bool:
 	_coyote = 0.0
 	_jumping = true
 	_jump_released = false
-	velocity.y = _jump_velocity()
+
+	if _wants_side_flip():
+		_side_flip()
+		return true
+
+	var height := jump_height
+	match jump_chain:
+		1:
+			height = jump_height * double_jump_scale
+		2:
+			# A triple jump has to be earned by going somewhere, as Mario's is.
+			# Too slow and the chain quietly starts again from an ordinary jump.
+			if _flat_speed() >= triple_jump_min_speed:
+				height = jump_height * triple_jump_scale
+			else:
+				jump_chain = 0
+	jump_chain = (jump_chain + 1) % 3
+
+	velocity.y = sqrt(2.0 * gravity_rise * height)
 	play_sfx(sfx_jump)
 	return true
+
+
+func _flat_speed() -> float:
+	return Vector2(velocity.x, velocity.z).length()
+
+
+## True when the stick is pointed back the way we came while we still have speed.
+## Read before the chain, so a side flip never consumes a double jump.
+func _wants_side_flip() -> bool:
+	var speed := _flat_speed()
+	if speed < slide_min_speed or wish_dir.length_squared() < 0.04:
+		return false
+	var travel := Vector3(velocity.x, 0.0, velocity.z) / speed
+	return wish_dir.normalized().dot(travel) <= side_flip_dot
+
+
+## Mario's side somersault: straight up, and off the way you are now pointing.
+func _side_flip() -> void:
+	var away := wish_dir.normalized() * side_flip_push
+	velocity.x = away.x
+	velocity.z = away.z
+	velocity.y = sqrt(2.0 * gravity_rise * side_flip_height)
+	facing = wish_dir.normalized()
+	# Not part of the chain: a side flip is its own answer to being at speed, and
+	# letting it feed the triple jump would make the biggest jump too easy.
+	jump_chain = 0
+	play_sfx(sfx_jump)
+
+
+## Backflip — crouch still, then jump. High, and backwards.
+func _backflip() -> void:
+	_jump_buffered = 0.0
+	_jumping = true
+	_jump_released = false
+	var back := -_flatten(facing) * backflip_push
+	velocity.x = back.x
+	velocity.z = back.z
+	velocity.y = sqrt(2.0 * gravity_rise * backflip_height)
+	jump_chain = 0
+	play_sfx(sfx_jump)
+	_set_state(State.AIR)
+
+
+## Long jump — crouch at a run, then jump. Low, and a very long way.
+##
+## The push is added to the speed already there rather than replacing it, so a
+## long jump out of a fast slide down a ramp goes further than one off the flat.
+## That is the whole reason this move and the slope system belong in the same
+## game.
+func _long_jump() -> void:
+	_jump_buffered = 0.0
+	_jumping = true
+	_jump_released = false
+	var forward := _flatten(facing)
+	if forward == Vector3.ZERO:
+		forward = _flatten(velocity)
+	var flat := Vector3(velocity.x, 0.0, velocity.z) + forward * long_jump_push
+	velocity.x = flat.x
+	velocity.z = flat.z
+	velocity.y = sqrt(2.0 * gravity_rise * long_jump_height)
+	jump_chain = 0
+	play_sfx(sfx_jump)
+	_set_state(State.AIR)
 
 
 # ------------------------------------------------------------------------ states
@@ -534,6 +687,11 @@ func _do_ground(delta: float) -> void:
 	if _try_jump():
 		_set_state(State.AIR)
 		return
+	# Crouching forks on how fast you are going, which is how one button covers
+	# four moves: duck on the spot, or slide.
+	if Input.is_action_pressed(&"crouch"):
+		_set_state(State.SLIDE if _flat_speed() >= slide_min_speed else State.CROUCH)
+		return
 	# The grapple is usable from standing too, now that it has its own button.
 	if _try_grapple():
 		return
@@ -541,9 +699,70 @@ func _do_ground(delta: float) -> void:
 		_set_state(State.AIR)
 
 
+## Ducked and still. A junction rather than a move: jump out of it to backflip,
+## get moving to slide, let go to stand up.
+func _do_crouch(delta: float) -> void:
+	_slope_pull(delta)
+	# No stick authority at all while ducked, so a crouch is a real stop. The
+	# slope can still drag you, which is what turns a steep ramp into a slide.
+	var flat := Vector3(velocity.x, 0.0, velocity.z).move_toward(
+		Vector3.ZERO, deceleration * delta)
+	velocity.x = flat.x
+	velocity.z = flat.z
+	velocity.y = minf(velocity.y, 0.0)
+
+	# Recovering from a ground pound: nothing gets you out of it early. A pound
+	# you can cancel instantly out of has no weight to it.
+	if _slam_recover > 0.0:
+		_jump_buffered = 0.0
+		return
+
+	if _jump_buffered > 0.0:
+		_backflip()
+		return
+	if not Input.is_action_pressed(&"crouch"):
+		_set_state(State.GROUND)
+		return
+	if _flat_speed() >= slide_min_speed:
+		_set_state(State.SLIDE)
+		return
+	if not is_on_floor():
+		_set_state(State.AIR)
+
+
+## The forward slide. Nearly frictionless on purpose: the slide is for keeping
+## the speed you have and letting a slope add to it, so the only thing taking
+## speed off you is `slide_friction`, which is a sixth of normal braking.
+func _do_slide(delta: float) -> void:
+	_slope_pull(delta)
+	var flat := Vector3(velocity.x, 0.0, velocity.z)
+	var steer := wish_dir * max_speed
+	# Steering is weak and never braking: a slide you can stop out of is just
+	# walking.
+	if wish_dir.length_squared() > 0.04:
+		flat = flat.move_toward(
+			steer.normalized() * flat.length(), acceleration * slide_control * delta)
+	flat = flat.move_toward(Vector3.ZERO, slide_friction * delta)
+	velocity.x = flat.x
+	velocity.z = flat.z
+	velocity.y = minf(velocity.y, 0.0)
+
+	if _jump_buffered > 0.0:
+		_long_jump()
+		return
+	if not Input.is_action_pressed(&"crouch"):
+		_set_state(State.GROUND)
+		return
+	if _flat_speed() < slide_stop_speed:
+		_set_state(State.CROUCH)
+		return
+	if not is_on_floor():
+		_set_state(State.AIR)
+
+
 func _do_air(delta: float) -> void:
 	if _wall_lock <= 0.0:
-		# keep_momentum: speed brought in from a swing or a slam bounce is not
+		# keep_momentum: speed brought in from a slope or a long jump is not
 		# braked away by the air control. See _apply_horizontal.
 		_apply_horizontal(delta, 1.0, air_control, true)
 	_apply_gravity(delta)
@@ -552,14 +771,14 @@ func _do_air(delta: float) -> void:
 	if _coyote > 0.0 and _try_jump():
 		return
 
-	if _try_grapple():
-		return
-
-	# Jump in mid-air drives you into the ground. Available whether you jumped
-	# or just walked off something, so any height at all can be spent.
-	if _jump_buffered > 0.0:
+	# Crouch in mid-air is the ground pound. It used to be jump-in-air, which the
+	# double and triple jump now need.
+	if Input.is_action_just_pressed(&"crouch"):
 		_jump_buffered = 0.0
 		_set_state(State.SLAM)
+		return
+
+	if _try_grapple():
 		return
 
 	if _ledge_lock <= 0.0 and velocity.y <= 0.5 and _find_ledge():
@@ -583,24 +802,19 @@ func slam_power() -> float:
 	return clampf(fall / maxf(slam_power_height, 0.01), 0.0, 1.0)
 
 
-## The landing: shockwave out, then rebound up.
+## The landing: shockwave out, and you stay down.
+##
+## No rebound and no combo count. Both were removed when the moveset went Mario:
+## the bounce needed the jump button in mid-air, which the double and triple jump
+## now own, and a pound that launches you is not a pound.
 func _slam_impact() -> void:
 	var power := slam_power()
 	var at := global_position
 
-	# Count this slam. Every Nth one in an unbroken chain hits harder and throws
-	# you higher, which gives chained slams a rhythm — two ordinary, then a big
-	# one — instead of being a flat loop.
-	slam_combo += 1
-	var big_one := slam_combo % maxi(slam_combo_interval, 1) == 0
-
 	var radius: float = lerpf(slam_radius_min, slam_radius_max, power)
 	var damage := int(roundf(lerpf(float(slam_damage_min), float(slam_damage_max), power)))
-	if big_one:
-		radius *= slam_combo_radius_scale
-		damage += slam_combo_damage_bonus
 
-	_spawn_shockwave(at, radius, big_one)
+	_spawn_shockwave(at, radius, false)
 
 	# Everything standing in the shockwave takes the hit, not just whatever was
 	# directly underneath — that is what makes a slam feel like weight rather
@@ -628,22 +842,19 @@ func _slam_impact() -> void:
 	Events.slam_landed.emit(at, power)
 
 	velocity = Vector3.ZERO
-	# Rebound to a fixed height rather than one scaled by the fall. Fall distance
-	# already decides damage and reach; letting it decide the bounce too made the
-	# payoff one blurry lump. This way the two rewards stay readable apart.
-	var height := jump_height * (slam_combo_bounce_scale if big_one else slam_bounce_height_scale)
-	velocity.y = sqrt(2.0 * gravity_rise * height)
-	# The bounce counts as a fresh ascent, so a chained slam measures its fall
-	# from this impact rather than from the height before it.
 	_air_peak_y = at.y
 	_jumping = false
-	_jump_released = false
-	# Spend the coyote grace. The impact touched the ground for a frame, which
-	# refills it — and then a jump pressed in the next tenth of a second would
-	# be read as a late ground jump rather than the next slam, killing the chain
-	# exactly when the player is trying hardest to keep it going.
+	_jump_released = true
+	# A pound must not feed the jump chain. Without this, pounding and then
+	# jumping out of the recovery would hand you a double jump for free, and the
+	# chain is supposed to be earned by landing three jumps cleanly.
+	jump_chain = 0
+	# Eat anything buffered during the drop, so a jump held on the way down does
+	# not fire the instant you land and cancel the recovery.
+	_jump_buffered = 0.0
 	_coyote = 0.0
-	_set_state(State.AIR)
+	_slam_recover = slam_recover_time
+	_set_state(State.CROUCH)
 
 
 ## Draws the ring showing how far the shockwave actually reached.
@@ -659,21 +870,13 @@ func _spawn_shockwave(at: Vector3, radius: float, combo: bool) -> void:
 		ring.call(&"play", radius, combo)
 
 
-func _do_wall_run(delta: float) -> void:
-	_wall_time -= delta
-	# Ride the wall tangent at a fixed clip; the point is to cover ground.
-	var along := _wall_dir * wall_run_speed
-	velocity.x = along.x
-	velocity.z = along.z
-	_apply_gravity(delta, wall_run_gravity_scale)
-
-	if _jump_buffered > 0.0:
-		_wall_jump()
-		return
-	if _wall_time <= 0.0 or not is_on_wall() or is_on_floor():
-		_set_state(State.AIR if not is_on_floor() else State.GROUND)
-
-
+## Clinging to a wall, waiting for a kick off it.
+##
+## This is the whole wall game now. There used to be a WALL_RUN as well, which
+## carried you along a surface at a fixed clip if you hit it with enough speed —
+## a good Rayman move and a bad Mario one. With both in, the same tan wall would
+## sometimes carry you sideways and sometimes catch you, decided by a speed
+## threshold the player could not see, which made every wall a coin toss.
 func _do_wall_slide(delta: float) -> void:
 	_apply_horizontal(delta, 1.0, air_control)
 	_apply_gravity(delta)
@@ -929,9 +1132,6 @@ func _after_move(_delta: float) -> void:
 		State.GROUND:
 			if not is_on_floor() and velocity.y <= 0.0:
 				pass # handled next frame via coyote time
-		State.WALL_RUN:
-			if is_on_wall():
-				_wall_normal = get_wall_normal()
 		State.SWING:
 			# The rope has to be applied here, after the straight-line move has
 			# already pulled us off the arc. _constrain_to_rope explains why.
@@ -942,26 +1142,21 @@ func _after_move(_delta: float) -> void:
 				_slam_impact()
 
 
+## Catches a wall on the way past, Mario-style.
+##
+## Deliberately unconditional beyond "is it a wall and am I falling". The old
+## version demanded either enough speed along the surface or the stick held into
+## it, which meant a wall you were clearly touching would sometimes refuse you
+## for reasons invisible from the outside. A wall kick has to be reliable or
+## nobody builds a route out of it.
 func _try_enter_wall() -> void:
 	var normal := get_wall_normal()
-	if absf(normal.y) > 0.4:
+	if absf(normal.y) > wall_cling_max_tilt:
+		return
+	if velocity.y > 0.0:
 		return
 	_wall_normal = _flatten(normal)
-	var flat := Vector3(velocity.x, 0.0, velocity.z)
-	var side := _wall_normal.cross(Vector3.UP).normalized()
-	var along := flat.dot(side)
-	var pulling_away := wish_dir.dot(-_wall_normal) < -0.25
-
-	# A wall run is earned with momentum, not by holding into the wall — when you
-	# run along a wall your stick points along it, not at it. So speed along the
-	# surface starts the run, and only actively steering away refuses it.
-	if absf(along) >= wall_run_min_speed and not pulling_away:
-		_wall_dir = side * signf(along)
-		_wall_time = wall_run_time
-		_set_state(State.WALL_RUN)
-	elif wish_dir.dot(-_wall_normal) > 0.2 and velocity.y < 0.0:
-		# Pressing into the wall with no speed is a cling, not a run.
-		_set_state(State.WALL_SLIDE)
+	_set_state(State.WALL_SLIDE)
 
 
 # ------------------------------------------------------------------ ledge grab
@@ -1109,7 +1304,9 @@ func respawn_at(where: Transform3D) -> void:
 	_rope_taut = false
 	abilities.drop_everything()
 	_hurt_left = 0.0
-	slam_combo = 0
+	jump_chain = 0
+	_chain_window = 0.0
+	_slam_recover = 0.0
 	_ledge_lock = 0.0
 	_wall_lock = 0.0
 	health.reset()
@@ -1188,8 +1385,10 @@ func _enter_state(which: State) -> void:
 			# down a slope would thud.
 			if _pre_move_vy < -4.0:
 				play_sfx(sfx_land)
-			# Touching down without slamming ends the chain.
-			slam_combo = 0
+			# Landing opens the window for the next jump in the chain. Set here
+			# rather than when jumping, because it is the LANDING that has to be
+			# followed up quickly.
+			_chain_window = jump_chain_window
 		State.LEDGE_HANG:
 			_snap_to_ledge()
 		State.DEAD:
@@ -1200,8 +1399,6 @@ func _enter_state(which: State) -> void:
 
 func _exit_state(which: State) -> void:
 	match which:
-		State.WALL_RUN:
-			_wall_time = 0.0
 		State.LEDGE_HANG:
 			_ledge_lock = maxf(_ledge_lock, ledge_cooldown)
 		State.SWING:
@@ -1231,7 +1428,8 @@ func debug_info() -> Dictionary:
 		"wall": is_on_wall(),
 		"target": target.name if target != null else "-",
 		"kind": ("anchor" if GrappleTargeting.is_anchor(target) else "enemy") if target != null else "-",
-		"slam": "%d (power %.2f)" % [slam_combo, slam_power()],
+		"slam": "power %.2f" % slam_power(),
+		"chain": "%d (window %.2f)" % [jump_chain, maxf(_chain_window, 0.0)],
 		"rope": ("%.1f m %s" % [_rope_length, "taut" if _rope_taut else "slack"]) if state == State.SWING else "-",
 		"carry": abilities.carried.name if abilities.carried != null else "-",
 		"tongue": abilities.tethered.name if abilities.tethered != null else "-",

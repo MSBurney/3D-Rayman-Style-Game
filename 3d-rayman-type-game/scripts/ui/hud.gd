@@ -97,7 +97,10 @@ func _format_debug(info: Dictionary) -> String:
 		"vert    %.2f" % info["vy"],
 		"floor   %s   wall %s" % [info["floor"], info["wall"]],
 		"target  %s (%s)" % [info["target"], info["kind"]],
-		"slam    %s" % info["slam"],
+		"pound   %s" % info["slam"],
+		# Jump chain: 0 means the next jump is an ordinary one, 1 a double, 2 a
+		# triple. The window is how long you have left to keep it alive.
+		"chain   %s" % info["chain"],
 		# Rope length and whether it is pulling. Worth watching while swinging:
 		# "slack" means the rope is doing nothing and you are in free flight.
 		"rope    %s" % info["rope"],

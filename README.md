@@ -27,9 +27,15 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | Move | `WASD` | Left stick |
 | Look | Mouse or arrow keys | Right stick |
 | Jump | `Space` | A |
-| **Ground slam** | `Space` again in the air | A again |
+| **Double / triple jump** | `Space`, land, `Space` again quickly | A |
+| **Side flip** | at speed, flick the stick back and `Space` | stick back + A |
+| **Crouch** | `Ctrl` or `Shift` | LB |
+| **Backflip** | crouch still, then `Space` | LB then A |
+| **Forward slide** | crouch at a run | LB while moving |
+| **Long jump** | crouch at a run, then `Space` | LB then A |
+| **Ground pound** | **crouch in mid-air** | LB in mid-air |
+| **Wall kick** | touch a wall falling, then `Space` | A |
 | **Tongue / swing** | `Q` or `RMB` — **hold** on an anchor to swing | RB |
-| **Jump off the rope** | `Space` while swinging | A |
 | **Reel rope in / out** | `E` / `Ctrl` while swinging | B / LB |
 | Grab & throw | `E` | B |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
@@ -62,25 +68,39 @@ awkward on a laptop trackpad.
 - **Ledge grab** — automatic when you fall past a grabbable lip. Shimmy sideways, `Space` to climb,
   steer away to drop. Note a standing jump clears 2.35 m, so **lips below ~3.3 m just get landed
   on** — grabbing is for lips *above* your jump, caught on the way down.
-- **Wall run / wall jump** — run along a wall with enough speed and it carries you; jump off it to
-  cross gaps or climb a shaft. Triggered by momentum, not by holding into the wall.
-- **Ground slam** — press jump again in mid-air to drive yourself into the ground. This is the
-  character's defining move, because the character is **heavy**, and the slam is what turns that
-  weight into something useful.
+- **The jump chain** — land and jump again quickly for a double jump, then again for a triple, as
+  Mario 64 does. The triple has to be earned: you need to actually be moving, and letting the window
+  lapse puts you back to an ordinary jump.
+- **Crouch, and the three moves off it** — `Ctrl` ducks you, and what that unlocks depends on what
+  you were doing:
+  - **still** → **backflip**: straight up, higher than a jump, and backwards.
+  - **at a run** → **forward slide**: almost frictionless, so a slope keeps adding to it.
+  - **sliding or running, then jump** → **long jump**: low, and a very long way. The push is *added*
+    to the speed you already had, so a long jump out of a fast slide down a ramp goes further than
+    one off the flat. That is why this move and the slope system belong in the same game.
+  - **in mid-air** → **ground pound**.
+- **Side flip** — at speed, flick the stick back the way you came and jump. It fires on your *input*
+  reversing rather than your velocity reversing, because heavy handling will not let velocity turn
+  round quickly, so waiting for it would mean the move never happened.
+- **Wall kick** — touch a wall while falling and you cling to it; jump to kick off. Deliberately
+  unconditional: there used to be a Rayman-style wall *run* here too, and with both in, the same wall
+  would sometimes carry you sideways and sometimes catch you, decided by a speed threshold the player
+  could not see.
+- **Ground pound** — crouch in mid-air to drive yourself into the floor, and stay there.
 
   Everything about it scales with how far you fell, measured from the highest point you reached
-  since last touching the ground. Damage, shockwave radius and rebound height all grow with the
-  drop. A hop is worth almost nothing; a fall from a tower is worth a lot. That is the point:
-  **height becomes a resource worth going and fetching**, not just a place you happen to be.
+  since last touching the ground. Damage and shockwave radius both grow with the drop. A hop is
+  worth almost nothing; a fall from a tower is worth a lot. That is the point: **height becomes a
+  resource worth going and fetching**, not just a place you happen to be.
 
   The impact hits everything within the shockwave, not only what was underneath, and shoves it
   away. An expanding ring is drawn at the real radius that was used, so the scaling is visible
   rather than something you have to infer.
 
-  **The rebound always returns you to jump height**, so a slam never costs you ground. Height is
-  gained from the *combo* instead: every third slam in an unbroken chain throws you 50% higher than
-  a jump and hits harder with a wider, red-tinted shockwave. Touching down without slamming resets
-  the chain, so a run of slams is something you sustain rather than something that just happens.
+  It replaced a **bounce attack** that did the same thing and then threw you back up to jump height,
+  with every third one in a chain going 50% higher. That needed the jump button in mid-air, which
+  the double and triple jump now own — and a pound that launches you is not a pound. The fall-distance
+  scaling was kept because it is the part that carried the weight-is-a-resource idea.
 - **Tongue** — press `Q` and it reaches for the ringed target. One button, and what happens depends
   on whether the target can be moved:
   - **Anchor (purple ring)** — bolted to the level, so *you* are the one that moves: you **swing**
@@ -156,11 +176,17 @@ The showcase level in `main.tscn`: one hub with four zones, each built around a 
 | Direction | Zone | Teaches |
 | --- | --- | --- |
 | North | Rising platforms, then a gap with two anchors | Jumping, then **swinging** across |
-| East | Pit spanned by a tan wall, then a shaft | **Wall run**, then **wall jump** |
+| East | Pit spanned by a tan wall, then a shaft | **Wall kick** — ⚠️ see below |
 | West | Three terraces with 3.3 m lips | **Ledge grab** (too high to jump onto) |
 | South | Chain of anchors over a pit, tower | **Swinging** (nothing else crosses it) |
 
-Tan surfaces are the runnable walls. Falling into a pit respawns you at the last checkpoint.
+Tan surfaces are the climbable walls. Falling into a pit respawns you at the last checkpoint.
+
+> ⚠️ **Zone E is stale level content.** It was built around the wall *run*, which was removed with
+> the move to a Mario moveset — the pit there was meant to be crossed by running along the tan wall,
+> and nothing crosses it now. The shaft above it still works, because a shaft is what wall *kicks*
+> are for. Needs rebuilding, or deleting; it is the only place in either level that depended on a
+> removed move.
 
 ## Layout
 
@@ -185,7 +211,7 @@ share a lot of velocity maths and constantly interrupt each other.
 ## Tuning
 
 Every feel number is an `@export` on the player, grouped in the inspector (Run, Jump, Wall moves,
-Ledge grab, Grapple, Weight, Slam, Combat, Sounds). Select the Player node and edit them there — no
+Ledge grab, Grapple, Weight, Slam, Combat, Sounds; Jump has Jump chain and Crouch moves subgroups). Select the Player node and edit them there — no
 code changes needed. Enemies, lums and grapple points expose their own knobs the same way.
 
 ## Smoke test
@@ -196,8 +222,8 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 48 behaviours (each state, damage, death, respawn, stomp, grab
-and throw, plus slopes, crumbling floors, the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
+It drives the player through all 53 behaviours (each state, damage, death, respawn, stomp, grab
+and throw, plus every Mario move, slopes, crumbling floors, the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
 means everything passed. It caught several real bugs during the initial build and is worth
 rerunning whenever the controller changes.
 

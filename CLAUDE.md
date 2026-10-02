@@ -291,25 +291,70 @@ clamps total speed to it is a bug — see the cap list in the swing section, whi
 listens to `Events.slam_landed(at, force)`, which is the intended way for a prop to react to a slam —
 the prop holds no reference to the player and the player does not know props exist.
 
-## Slam and combo
+## The Mario moveset
+
+**Added 2026-10-02.** The moveset is Mario 64 / Odyssey shaped: double and triple jump, side flip,
+backflip, long jump, forward slide, ground pound, wall kick. Two things were removed to make room,
+both deliberately:
+
+- **The bounce attack.** The old slam threw you back up to jump height, with every third one in a
+  chain going 50% higher. It needed the jump button in mid-air, which the double and triple jump now
+  own. The fall-distance scaling and the shockwave ring were kept; the bounce and the combo are gone.
+- **The wall run.** A good Rayman move and a bad Mario one. With both in, the same wall would
+  sometimes carry you sideways and sometimes catch you, decided by a speed threshold the player could
+  not see. A wall now always catches you and always offers a kick.
+
+**One button, four moves.** `crouch` (Ctrl) forks on what you were doing, which is how Mario 64 gets
+so much out of Z: still → backflip, at a run → slide, slide-or-run then jump → long jump, in mid-air
+→ ground pound. If you add a fifth crouch move, add it to that fork rather than to a new button.
+
+### The tension to keep naming
+
+**Mario's moveset assumes Mario is agile; this character is deliberately heavy.** The user was told
+this and chose to keep it heavy, so the resolution is: **the moveset is where the agility lives.**
+Base handling stays committal (`acceleration` 14, `air_control` 0.15) and each Mario move buys one
+specific kind of motion you cannot get by steering. That is consistent with weight being a trade you
+control — but it means the moves have to carry more weight than they do in Mario, so be suspicious of
+any of them being made weaker "for balance".
+
+Two consequences already baked in, and both will look wrong if you don't know why:
+
+- **The side flip triggers on the INPUT reversing, not the velocity reversing** (`_wants_side_flip`).
+  Heavy handling will not let velocity turn round quickly by design, so waiting for it would mean the
+  move never fires at all.
+- **The long jump ADDS its push to the speed you already had** rather than replacing it. So a long
+  jump out of a fast slide down a ramp goes much further than one off the flat. That is the one place
+  the Mario moveset and the slope system reinforce each other, and it is worth protecting.
+
+### `slide_friction` has to beat the wrong number
+
+A slide feels like nothing if you tune it against `deceleration` (12). What it actually has to beat
+is **`momentum_friction` (3.5)**, because that already preserves ground momentum above `max_speed` —
+so the ordinary run is far less draggy than it looks. `slide_friction` started at 2.0 and measured a
+0.7 m/s advantage over just running, which is invisible. It is **1.0**.
+
+## The ground pound
+
+Still called `SLAM` throughout the code — same move, and renaming eleven exports would have been
+churn for nothing.
 
 - **Fall distance is the currency.** Damage, shockwave radius and the *visible ring* all scale with
   how far you fell, measured from the highest point since last grounded (`Player.slam_power()`).
-  A hop is worth ~0.08, a tower drop 1.00.
-- **The rebound is fixed at jump height, not scaled.** Letting fall distance drive the bounce too
-  made one blurry reward; separating them keeps both legible. Height is gained from the combo.
-- **Every third slam in an unbroken chain** bounces 50% higher with a wider, red shockwave.
-  Touching the ground without slamming resets the count, in `_enter_state(State.GROUND)`.
-- **A slam impact clears `_coyote`.** The landing touches the floor for a frame, which refills the
-  coyote window, and a press in the next tenth of a second would then read as a late ground jump
-  rather than the next slam — silently breaking every chain.
+  A hop is worth ~0.08, a tower drop 1.00. This is the part of the old bounce attack worth keeping,
+  because it is what carried the weight-is-a-resource idea.
+- **It does not bounce, and it does not combo.** Both went with the Mario moveset; see above.
+- **A pound clears `jump_chain` and eats `_jump_buffered`.** Otherwise a jump held on the way down
+  fires the instant you land and cancels the recovery, and pounding then jumping would hand you a
+  free double jump — the chain is supposed to be earned by landing three jumps cleanly.
+- **It lands in `CROUCH`, not `GROUND`,** and `_slam_recover` locks you there briefly. A pound you
+  can cancel straight out of reads weightless.
 - **The shockwave ring is not additive.** The palette is bright pastel and additive blending
-  saturates straight to white, throwing away the colour that distinguishes a combo hit.
+  saturates straight to white, throwing away the colour the ring is drawn in.
 
 ### Testing input in the smoke test
 
 `Input.action_press()` on **every** frame never produces a fresh `just_pressed` — holding across
 frame boundaries registers nothing at all, so the move simply never fires and the test looks like a
 gameplay bug. Press **once**, wait, then release. And `_place()` resets the timers (`_coyote`,
-`_jump_buffered`, `slam_combo`) for the same reason: leftover state from a previous check turns the
-next press into a different move entirely.
+`_jump_buffered`, `jump_chain`, `_chain_window`, `_slam_recover`) for the same reason: leftover
+state from a previous check turns the next press into a different move entirely.

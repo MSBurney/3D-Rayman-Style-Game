@@ -24,7 +24,7 @@ const CRUMBLING := preload("res://scenes/props/crumbling_floor.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 48
+const EXPECTED_CHECKS := 53
 
 var player: Player
 var level: Node3D
@@ -75,8 +75,8 @@ func _check(label: String, ok: bool, detail: String = "") -> void:
 
 ## Teleports the player and clears everything a previous test might have left
 ## behind. The timers matter as much as the position: a leftover coyote window
-## turns the next jump press into a late ground jump instead of a slam, and a
-## stale combo count makes the chain tests read a tick that never happened.
+## turns the next jump press into a late ground jump instead of a pound, and a
+## stale jump-chain count turns the next press into a double or triple jump.
 func _place(at: Vector3) -> void:
 	player.global_position = at
 	player.velocity = Vector3.ZERO
@@ -87,12 +87,35 @@ func _place(at: Vector3) -> void:
 	player._coyote = 0.0
 	player._jump_buffered = 0.0
 	player._grapple_buffered = 0.0
-	player.slam_combo = 0
+	player.jump_chain = 0
+	player._chain_window = 0.0
+	player._slam_recover = 0.0
 	player._set_state(Player.State.AIR)
 
 
 func _on_burst(_where: Vector3) -> void:
 	bursts += 1
+
+
+## Waits for the ground, jumps the instant we touch it, and returns the launch
+## speed. Used three times in a row to drive Mario's jump chain.
+##
+## Pressing the moment we land matters: the chain only stays alive for
+## `jump_chain_window` after touching down, so any fixed wait long enough to be
+## safe is also long enough to lose the chain. And the launch speed has to be
+## read BEFORE the button is released, or the jump-cut halves it on the way out.
+func _chain_jump(max_wait: int = 240) -> float:
+	for i in max_wait:
+		await _step(1)
+		if player.is_on_floor():
+			break
+	Input.action_press("jump")
+	var launch := 0.0
+	for i in 10:
+		await _step(1)
+		launch = maxf(launch, player.velocity.y)
+	Input.action_release("jump")
+	return launch
 
 
 ## Builds a slope in empty space and returns it, so the momentum checks do not
@@ -103,10 +126,10 @@ func _on_burst(_where: Vector3) -> void:
 ## use. Worth knowing if you ever hand-write one of those in a .tscn: Godot
 ## serialises a Transform3D basis ROW by row, so the obvious column-major
 ## reading of those nine numbers gives you a ramp tilted the wrong way.
-func _add_slope(at: Vector3, degrees: float, length: float) -> StaticBody3D:
+func _add_slope(at: Vector3, degrees: float, length: float, width: float = 12.0) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(12.0, 2.0, length)
+	box.size = Vector3(width, 2.0, length)
 	var shape := CollisionShape3D.new()
 	shape.shape = box
 	body.add_child(shape)
@@ -167,7 +190,7 @@ func _pump_from_rest(anchor: GrapplePoint, pump: bool) -> float:
 func _release_all() -> void:
 	# Movement actions must be in here too: a held move_right leaking out of the
 	# wall-run test walks the player away from every later test's setup.
-	for action in ["jump", "grapple", "grab", "drop",
+	for action in ["jump", "grapple", "grab", "drop", "crouch", "attack",
 			"move_left", "move_right", "move_forward", "move_back"]:
 		Input.action_release(action)
 
@@ -191,148 +214,208 @@ func _run() -> void:
 	_place(Vector3(0, 14, -21))
 	await _step(20)
 	_check("falls freely", player.velocity.y < -5.0, "vy=%.2f" % player.velocity.y)
-	var before_vy: float = player.velocity.y
+
+	# ------------------------------------------------------------- Mario moveset
+	#
+	# All of it runs on a 60x60 pad built in empty space. The level's own flat
+	# ground is the hub, and the hub has wandering walkers on it whose contact
+	# knockback reads as a phantom 7 m/s of drift — which is exactly the sort of
+	# thing these checks are measuring. Out here nothing can interfere, and there
+	# is no edge within 30 m to walk off mid-measurement.
+	var pad := _add_slope(Vector3(250, 20, 0), 0.0, 60.0, 60.0)
+	const PAD_TOP := Vector3(250, 21, 0)
+	await _step(4)
+
+	# --- jump in mid-air must now do NOTHING. It used to start the bounce attack;
+	# the double and triple jump need the button, so the pound moved to crouch.
+	_place(PAD_TOP + Vector3(0, 14, 0))
+	await _step(24)
+	var air_vy: float = player.velocity.y
 	Input.action_press("jump")
 	await _step(2)
 	_release_all()
-	# Jump in mid-air now means SLAM. What it must never be is a second jump.
-	_check("mid-air jump slams, never lifts",
-		player.velocity.y < before_vy and player.state == Player.State.SLAM,
-		"vy %.2f -> %.2f state=%s" % [before_vy, player.velocity.y, player.state_name()])
+	_check("mid-air jump does nothing",
+		player.state == Player.State.AIR and player.velocity.y < air_vy,
+		"vy %.2f -> %.2f state=%s" % [air_vy, player.velocity.y, player.state_name()])
 	await _step(40)
 
-	# --- jump must NOT fire the grapple. It was briefly bound there; it is now
-	# back on its own button so jump is free for weight-based air moves.
-	_release_all()
-	await _step(4)
-	_place(Vector3(0, 4, 24))
-	player.rig.yaw = 0.0
-	player.rig.pitch = 0.55
-	await _step(6)
-	var had_target := player.targeting.current != null
-	Input.action_press("jump")
-	await _step(6)
-	_release_all()
-	# With a target in range and the grapple back on its own button, jump must
-	# slam rather than hook.
-	_check("jump slams instead of grappling",
-		had_target and player.state == Player.State.SLAM,
-		"target_present=%s state=%s" % [had_target, player.state_name()])
+	# --- crouch in mid-air IS the ground pound.
+	_place(PAD_TOP + Vector3(0, 16, 0))
 	await _step(10)
-
-	# --- ground slam. Jump in mid-air drives you down, and the payoff scales
-	# with how far you fell, which is what makes height worth going to get.
-	#
-	# Run on the zone B perch, not the hub. A slam kills whatever its shockwave
-	# catches, and slamming near the hub quietly destroyed the walker the stomp
-	# test needs hundreds of lines later. Freezing the walkers was not enough:
-	# PROCESS_MODE_DISABLED stops them moving, not from being damaged. The perch
-	# top is 12 m up with nothing within 15 m, which also gives a real drop.
-	const PERCH_TOP := Vector3(48, 12, -7)
-
-	_release_all()
-	await _step(4)
-	_place(PERCH_TOP + Vector3(0, 14, 0))
-	await _step(10)
-	Input.action_press("jump")
+	Input.action_press("crouch")
 	await _step(3)
 	_release_all()
-	_check("jump in air starts a slam", player.state == Player.State.SLAM,
+	_check("crouch in mid-air starts a pound", player.state == Player.State.SLAM,
 		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
 
-	var slam_power_high := 0.0
-	var bounced_high := 0.0
+	var pound_power_high := 0.0
+	var pound_vy := 1.0
 	for i in 200:
-		await get_tree().physics_frame
+		await _step(1)
 		if player.state == Player.State.SLAM:
-			slam_power_high = player.slam_power()
+			pound_power_high = player.slam_power()
 		else:
-			bounced_high = player.velocity.y
+			pound_vy = player.velocity.y
 			break
-	_check("big fall lands at full power", slam_power_high > 0.95,
-		"power=%.2f" % slam_power_high)
-	_check("slam bounces the player up", bounced_high > 0.0,
-		"vy after impact=%.2f" % bounced_high)
-	await _step(60)
+	_check("big fall pounds at full power", pound_power_high > 0.95,
+		"power=%.2f" % pound_power_high)
+	# The headline change: a pound ends on the floor. It must not launch you.
+	_check("a pound does not bounce you",
+		pound_vy <= 0.0 and player.state == Player.State.CROUCH,
+		"vy after impact=%.2f state=%s" % [pound_vy, player.state_name()])
 
-	# A short hop must be worth much less than a tower drop, or height is not a
-	# resource at all and the whole mechanic collapses into one flat move.
+	# And you are held there briefly, or the pound reads weightless.
+	Input.action_press("jump")
+	await _step(3)
 	_release_all()
-	await _step(20)
-	_place(PERCH_TOP + Vector3(0, 0.5, 0))
+	_check("pound recovery holds you down",
+		player.state == Player.State.CROUCH and player.velocity.y <= 0.1,
+		"state=%s vy=%.2f recover=%.2f"
+			% [player.state_name(), player.velocity.y, player._slam_recover])
+	await _step(40)
+
+	# A short hop must be worth much less than a long fall, or height is not a
+	# resource and the whole thing collapses into one flat move.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
 	await _step(40)
 	Input.action_press("jump")
 	await _step(6)
 	_release_all()
 	await _step(6)
+	Input.action_press("crouch")
+	await _step(3)
+	_release_all()
+	var pound_power_low := 1.0
+	for i in 90:
+		await _step(1)
+		if player.state == Player.State.SLAM:
+			pound_power_low = player.slam_power()
+		elif pound_power_low < 1.0:
+			break
+	_check("a small hop pounds weakly", pound_power_low < pound_power_high * 0.6,
+		"hop power=%.2f vs fall power=%.2f" % [pound_power_low, pound_power_high])
+	await _step(50)
+
+	# --- the jump chain: land and jump again quickly for the double, then the
+	# triple. A direction is held throughout, because a triple jump has to be
+	# earned by actually going somewhere.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	Input.action_press("move_right")
+	await _step(40)
+	var chain: Array[float] = []
+	for i in 3:
+		chain.append(await _chain_jump())
+	_release_all()
+	await _step(40)
+
+	_check("a double jump beats a single",
+		chain.size() == 3 and chain[1] > chain[0] + 0.5,
+		"launch speeds=%s" % str(chain))
+	_check("a triple jump is the biggest",
+		chain.size() == 3 and chain[2] > chain[1] + 0.5,
+		"launch speeds=%s" % str(chain))
+
+	# Standing still, the third jump must NOT be the big one — otherwise the
+	# largest jump in the game is free from a standstill.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	var still: Array[float] = []
+	for i in 3:
+		still.append(await _chain_jump())
+	_check("a standing triple jump is refused",
+		still.size() == 3 and still[2] < chain[2] - 0.5,
+		"standing=%.2f vs moving=%.2f" % [still[2], chain[2]])
+	await _step(40)
+
+	# --- backflip: crouch still, then jump. Up a long way, and backwards.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	player.facing = Vector3.FORWARD
+	Input.action_press("crouch")
+	await _step(10)
+	var crouched := player.state
 	Input.action_press("jump")
 	await _step(3)
 	_release_all()
-	var slam_power_low := 1.0
-	for i in 90:
-		await get_tree().physics_frame
-		if player.state == Player.State.SLAM:
-			slam_power_low = player.slam_power()
-		elif slam_power_low < 1.0:
-			break
-	_check("small hop slams weakly", slam_power_low < slam_power_high * 0.6,
-		"hop power=%.2f vs drop power=%.2f" % [slam_power_low, slam_power_high])
-	await _step(30)
+	var plain_launch := sqrt(2.0 * player.gravity_rise * player.jump_height)
+	_check("backflip goes higher than a jump, and backwards",
+		crouched == Player.State.CROUCH
+			and player.velocity.y > plain_launch + 1.0
+			and player.velocity.z > 1.0,
+		"crouched=%s vy=%.2f (a jump is %.2f), back=%.2f"
+			% [Player.State.keys()[crouched], player.velocity.y, plain_launch,
+				player.velocity.z])
+	await _step(70)
 
-	# --- the combo: chained slams rebound to jump height, and every third one
-	# throws you noticeably higher. Slamming from a standstill on flat ground,
-	# so each bounce is identical apart from the combo.
-	# A chain never touches the ground in between — the rebound keeps you
-	# airborne, so each slam is just another press. No jumping involved.
+	# --- slide and long jump: crouch at a run. The slide has to KEEP speed that
+	# walking would brake away, and the long jump has to go far rather than high.
 	_release_all()
-	await _step(20)
-	_place(PERCH_TOP + Vector3(0, 6, 0))
-	# Start from a known count. The earlier slam tests already advanced it, and
-	# leaving it non-zero made the loop below "see" a combo tick on its first
-	# frame and record a falling velocity as if it were a rebound.
-	player.slam_combo = 0
-	await _step(6)
-	# Watch the combo counter rather than polling for the SLAM state. After a
-	# bounce the player is only centimetres above the floor, so the next slam can
-	# begin and finish inside a two-frame wait — any sampling that looks for the
-	# state misses it. The counter ticking is the one unambiguous signal that an
-	# impact just happened, so read the rebound on exactly that frame.
-	var bounce_speeds: Array[float] = []
-	for slam_index in 3:
-		# Wait until properly airborne and falling, then press ONCE. Pressing on
-		# every frame does not register at all — holding the button across frame
-		# boundaries never produces a fresh just_pressed, so the slam never fires.
-		for i in 200:
-			await get_tree().physics_frame
-			if player.state == Player.State.AIR and player.velocity.y < -1.0:
-				break
-		var before_combo := player.slam_combo
-		Input.action_press("jump")
-		await _step(3)
-		_release_all()
-		# The combo ticking is the unambiguous "an impact just happened" signal,
-		# and the rebound is on the velocity that same frame.
-		for i in 200:
-			await get_tree().physics_frame
-			if player.slam_combo > before_combo:
-				bounce_speeds.append(player.velocity.y)
-				break
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	player.velocity = Vector3(0, 0, -11)
+	Input.action_press("crouch")
+	await _step(2)
+	var sliding := player.state
+	await _step(58)
+	var slide_speed := Vector2(player.velocity.x, player.velocity.z).length()
 
-	var plain_bounce := sqrt(2.0 * player.gravity_rise * player.jump_height)
-	_check("slam rebounds to jump height",
-		bounce_speeds.size() >= 2 and absf(bounce_speeds[0] - plain_bounce) < 1.0,
-		"bounce=%.2f expected=%.2f" % [
-			bounce_speeds[0] if bounce_speeds.size() > 0 else -1.0, plain_bounce])
-	_check("every third slam bounces higher",
-		bounce_speeds.size() == 3 and bounce_speeds[2] > bounce_speeds[0] + 1.0,
-		"bounces=%s combo=%d" % [str(bounce_speeds), player.slam_combo])
-
-	# Landing normally has to break the chain, or the combo would just tick up
-	# forever and every third landing would randomly launch the player.
+	# The control case: the same 11 m/s with no crouch, which normal braking
+	# pulls down much faster.
 	_release_all()
-	await _step(90)
-	_check("landing resets the combo", player.slam_combo == 0,
-		"combo=%d state=%s" % [player.slam_combo, player.state_name()])
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	player.velocity = Vector3(0, 0, -11)
+	await _step(60)
+	var walk_speed := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("sliding keeps speed that walking brakes away",
+		sliding == Player.State.SLIDE and slide_speed > walk_speed + 1.5,
+		"slide kept %.1f, walking kept %.1f" % [slide_speed, walk_speed])
+
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	player.velocity = Vector3(0, 0, -11)
+	Input.action_press("crouch")
+	await _step(8)
+	var before_long := Vector2(player.velocity.x, player.velocity.z).length()
+	Input.action_press("jump")
+	await _step(3)
+	_release_all()
+	var after_long := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("long jump goes far and low",
+		after_long > before_long + 5.0 and player.velocity.y < plain_launch,
+		"speed %.1f -> %.1f, vy=%.2f (a jump is %.2f)"
+			% [before_long, after_long, player.velocity.y, plain_launch])
+	await _step(70)
+
+	# --- side flip: at speed, flick the stick back the way you came and jump.
+	# Triggered on the INPUT reversing, not the velocity, because heavy handling
+	# will not let velocity turn round quickly — see Player._wants_side_flip.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(40)
+	Input.action_press("move_right")
+	await _step(60)
+	var flip_before := Vector3(player.velocity.x, 0.0, player.velocity.z)
+	Input.action_release("move_right")
+	Input.action_press("move_left")
+	await _step(2)
+	Input.action_press("jump")
+	await _step(2)
+	_release_all()
+	var flip_after := Vector3(player.velocity.x, 0.0, player.velocity.z)
+	var reversed := flip_before.length() > 0.1 and flip_after.length() > 0.1 \
+		and flip_before.normalized().dot(flip_after.normalized()) < 0.0
+	_check("side flip reverses you and lifts you",
+		reversed and player.velocity.y > plain_launch * 0.8,
+		"%.1f m/s -> %.1f m/s reversed=%s, vy=%.2f"
+			% [flip_before.length(), flip_after.length(), reversed, player.velocity.y])
+	await _step(70)
 
 	# --- the shockwave hits things standing nearby, not only underfoot.
 	_release_all()
@@ -665,16 +748,28 @@ func _run() -> void:
 		"victim %s" % ("killed" if victim_gone else "hp %d" % victim_health.current))
 	await _step(20)
 
-	# --- wall run along the tan wall in zone B (face at z=5, spans x 25..45).
-	# Capsule edge starts 0.05 m off the face so contact happens immediately.
-	_place(Vector3(26, 2.5, 4.55))
-	player.velocity = Vector3(9.0, 0.0, 3.0)
-	Input.action_press("move_right")
+	# --- the wall kick, against the tan wall in zone B (face at z=5, spans
+	# x 25..45). Capsule edge starts 0.05 m off the face so contact is immediate.
+	#
+	# This used to accept WALL_RUN or WALL_SLIDE. There is no wall run any more —
+	# a wall now always catches you and always offers a kick, which is the point:
+	# the old version refused you based on a speed threshold you could not see.
+	_place(Vector3(26, 3.5, 4.55))
+	player.velocity = Vector3(0.0, -2.0, 3.0)
 	await _step(12)
 	var wall_state := player.state
+	_check("a wall catches you for a kick", wall_state == Player.State.WALL_SLIDE,
+		"state=%s" % Player.State.keys()[wall_state])
+
+	# And the kick throws you off it, away from the face.
+	Input.action_press("jump")
+	await _step(3)
 	_release_all()
-	_check("wall contact state", wall_state == Player.State.WALL_RUN or wall_state == Player.State.WALL_SLIDE,
-		"state=%s" % player.state_name())
+	_check("the wall kick pushes off and up",
+		player.state == Player.State.AIR
+			and player.velocity.y > 2.0 and player.velocity.z < -2.0,
+		"state=%s vy=%.2f away=%.2f"
+			% [player.state_name(), player.velocity.y, player.velocity.z])
 	await _step(20)
 
 	# --- grab and throw a keg
@@ -786,12 +881,12 @@ func _run() -> void:
 		"9.0 -> %.1f m/s" % uphill_left)
 
 	# Flat ground must never be a source of speed, only a slow drain of it.
-	var pad := _add_slope(Vector3(170, 20, 0), 0.0, 40.0)
+	var flat_pad := _add_slope(Vector3(170, 20, 0), 0.0, 40.0)
 	await _step(4)
 	# Note `momentum_friction` only bleeds the surplus down TO `max_speed`; with
 	# no stick input the ordinary `deceleration` then takes over and brings you
 	# to a stop, which is why this does not assert a floor at `max_speed`.
-	var flat_peak := await _roll_on(pad, Vector3(170, 21.6, -10), Vector3(0, 0, 9), 40)
+	var flat_peak := await _roll_on(flat_pad, Vector3(170, 21.6, -10), Vector3(0, 0, 9), 40)
 	var flat_left := Vector2(player.velocity.x, player.velocity.z).length()
 	_check("flat ground never adds speed", flat_peak <= 9.2 and flat_left < 9.0,
 		"9.0 -> peak %.1f -> %.1f m/s" % [flat_peak, flat_left])
