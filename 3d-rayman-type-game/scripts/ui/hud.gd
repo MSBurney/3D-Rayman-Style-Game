@@ -1,19 +1,16 @@
 extends Control
 
-## Health, lums, and the grapple reticle.
+## Health, lums, and the F3 debug readout.
 ##
-## The reticle is the important one: it's the only feedback telling the player
-## which point the aim-assist has decided they mean, so the grapple never feels
-## like a guess.
+## There used to be a reticle here, drawn over whatever the grapple aim-assist
+## had picked. It went with the grapple: the spin attack is a radius around the
+## player rather than something aimed at a target, so there is nothing for a
+## reticle to point at. The spin draws a ring at its own real radius instead,
+## which is better feedback anyway because it shows the reach that was used.
 
 @export var heart_radius: float = 11.0
 @export var heart_spacing: float = 30.0
 @export var heart_origin: Vector2 = Vector2(34.0, 34.0)
-@export var anchor_colour: Color = Color(0.72, 0.45, 1.0)
-## Enemies get their own reticle colour so "I am about to attack that" reads
-## differently from "I am about to swing off that" at a glance.
-@export var enemy_colour: Color = Color(1.0, 0.36, 0.36)
-@export var reticle_radius: float = 20.0
 
 var _player: Player = null
 var _health: int = 0
@@ -47,7 +44,6 @@ func _process(_delta: float) -> void:
 
 func _draw() -> void:
 	_draw_hearts()
-	_draw_reticle()
 
 func _draw_hearts() -> void:
 	for i in _health_max:
@@ -56,27 +52,6 @@ func _draw_hearts() -> void:
 		if filled:
 			draw_circle(centre, heart_radius, Color(1.0, 0.35, 0.4))
 		draw_arc(centre, heart_radius, 0.0, TAU, 24, Color(0.1, 0.08, 0.12, 0.85), 2.5, true)
-
-func _draw_reticle() -> void:
-	if _player == null:
-		return
-	var target := _player.targeting.current
-	if target == null:
-		return
-	var camera := _player.rig.camera
-	if camera == null or camera.is_position_behind(target.global_position):
-		return
-
-	var at := camera.unproject_position(target.global_position)
-	# Purple over an anchor (you get pulled to it), red over an enemy (it gets
-	# pulled to you). Two outcomes, two colours.
-	var colour := anchor_colour if GrappleTargeting.is_anchor(target) else enemy_colour
-	draw_arc(at, reticle_radius, 0.0, TAU, 32, colour, 2.5, true)
-	# Four ticks so the ring reads as a target and not just a circle.
-	for i in 4:
-		var angle := TAU * 0.125 + TAU * 0.25 * i
-		var dir := Vector2(cos(angle), sin(angle))
-		draw_line(at + dir * (reticle_radius - 6.0), at + dir * (reticle_radius + 5.0), colour, 2.5, true)
 
 func _on_health_changed(current: int, maximum: int) -> void:
 	_health = current
@@ -96,16 +71,13 @@ func _format_debug(info: Dictionary) -> String:
 		"speed   %.2f" % info["speed"],
 		"vert    %.2f" % info["vy"],
 		"floor   %s   wall %s" % [info["floor"], info["wall"]],
-		"target  %s (%s)" % [info["target"], info["kind"]],
 		"pound   %s" % info["slam"],
 		# Jump chain: 0 means the next jump is an ordinary one, 1 a double, 2 a
 		# triple. The window is how long you have left to keep it alive.
 		"chain   %s" % info["chain"],
-		# Rope length and whether it is pulling. Worth watching while swinging:
-		# "slack" means the rope is doing nothing and you are in free flight.
-		"rope    %s" % info["rope"],
 		"carry   %s" % info["carry"],
-		"tongue  %s" % info["tongue"],
+		"spin    %s" % info["spin"],
+		"magnet  %s" % info["magnet"],
 		"fps     %d" % Engine.get_frames_per_second(),
 	])
 

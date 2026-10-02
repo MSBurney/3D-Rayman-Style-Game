@@ -5,7 +5,7 @@ extends Node
 ##
 ## Add it as a child of anything throwable, call [method launch] from that
 ## object's `throw()`, and react to [signal exploded]. Both the keg and a
-## tongue-grabbed enemy use it, which is why it lives here rather than in
+## spin-grabbed enemy use it, which is why it lives here rather than in
 ## either of their scripts.
 ##
 ## Modelled on the Yoshi egg in Super Mario 64 DS: the throw is not a lob you

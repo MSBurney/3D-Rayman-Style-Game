@@ -2,6 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://4nl2p1prnqmb" path="res://scenes/props/checkpoint.tscn" id="cp"]
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
+[ext_resource type="PackedScene" uid="uid://b546i5pe5gix4" path="res://scenes/props/spin_switch.tscn" id="sw"]
 [ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
 [ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
 [ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="lum"]
@@ -170,3 +171,13 @@ instant_kill = true
 
 [node name="Shape" type="CollisionShape3D" parent="KillPlane" unique_id=2029243725]
 shape = SubResource("ShapePit")
+
+[node name="SwitchA" parent="." instance=ExtResource("sw")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0, -6)
+
+[node name="SwitchB" parent="." instance=ExtResource("sw")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0, -6)
+momentary = true
+
+[node name="SwitchLanding" parent="." instance=ExtResource("sw")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 38)

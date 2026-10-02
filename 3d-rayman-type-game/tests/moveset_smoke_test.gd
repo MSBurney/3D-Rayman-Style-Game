@@ -8,7 +8,8 @@ extends Node
 ##   <godot> --headless --path . res://tests/moveset_smoke_test.tscn
 ## Exit code is 0 when everything passes, 1 otherwise.
 ##
-## It reaches into a few private fields (_grapple, _rope) on purpose: the point
+## It reaches into a few private fields (_chain_window, _slam_recover) on purpose:
+## the point
 ## is to put the controller into states that need a level around them, which is
 ## awkward to arrange through input alone.
 
@@ -20,11 +21,13 @@ const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
 ## Spawned for the weight-acts-on-the-world checks. Only the momentum playground
 ## has these placed in it, and this suite runs on main.tscn.
 const CRUMBLING := preload("res://scenes/props/crumbling_floor.tscn")
+const SWITCH := preload("res://scenes/props/spin_switch.tscn")
+const KEG := preload("res://scenes/props/throwable_keg.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 53
+const EXPECTED_CHECKS := 48
 
 var player: Player
 var level: Node3D
@@ -80,13 +83,13 @@ func _check(label: String, ok: bool, detail: String = "") -> void:
 func _place(at: Vector3) -> void:
 	player.global_position = at
 	player.velocity = Vector3.ZERO
-	player._grapple = null
-	player._rope_taut = false
+
+
 	player._ledge_lock = 0.0
 	player._wall_lock = 0.0
 	player._coyote = 0.0
 	player._jump_buffered = 0.0
-	player._grapple_buffered = 0.0
+
 	player.jump_chain = 0
 	player._chain_window = 0.0
 	player._slam_recover = 0.0
@@ -150,41 +153,6 @@ func _roll_on(_slope: StaticBody3D, from: Vector3, push: Vector3, frames: int) -
 		peak = maxf(peak, Vector2(player.velocity.x, player.velocity.z).length())
 	return peak
 
-
-## Attaches to an anchor exactly as `_try_grapple` would, and holds the button.
-##
-## The swing is held, not toggled, so the button has to stay down for the whole
-## check — a `_release_all()` in the middle of one ends it. The repress lock is
-## set for the same reason the real code sets it: without it the press that
-## attached us is still down on the next frame and the swing lets go instantly.
-func _start_swing(anchor: GrapplePoint) -> void:
-	Input.action_press("grapple")
-	player._grapple = anchor
-	player._rope_length = clampf(
-		player.global_position.distance_to(anchor.global_position),
-		player.swing_min_rope, player.swing_max_rope)
-	player._grapple_lock = player.grapple_repress_delay
-	player._set_state(Player.State.SWING)
-
-
-## Hangs at rest from the bottom of the arc, optionally holds a direction, and
-## returns the speed reached. Used to compare a pumped swing against a dead one.
-##
-## At the bottom the rope is vertical, so every horizontal direction is fully
-## tangential to it — which is why this does not care where the camera points.
-func _pump_from_rest(anchor: GrapplePoint, pump: bool) -> float:
-	_place(anchor.global_position + Vector3(0, -10.5, 0))
-	await _step(2)
-	_start_swing(anchor)
-	player.velocity = Vector3.ZERO
-	if pump:
-		Input.action_press("move_right")
-	await _step(30)
-	var speed := player.velocity.length()
-	Input.action_release("move_right")
-	_release_all()
-	await _step(20)
-	return speed
 
 
 func _release_all() -> void:
@@ -459,226 +427,136 @@ func _run() -> void:
 	else:
 		_check("ledge climb up", false, "skipped, never hung")
 
-	# --- pull grapple: hook point sits ahead of the hub at (0, 7, -12)
-	_place(Vector3(0, 1.5, 0))
-	await _step(20)
-	var pull_target := player.targeting.pick(player.rig.camera, player.global_position + Vector3.UP, [player.get_rid()])
-	_check("finds a grapple target", pull_target != null,
-		"target=%s" % (pull_target.name if pull_target != null else "none"))
-
-	# --- the swing. Everything here is about there being NO speed cap, because
-	# capping it is what killed the mechanic twice. See Player._do_swing.
-	var anchor := level.get_node("HubPull") as GrapplePoint
-	var anchor_at := anchor.global_position
-
-	# These checks are about whether the MECHANIC works, so they must not depend
-	# on how the scene happens to be tuned. main.tscn sets `swing_max_rope = 6.5`
-	# on the player, which silently clamped every rope here to 6.5 m and failed
-	# three checks for a reason that had nothing to do with the code.
-	player.swing_max_rope = 60.0
-
-	# Hooking from level with the anchor gives a horizontal rope, so the whole
-	# swing happens in open air above the hub rather than scraping the floor.
-	_place(anchor_at + Vector3(10.5, -0.2, 0))
-	await _step(2)
-	_start_swing(anchor)
-	_check("hooking an anchor starts a swing",
-		player.state == Player.State.SWING
-			and absf(player._rope_length - 10.5) < 0.4,
-		"state=%s rope=%.2f" % [player.state_name(), player._rope_length])
-
-	# Swing down through the arc under gravity alone and watch the speed. A
-	# pendulum dropping 10.5 m should reach about sqrt(2*g*h) = 23 m/s, which is
-	# three times `max_speed` — if anything is quietly clamping, this is the
-	# check that notices.
-	var peak_speed := 0.0
-	var worst_radius_error := 0.0
-	for i in 90:
-		await _step(1)
-		if player.state != Player.State.SWING:
-			break
-		peak_speed = maxf(peak_speed, player.velocity.length())
-		if player._rope_taut:
-			var radius := player.global_position.distance_to(anchor.global_position)
-			worst_radius_error = maxf(worst_radius_error, absf(radius - player._rope_length))
-	_check("a swing is not speed capped", peak_speed > player.max_speed * 2.5,
-		"peak=%.1f m/s vs max_speed %.1f" % [peak_speed, player.max_speed])
-
-	# The rope is enforced as an exact position correction after the move, not as
-	# a spring before it. A spring is always a frame behind and buzzes at 60 Hz,
-	# which is what made the previous swing feel rough. Exact means exact.
-	_check("the rope holds an exact radius", worst_radius_error < 0.15,
-		"worst error=%.3f m" % worst_radius_error)
-
-	# Releasing keeps every bit of it. This is the payoff, and it is also what
-	# `keep_momentum` in _apply_horizontal protects: without that, the air
-	# control brakes a fast release back to walking pace within half a second.
+	# ------------------------------------------------------------- spin attack
 	#
-	# Released at a measured speed rather than after a fixed wait. A fixed wait
-	# lands at whatever phase of the arc the rope length happens to produce, and
-	# near the apex the swing is slow enough that `keep_momentum` is not even
-	# active — so the check was really measuring the rope length.
+	# Replaced the grapple on 2026-10-02. Everything here runs on the flat pad
+	# built for the Mario moves, with its own spawned fixtures, for the same
+	# reason: nothing in a level survives this suite reliably.
+
+	# --- a spin hurts what is standing next to you, and the chain scales.
 	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
 	await _step(40)
-	_place(anchor_at + Vector3(10.5, -0.2, 0))
-	await _step(2)
-	_start_swing(anchor)
-	var speed_before_release := 0.0
-	for i in 150:
-		await _step(1)
-		if player.state != Player.State.SWING:
-			break
-		var flat_now := Vector2(player.velocity.x, player.velocity.z).length()
-		if flat_now > player.max_speed * 2.0:
-			speed_before_release = flat_now
-			break
-	_release_all()
-	await _step(20)
-	var speed_after_release := Vector2(player.velocity.x, player.velocity.z).length()
-	_check("releasing keeps the swing's momentum",
-		player.state != Player.State.SWING
-			and speed_before_release > 0.0
-			and speed_after_release > speed_before_release * 0.9,
-		"%.1f -> %.1f m/s over 20 frames" % [speed_before_release, speed_after_release])
-	await _step(40)
-
-	# Pumping. Started from rest at the bottom of the arc, where the rope is
-	# vertical and so EVERY horizontal direction is tangential to it — which
-	# makes this work whichever way the camera happens to be pointing.
-	var pumped := await _pump_from_rest(anchor, true)
-	var unpumped := await _pump_from_rest(anchor, false)
-	_check("pumping accelerates past max_speed",
-		pumped > unpumped + 1.0 and pumped > player.max_speed,
-		"pumped=%.1f unpumped=%.1f max_speed=%.1f"
-			% [pumped, unpumped, player.max_speed])
-
-	# The rope only pulls, it never pushes. Fired straight up from below the
-	# anchor, the rope goes slack and the player flies clean over the top of it
-	# instead of being pinned underneath — being pinned below the anchor was half
-	# of what made the old swing feel like a cage.
-	# Offset sideways, not straight below: fired directly at the anchor the
-	# player reaches it and gets the arrival bounce instead, which is a different
-	# check. 6 m to the side means the closest approach is 6 m, well clear of
-	# `swing_min_rope`, and the rope catches again 8 m above the anchor.
-	_place(anchor_at + Vector3(6, -8, 0))
-	await _step(2)
-	_start_swing(anchor)
-	player.velocity = Vector3(0, 26, 0)
-	var highest := player.global_position.y
-	for i in 100:
-		await _step(1)
-		if player.state != Player.State.SWING:
-			break
-		highest = maxf(highest, player.global_position.y)
-	_check("the rope is one-sided, so you can rise above the anchor",
-		highest > anchor_at.y + 1.0,
-		"reached y=%.1f vs anchor y=%.1f" % [highest, anchor_at.y])
-	_release_all()
-	await _step(20)
-
-	# Reeling in. Trading rope for speed is the main exploit the swing offers, so
-	# the rope length has to actually be the player's to change.
-	_place(anchor_at + Vector3(12, -1, 0))
-	await _step(2)
-	_start_swing(anchor)
-	var rope_before := player._rope_length
-	Input.action_press("grab")
-	await _step(20)
-	var rope_after := player._rope_length
-	_check("reeling in shortens the rope", rope_after < rope_before - 2.0,
-		"%.1f -> %.1f m" % [rope_before, rope_after])
-
-	# Reel all the way in and you arrive at the anchor, which bounces you off it.
-	var bounce_vy := 0.0
-	for i in 200:
-		await _step(1)
-		if player.state != Player.State.SWING:
-			bounce_vy = player.velocity.y
-			break
-	var want_bounce := sqrt(2.0 * player.gravity_rise
-		* player.jump_height * player.anchor_bounce_height_scale)
-	_check("reeling all the way in bounces off the anchor",
-		bounce_vy >= want_bounce - 0.6,
-		"vy=%.2f, at least %.2f expected" % [bounce_vy, want_bounce])
-	_release_all()
-	await _step(30)
-
-	# Jumping off adds a jump ON TOP of the swing rather than replacing it, which
-	# is where the absurd long jumps come from.
-	_place(anchor_at + Vector3(10.5, -0.2, 0))
-	await _step(2)
-	_start_swing(anchor)
-	await _step(45)
-
-	# Sampled on the exact frame the swing ends, not after a fixed wait: a press
-	# does not necessarily land before the same frame's _physics_process, and
-	# waiting instead lets gravity eat the gain being measured.
-	Input.action_press("jump")
-	var gained := 0.0
-	var flat_on_rope := 0.0
-	var flat_after := 0.0
-	for i in 10:
-		var vy_on_rope := player.velocity.y
-		var flat_now := Vector2(player.velocity.x, player.velocity.z).length()
-		await _step(1)
-		if player.state != Player.State.SWING:
-			gained = player.velocity.y - vy_on_rope
-			flat_on_rope = flat_now
-			flat_after = Vector2(player.velocity.x, player.velocity.z).length()
-			break
-	Input.action_release("jump")
-	# "Adds on top" is measured as the vertical GAIN plus the horizontal speed
-	# surviving, not as total speed going up: part way down the arc the swing is
-	# travelling downward, so an upward impulse legitimately makes the magnitude
-	# of the velocity smaller while being strictly better to have.
-	_check("jumping off adds a jump on top of the swing",
-		player.state != Player.State.SWING
-			and gained > player._jump_velocity() * 0.85
-			and flat_after > flat_on_rope * 0.9,
-		"vy +%.1f (a jump is %.1f), horizontal %.1f -> %.1f"
-			% [gained, player._jump_velocity(), flat_on_rope, flat_after])
-	_release_all()
-	await _step(40)
-
-	# --- the tongue on an ENEMY: the enemy comes to the player, not the other
-	# way round, and ends up carried. This is the half that makes it a Yoshi
-	# tongue rather than a grapple.
-	# Spawned, not borrowed from the level. The swing checks above fly the player
-	# all over the hub and drop them from the anchor's height, which lands on and
-	# kills the hub walkers often enough that reading one here failed with "Node
-	# not found: HubWalkerB". Nothing placed in the level survives this suite
-	# reliably — see the note on the stomp check.
-	_release_all()
+	var spin_prey := WALKER.instantiate() as Node3D
+	level.add_child(spin_prey)
+	spin_prey.global_position = PAD_TOP + Vector3(1.6, 0.2, 0)
 	await _step(10)
-	var prey := WALKER.instantiate() as Node3D
-	level.add_child(prey)
-	prey.global_position = Vector3(-10, 0.2, 8)
+	var spin_health := spin_prey.get_node("Health") as HealthComponent
+	spin_health.max_health = 40
+	spin_health.reset()
+	var spin_hp: int = spin_health.current
+
+	Input.action_press("attack")
+	await _step(2)
+	Input.action_release("attack")
+	await _step(2)
+	_check("a spin hurts what is next to you",
+		spin_health.current < spin_hp and player.abilities.spin_step == 1,
+		"hp %d -> %d, step=%d" % [spin_hp, spin_health.current, player.abilities.spin_step])
+
+	# Freed before anything else runs. It has 40 HP so it survives the spin, which
+	# means it then chases the player and lands contact hits — and a hit puts the
+	# player in HURT, where `handle_input` is not called at all, so attack presses
+	# are silently swallowed. That cost the chain check below two of its three
+	# spins and looked exactly like the combo being broken.
+	spin_prey.queue_free()
 	await _step(10)
-	var prey_start := prey.global_position
-	_place(prey_start + Vector3(0, 0.6, 7))
+
+	# The third spin in a chain has to be the biggest. Measured by the radius the
+	# spin reports, which is the same number the damage and knockback scale by.
+	var radii: Array[float] = []
+	player.abilities.spun.connect(func(_step: int, radius: float) -> void:
+		radii.append(radius))
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(60)
+	for i in 3:
+		Input.action_press("attack")
+		await _step(2)
+		Input.action_release("attack")
+		# Past the cooldown (0.44s = 27 frames) but inside the combo window (0.9s).
+		# The chain is the thing being tested, so both bounds matter.
+		await _step(32)
+	_check("the third spin is the biggest",
+		radii.size() == 3 and radii[1] > radii[0] and radii[2] > radii[1],
+		"radii=%s" % str(radii))
+
+	# And the chain resets after the third, so the big one is always the pay-off
+	# for three presses rather than a lucky accident mid-string.
+	_check("the chain resets after the third spin",
+		player.abilities.spin_step == 0,
+		"step=%d" % player.abilities.spin_step)
 	await _step(40)
-	var player_before := player.global_position
-	player.abilities.tongue_grab(prey)
-	for i in 150:
-		await get_tree().physics_frame
+
+	# --- a spin trips a switch. The `spinnable` group plus a `spin_hit` method is
+	# the whole contract, and this is what makes it extensible.
+	var switch := SWITCH.instantiate() as SpinSwitch
+	level.add_child(switch)
+	switch.global_position = PAD_TOP + Vector3(1.8, 0, 6)
+	await _step(10)
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 6))
+	await _step(40)
+	var switch_before := switch.on
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(3)
+	_check("a spin trips a switch", switch.on != switch_before,
+		"on %s -> %s" % [switch_before, switch.on])
+	await _step(40)
+
+	# --- the magnet: a spin drags a carryable to you from further than your
+	# hands reach, and you end up holding it. Moving the OBJECT rather than the
+	# player is the point — a spin rearranges the level around you.
+	_release_all()
+	var mag_keg := KEG.instantiate() as Node3D
+	level.add_child(mag_keg)
+	mag_keg.global_position = PAD_TOP + Vector3(3.4, 0.6, -6)
+	await _step(20)
+	var keg_start := mag_keg.global_position
+	_place(PAD_TOP + Vector3(0, 0.4, -6))
+	await _step(40)
+	var player_at := player.global_position
+	Input.action_press("attack")
+	await _step(2)
+	Input.action_release("attack")
+	for i in 120:
+		await _step(1)
 		if player.abilities.carried != null:
 			break
-	var player_moved := player_before.distance_to(player.global_position)
-	var prey_moved := prey_start.distance_to(prey.global_position)
-	_check("tongue drags the enemy, not the player",
-		player.abilities.carried == prey and prey_moved > player_moved,
-		"enemy moved %.2f, player moved %.2f, carried=%s"
-			% [prey_moved, player_moved,
+	var keg_moved := keg_start.distance_to(mag_keg.global_position)
+	var player_moved := player_at.distance_to(player.global_position)
+	_check("a spin magnets a carryable to you",
+		player.abilities.carried == mag_keg and keg_moved > player_moved,
+		"keg moved %.2f, player moved %.2f, carried=%s"
+			% [keg_moved, player_moved,
 				player.abilities.carried.name if player.abilities.carried else "none"])
 
-	# Pressing grapple while holding something throws it.
-	Input.action_press("grapple")
+	# --- attack while holding throws it.
+	Input.action_press("attack")
 	await _step(3)
-	_release_all()
+	Input.action_release("attack")
 	await _step(6)
-	_check("grapple throws what you are carrying", player.abilities.carried == null,
+	_check("attack while holding throws it", player.abilities.carried == null,
 		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
-	await _step(60)
+	await _step(40)
+
+	# --- auto-carry: walk into something and you are holding it, no button.
+	_release_all()
+	var walk_keg := KEG.instantiate() as Node3D
+	level.add_child(walk_keg)
+	walk_keg.global_position = PAD_TOP + Vector3(0, 0.6, -14)
+	await _step(20)
+	# Placed just inside `touch_carry_distance` rather than walked into, because
+	# which way "forward" is depends on the camera.
+	_place(walk_keg.global_position + Vector3(0.9, 0.0, 0))
+	await _step(20)
+	_check("walking into a carryable picks it up",
+		player.abilities.carried == walk_keg,
+		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
+	player.abilities.throw_carried()
+	await _step(40)
 
 	# --- a thrown object is a homing, ricocheting rocket (thrown_flight.gd).
 	#
@@ -772,21 +650,22 @@ func _run() -> void:
 			% [player.state_name(), player.velocity.y, player.velocity.z])
 	await _step(20)
 
-	# --- grab and throw a keg
+	# --- a thrown keg leaves at rocket speed.
+	#
+	# This block used to use the `grab` button for both halves. There is no grab
+	# button any more: carrying is automatic on touch, and `attack` throws. The
+	# pick-up and the throw each have their own check above; what is still worth
+	# measuring here is the SPEED, because a flight that silently fails to start
+	# looks identical to a successful throw until you read the number.
 	var keg := level.get_node("KegA") as RigidBody3D
 	_place(keg.global_position + Vector3(0, 0.4, 1.0))
 	await _step(25)
-	Input.action_press("grab")
-	await _step(3)
-	Input.action_release("grab")
-	await _step(5)
-	# Whichever keg the grab area actually chose is the one to watch.
 	var held := player.abilities.carried as RigidBody3D
-	_check("grab picks up keg", held != null,
+	_check("walking up to a keg carries it", held != null,
 		"carried=%s" % (held.name if held != null else "none"))
-	Input.action_press("grab")
+	Input.action_press("attack")
 	await _step(3)
-	Input.action_release("grab")
+	Input.action_release("attack")
 	await _step(6)
 	# A thrown keg is frozen and driven by its Flight node, but a kinematic
 	# RigidBody3D still reports the velocity implied by its movement — so this

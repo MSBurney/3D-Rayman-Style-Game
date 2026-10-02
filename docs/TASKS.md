@@ -12,7 +12,7 @@ tell when it works.
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 53).
+If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 48).
 
 ---
 
@@ -33,6 +33,23 @@ still on it. Both of those thresholds come out of `Slope Gravity` on the player 
 group and the note in CLAUDE.md.
 
 *Done when:* you can say what angle gives a fun amount of speed, and add a row to this file saying so.
+
+---
+
+### 0b. Make something answer to the spin
+Two lines of contract, which makes it the smallest real feature in the project.
+
+- Copy `scripts/props/spin_switch.gd` as a starting point. The whole contract is: call
+  `add_to_group(&"spinnable")` in `_ready()`, and implement `func spin_hit(by: Node3D) -> void:`.
+- Make something that is *not* a switch. A bell that rings. A flower that opens. A crate that breaks
+  only on the third spin in a chain (the player's `abilities.spin_step` tells you which one it is).
+- Put it in `scenes/levels/momentum_playground.tscn` next to the existing switches.
+
+*Watch out:* `PlayerAbilities` walks the group by distance from the player's chest, so a very large
+prop will shrug off a spin that visibly hit its far end. Keep them about spin-radius sized, or give
+the prop a child node at the point that should count and check from there.
+
+*Done when:* your thing reacts to a spin and you did not edit `player_abilities.gd` to make it work.
 
 ---
 
@@ -61,18 +78,20 @@ A platform that slides between two points, carrying the player.
 
 ---
 
-### 3. Sound effects for the wall run and the tongue
+### 3. Sound effects for the slide and the spin
 There is an audio system already — see `play_sfx()` in `player.gd` and the `Sounds` group in the
-Inspector. Nothing plays for wall running, or for grabbing and throwing with the tongue.
+Inspector. Nothing plays for sliding, or for the spin attack and its combo.
 
 - Add new `@export var sfx_*: AudioStream` slots and call `play_sfx()` from the right state.
 - Generate new placeholder blips by editing the recipe list in
   `tools/make_placeholder_sounds.gd` and re-running it, or drop in real `.wav` files.
 
-*Watch out:* a wall run is continuous, not a one-shot. You will need a looping sound that starts on
-entering `WALL_RUN` and stops on leaving, rather than one blip per frame.
+*Watch out:* a slide is continuous, not a one-shot. You will need a looping sound that starts on
+entering `SLIDE` and stops on leaving, rather than one blip per frame. The spin already emits a
+`spun(step, radius)` signal with the chain position, so pitching the sound by `step` is easy.
 
-*Done when:* wall running and the tongue both sound like something is happening.
+*Done when:* sliding and all three spins in a chain sound like something is happening, and the
+third one sounds bigger.
 
 ---
 
@@ -130,7 +149,7 @@ whether it makes aiming better or just noisier.
 
 ### 8. Second level
 Duplicate `test_level.tscn` and build something that demands *combining* moves — a gap you can only
-clear by swinging off an anchor, slamming for height, and catching a ledge.
+clear by sliding a ramp into a long jump, pounding for a crumbling floor, and catching a ledge.
 
 That combination is the whole point of the project. Read the design rule at the top of `player.gd`.
 

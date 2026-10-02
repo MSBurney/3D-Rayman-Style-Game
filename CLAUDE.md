@@ -43,9 +43,9 @@ file to be read.
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
     components/      health, thrown_flight (drop-in Nodes, no matching scene)
-    player/          player.gd (movement), abilities, camera, grapple targeting, ledge sensor
+    player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
-    props/           lum, grapple point, throwable keg, checkpoint, hazard, crumbling floor
+    props/           lum, throwable keg, checkpoint, hazard, crumbling floor, spin switch
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase) and playground.tscn (momentum)
@@ -64,8 +64,8 @@ site, but they are worth knowing up front:
 
 - **`Input.is_action_just_pressed()` stays true for the whole frame.** If one function reacts to a
   press by changing state, and the new state's code runs later in the *same* frame, it sees that
-  same press and can immediately undo the change. The grapple needed a short lock-out timer
-  (`grapple_repress_delay`) because of exactly this.
+  same press and can immediately undo the change. The old grapple needed a short lock-out timer
+  because of exactly this; `spin_cooldown` plays the same role now.
 - **Wall and floor contact is only known after `move_and_slide()`.** `is_on_wall()` and
   `is_on_floor()` are meaningless before it. That is why `player.gd` has a separate
   `_after_move()` step for entering wall states.
@@ -129,83 +129,58 @@ The renderer is deliberately **GL Compatibility**, not Forward+. Do not switch i
 Not built yet, on purpose: animation (the character is primitives moved by code), swimming,
 menus, saving. Ask before starting any of these.
 
-## The tongue
+## The spin attack
 
-The grapple is a **Yoshi-style tongue**: an attack and a way of moving things, not a way of moving
-yourself. One button, and what happens depends on whether the target can be moved:
+**Added 2026-10-02, and it replaced the whole grapple.** `attack` (F / LMB / gamepad X) does one of
+two things depending on what you are holding:
 
-- **Anchor** (fixed to the level) — the player **swings** from it. `State.SWING` in `player.gd`.
-- **Enemy** (not fixed) — it is pulled to the player and ends up carried. `PlayerAbilities.tongue_grab`.
-  Press the button again to throw it. See **Thrown objects** below for what a throw does.
-- **Target with no `pick_up()`** (a turret, bolted down) — lashed for damage instead, so such
-  enemies stay killable rather than being immune.
+- **holding nothing** → spin. Hurts enemies in a radius, drags carryables to you, trips switches,
+  and chains into a bigger spin if repeated.
+- **holding something** → throw it.
 
-A grabbed enemy exposes the same `pick_up()` / `throw()` pair the throwable keg does, so the carry
-code treats it like any other held object and knows nothing about enemies.
+It lives in `player_abilities.gd` and is **not a `State`** — you can spin while running, jumping or
+falling, as in Mario Galaxy. If you find yourself wanting to add `State.SPIN`, that is a sign
+something is wrong: the spin does not change how the player moves.
 
-## The swing: do not cap it
+**Why it was a better bet than the grapple**, and the reason worth keeping: a grapple is a
+*traversal* system, so every level has to be designed around where you can and cannot hook. A spin
+is an *action with a radius*, so a level only has to care about what is standing near the player.
+Same argument as slopes-over-swinging in the weight section.
 
-**Read this before touching `_do_swing`.** The swing has been built three times and cut twice, and
-both times it was cut for the same reason dressed differently:
+### The `spinnable` group is the extension point
 
-1. **A pendulum on the jump button.** Wrong *kind* of input — a pendulum is sustained momentum
-   management, a jump is one impulse. Several rounds went into smoothing feel before anyone noticed
-   the ability was simply bound to the wrong button.
-2. **A pendulum with five caps in one function** — a speed limit, an apex clamp, drag, an
-   outward-velocity cancel and a spring. Each was added to answer a feel complaint, and together
-   they removed the only reason to use a swing.
+Anything that should react to a spin does exactly two things:
 
-The author's own diagnosis, and it is the one to keep: *"the fun part WAS the ability to mess with
-the physics of the grapple and exploiting it to make high jumps and far jumps — removing all of
-that with the caps killed the fun of the mechanic."*
+1. joins the `spinnable` group
+2. implements `spin_hit(by)`
 
-So: **nothing in the swing caps speed.** Not the pump, not gravity, not the release, not the top of
-the arc. Four places enforce that, and each will look like an oversight until you know why:
+`PlayerAbilities._trip_switches` walks the group by distance and calls the method. The prop holds no
+reference to the player and the player has no idea the prop exists. `spin_switch.gd` is the first
+user and is deliberately tiny — copy it. This is what "a variety of other interactions" means in
+practice, and it needs no changes in `player_abilities.gd` ever.
 
-- **`swing_gravity` is its own number and does not go through `_apply_gravity()`.** That helper
-  softens gravity near the apex and clamps the fall to `max_fall_speed`. Both are caps.
-- **`_apply_horizontal` takes a `keep_momentum` flag, and `_do_air` passes it.** Normally it steers
-  speed *toward* `max_speed`, which brakes as readily as it accelerates — so a 22 m/s release decayed
-  back to walking pace in about half a second. Above `max_speed` the stick may now redirect momentum
-  but never brake it. **This one is easy to reintroduce by accident**, because it does not live in
-  the swing at all.
-- **The swing-jump sets `_jumping = false`.** A normal jump is cut short when you release the
-  button, and you *have* to release the button to let go of the rope — so a cuttable swing-jump
-  halved itself every single time.
-- **The slack-rope push is added acceleration, never `move_toward(max_speed)`.** Same cap wearing a
-  disguise.
+### Three things that are the way they are for a reason
 
-Three geometry rules that look arbitrary until you hit the bug they prevent:
+- **Hits are resolved by walking groups, not with an `Area3D`.** An area added and queried in the
+  same frame reports nothing, and a spin has to land the instant it is pressed. The ground pound's
+  shockwave does the same. For `throwable` there is a second reason: a keg at rest is a *sleeping*
+  `RigidBody3D`, and sleeping bodies are unreliable in overlap queries.
+- **The third spin ends the chain** rather than wrapping to the first, so the big one is always the
+  pay-off for three presses and never a lucky accident in the middle of a longer string.
+- **`regrab_delay` exists because of auto-carry.** Walking into a carryable picks it up with no
+  button, so without a blind spell after a throw the object you just threw is instantly re-collected
+  while it is still a metre away, and the throw looks like it did nothing.
 
-- **The rope is an exact position correction applied AFTER the move** (`_constrain_to_rope`, called
-  from `_after_move`), not a spring applied before it. `move_and_slide()` travels in a straight line
-  but a swing is an arc, so the body drifts off the circle every frame. A spring before the move is
-  always a frame behind: drift out, get yanked back, drift out again — a 60 Hz buzz that gets worse
-  the faster you go, and that buzz was most of why version two felt rough. The smoke test asserts
-  the radius error stays under 0.15 m; it currently measures 0.002 m.
-- **The rope is ONE-SIDED.** It pulls, it never pushes: closer to the anchor than the rope is long
-  and it does nothing at all. That is what lets you swing over the top of the anchor and loop around
-  it. Being pinned below the anchor was half of what made the old swing feel like a cage.
-- **The constraint removes only the OUTWARD velocity**, never speed in general. A rope cannot
-  stretch, so the component along it goes to zero and everything along the arc is untouched — so the
-  constraint itself takes no energy out of the swing.
+### The grapple's remains
 
-**Only the rope's *length* changes over time, never its enforcement**, which is what keeps the
-radius continuous. It starts at the distance you hooked from and is then the player's to change with
-`grab` / `drop`. Reeling in while moving fast is the main exploit on offer: the same angular rate on
-a shorter rope is a faster one. Reel all the way in and you arrive at the anchor and bounce off it,
-at *at least* `jump_height` — same rule as the slam's rebound, **no ability should quietly cost you
-altitude.** An earlier version gave a flat 6 m/s kick, less than a jump, so arriving set you down
-lower than you started.
+The grapple is gone from the player: no `State.SWING`, no tongue, no aim-assist, no rope, no HUD
+reticle. `grapple_targeting.gd` and `rope_line.gd` are deleted.
 
-Note `grab` doubles as reel-in, so `player.gd` passes `allow_grab = false` to
-`PlayerAbilities.handle_input` while swinging — otherwise reeling also tries to pick up every keg
-you pass.
-
-**There is no cap on rope length relative to the anchor's height above the ground, on purpose.**
-That means hooking an anchor level with you swings you down into the floor. The old code capped it
-and that cap is gone with the rest. The answer is level design — put anchors *high*, over the gap
-they are meant to cross — and the reel.
+**`grapple_point.gd` and its scene are still on disk, deliberately.** Ian's `scene_smilex.tscn`
+instances six of them under a `LevelGrappleHooks` node, including an animated one, so deleting the
+scene would break his level. The script is marked deprecated at the top. **This needs a conversation
+with Ian, not a unilateral delete.** The anchors in `test_level.tscn` were removed, since that level
+is ours.
 
 ## Thrown objects
 
@@ -242,18 +217,24 @@ Two more that bite in the *test*, not in the game:
   outside that and it drops into the pit, and the check then fails for a reason that has nothing to
   do with what it is testing.
 
-**The lesson from the two cut versions**, worth more than the mechanic itself: when a feel complaint
+### The lesson from the grapple, worth more than any of its three versions
+
+The grapple was a pendulum on the jump button (wrong input), then a pendulum with five caps (the
+caps were the bug), then a pull-and-bounce (worked exactly as specified and was dull), then an
+uncapped swing (fun, and shelved for scope), and finally deleted in favour of the spin. When a feel
+complaint
 survives two or three rounds of tuning, stop tuning. Ask instead whether the ability is on the right
 *kind* of input (sustained vs impulse, held vs tapped) and whether the thing being "smoothed" is the
 thing that made it fun. Both times the swing was fixed by taking something away, never by adding a
-number.
+number. And when a mechanic survives four rewrites without settling, question whether it belongs
+in the game at all — that is what finally resolved it.
 
 ## Weight and momentum
 
 **The current direction, as of 2026-10-02.** The character is heavy, and the game is about building
-momentum and spending it. The swing is shelved (see above) — not because it worked badly in the end,
-but because an uncapped traversal ability is an open-ended design commitment, and every level then
-has to be built around it.
+momentum and spending it. The grapple is gone (see **The spin attack**) — not because it worked
+badly, but because an uncapped traversal ability is an open-ended design commitment, and every level
+then has to be built around it.
 
 **So momentum lives in the LEVEL, not in an ability.** A slope is content. A level has momentum where
 you put a ramp in it, and a level with no ramps has none, so each level sets its own pace. That is
@@ -283,8 +264,8 @@ Measured, on the playground's ramps, starting at 9 m/s: **12° takes you to 16.6
 flat bleeds you back to 7.5, and uphill eats all 9 m/s in under 3 metres.**
 
 **`max_speed` (7.5) is not a speed limit.** It is the top speed *the stick alone* will reach, and the
-floor that `momentum_friction` bleeds down to. Slopes and swings take you far past it. Anything that
-clamps total speed to it is a bug — see the cap list in the swing section, which applies here too.
+floor that `momentum_friction` bleeds down to. Slopes and long jumps take you far past it. Anything
+that clamps total speed to it is a bug.
 
 **Weight has to be a liability somewhere**, or it stops being a constraint and turns into a stat.
 `crumbling_floor.gd` is the first piece of that: a slab a heavy landing destroys under you. It

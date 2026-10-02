@@ -1,6 +1,19 @@
 class_name GrapplePoint
 extends Node3D
 
+## DEPRECATED: an anchor the player used to swing from.
+##
+## The grapple was replaced by the spin attack on 2026-10-02, so nothing reads
+## these any more and they are decoration. The file is kept ONLY because Ian's
+## scene_smilex.tscn instances six of them under a LevelGrappleHooks node, and
+## deleting the scene would break his level. That needs a conversation with him
+## rather than a unilateral delete.
+##
+## If you want them to do something again, the cheap option is to make them
+## `spinnable` (see spin_switch.gd) so a spin can at least knock them.
+##
+## Original description follows.
+##
 ## An anchor the player swings from.
 ##
 ## Anchors are bolted to the level, so hooking one moves the *player* — they are

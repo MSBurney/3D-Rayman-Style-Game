@@ -30,10 +30,10 @@ Fly around for five minutes before reading any code. Try to reach all four zones
 - **North** — hop the platforms, then dive across the gap using the two floating rings.
 - **East** — sprint at the tan wall and keep going; you should run along it.
 - **West** — jump at the tall pink terraces and you will grab the lip. Press jump again to climb up.
-- **South** — a pit with floating rings over it. **Hold Q** (or right-click) to hook one and swing
-  across. Hold a direction to pump the arc, `E` to reel the rope in, `Space` to launch off it.
+- **South** — a pit. ⚠️ This zone was built around grapple anchors and currently has no route
+  across it at all; see the warning in the README. Try the playground instead.
 
-Press **F3** for a live readout of your state, speed and current grapple target. Leave it on — it
+Press **F3** for a live readout of your state, speed, jump chain and spin. Leave it on — it
 is the single most useful thing for understanding what the code is doing.
 
 ---
@@ -91,9 +91,9 @@ main way to learn what each number does. **Go and break several of them.** Sugge
 
 | Try | In group | What you should notice |
 | --- | --- | --- |
-| `Tongue Reel Speed` → `4` | Abilities node | Watch an enemy get dragged in slowly — the tongue is easiest to understand at low speed |
-| `Swing Pump Accel` → `80` | Grapple > Swing | Hold a direction while swinging and you wind up absurdly fast. Nothing stops you, which is the point |
-| `Swing Reel Speed` → `3` | Grapple > Swing | Makes it obvious what `E` and `Ctrl` do to the rope |
+| `Magnet Speed` → `3` | Abilities > Carry | Spin next to a keg and watch it crawl towards you. The magnet is easiest to understand at low speed |
+| `Spin Third Scale` → `6` | Abilities > Spin | Chain three spins and the last one clears the whole plaza. Shows what the chain is scaling |
+| `Spin Combo Window` → `0.45` | Abilities > Spin | Chaining becomes near-impossible. Shows why this has to clear `Spin Time + Spin Cooldown` with room to spare |
 | `Slope Gravity` → `0` | Weight | Run down the big ramp in the playground. It becomes an ordinary floor, and you suddenly see how much of the game's speed was coming from it |
 | `Momentum Friction` → `30` | Weight | Ramp speed evaporates the moment you reach the bottom. This is what a cap feels like, and why this number is low |
 | `Acceleration` → `65` | Run | The old, light character. Try the ramps with it and notice that weight is what makes the speed feel earned |
@@ -145,60 +145,61 @@ reference to another. That is the point: you can rewrite the HUD without opening
 > override, and it is a big part of why Godot scenes are useful.
 
 ---
-
 ## 4. Read one ability (20 minutes)
 
-Open `scripts/player/player.gd` and read the header comment. Then find `_do_swing()`.
+Open `scripts/player/player.gd` and read the header comment. Then find `_do_slide()`.
 
-Do **not** read the whole file. The structure exists so you don't have to: one `_do_<state>()`
+Do **not** read the whole file. The structure exists so you do not have to: one `_do_<state>()`
 function per thing the player can be doing, and `_physics_process` picks which one runs:
 
 ```gdscript
 match state:
     State.GROUND: _do_ground(delta)
+    State.CROUCH: _do_crouch(delta)
+    State.SLIDE: _do_slide(delta)
     State.AIR: _do_air(delta)
-    State.SWING: _do_swing(delta)
     ...
 ```
 
-`_do_swing()` has that shape every state function has — **move, then check whether we should be in
-a different state.** It is also the most commented function in the project, because almost
-everything in it is there to stop someone helpfully adding a limit back. Read the comment block at
-the top before the code: the swing has been built three times, and twice it was cut because a feel
-complaint got answered with a cap.
+`_do_slide()` has the shape every state function has — **move, then check whether we should be in a
+different state.** It is about twenty lines, and three of the four `if`s at the bottom are exits: to
+a long jump, to standing up, to crouching when you run out of speed. Count the exits in each
+`_do_` function; a state with no way out is a bug.
 
-Then read `_constrain_to_rope()`, which is where the actual rope lives. Three things to notice:
+Then read `_try_jump()`, which is where Mario's jump chain lives. Notice that the side flip is
+handled there too, and the comment saying why: both are jumps, so keeping them in one function means
+no state has to know the difference.
 
-1. It runs from `_after_move()`, not from the state function. `move_and_slide()` travels in a
-   straight line and a swing is an arc, so the body drifts off the circle every frame and is put
-   back afterwards. Doing it the obvious way — a spring applied *before* the move — is always a
-   frame behind and buzzes at 60 Hz.
-2. It is **one-sided**: closer to the anchor than the rope is long and it does nothing. A rope pulls,
-   it does not push. That one `if` is what lets you loop over the top of the anchor.
-3. It removes only the velocity pointing *along* the rope, never speed in general.
+> **Try it:** on the playground, run down the big ramp holding `Ctrl` to slide, then press `Space` at
+> the bottom. Watch the `speed` line on F3. The long jump **adds** its push to the speed the slope
+> gave you, so the faster you arrive the further you go.
 
-> **Try it:** hold `Q` on a purple anchor from somewhere high, do nothing else, and watch the
-> `speed` line on the F3 readout. A free drop through the arc reaches about 22 m/s — `Max Speed`,
-> the number that governs running, is 7.5. Then let go at the bottom and see that you keep it.
+Now open `scripts/player/player_abilities.gd` and read `_spin()`. It is the other half of the
+moveset and it is deliberately **not** a state — you can spin while running, jumping or falling,
+so it has nothing to do with the state machine. Notice `_trip_switches()`: anything that joins the
+`spinnable` group and implements `spin_hit()` reacts to a spin, with no change needed in the player.
+That is the pattern to copy if you add a thing the spin should affect.
+
 
 Two things in this file are worth understanding because they bite everyone:
 
 **Order matters.** `is_on_floor()` and `is_on_wall()` only mean anything *after*
-`move_and_slide()` — before it, they describe last frame. That is why wall-running is entered in
+`move_and_slide()` — before it, they describe last frame. That is why the wall cling is entered in
 `_after_move()`, not inside a state function.
 
 **A button press lasts a whole frame.** `Input.is_action_just_pressed()` stays true for every
 check within the same frame. If one function reacts to a press by changing state, and the new
 state runs *later in the same frame*, it sees the same press and can undo the change immediately.
-The grapple needed `grapple_repress_delay` for exactly this: the press that fired the tongue was
-still "just pressed" when the tongue code ran, so it cancelled itself.
+The old grapple needed a lock-out timer for exactly this: the press that fired it was still "just
+pressed" when its own code ran a moment later, so it cancelled itself. `spin_cooldown` does the same
+job for the spin.
 
-> **Try it:** find a walker and press `Q` at it, then press `Q` again to throw it. Then aim at a
-> purple anchor and press `Q`. Same button, opposite outcomes — you move, or the target moves.
-> Read `_try_grapple()` in `player.gd` to see where that fork is made, and `tongue_grab()` in
-> `player_abilities.gd` for the half that drags enemies.
+> **Try it:** stand near a keg and press `F`. The spin drags it to you and you end up holding it;
+> press `F` again to throw it. Same button, two outcomes, decided only by whether your hands are
+> full. Read `handle_input()` in `player_abilities.gd` — the fork is three lines.
 >
-> **Then try throwing badly on purpose.** Grab a walker, turn away from everything, and throw. The
+> **Then try throwing badly on purpose.** Spin next to a walker to pick it up, turn away from
+> everything, and throw. The
 > object picks its own victim and rockets at it; if there is nothing to chase it ricochets off the
 > walls a few times and bursts. That is `scripts/components/thrown_flight.gd`, and it is a good
 > example of a **component**: a plain `Node` you add as a child of something to give it a
@@ -258,8 +259,8 @@ table. Run it after changing anything in `player.gd`:
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-53 checks, a few seconds. It has already caught several bugs that looked fine in play, including
-the grapple problem above. If you add an ability, add a check for it in
+48 checks, a few seconds. It has already caught several bugs that looked fine in play, including
+the grapple problems above. If you add an ability, add a check for it in
 `tests/moveset_smoke_test.gd` — copy an existing one, they are all the same shape.
 
 ---
@@ -270,9 +271,9 @@ the grapple problem above. If you add an ability, add a check for it in
 scripts/
   game.gd          score, checkpoints, respawning
   events.gd        the signal noticeboard (autoloaded as `Events`)
-  player/          player.gd, camera, grapple targeting, ledge sensor, abilities
+  player/          player.gd, abilities (spin + carry), camera, ledge sensor
   enemies/         walker, turret, bullet
-  props/           lum, grapple point, keg, checkpoint, hazard
+  props/           lum, keg, checkpoint, hazard, crumbling floor, spin switch
   ui/              hud.gd
 scenes/            mirrors scripts/ — one scene per script
 ```

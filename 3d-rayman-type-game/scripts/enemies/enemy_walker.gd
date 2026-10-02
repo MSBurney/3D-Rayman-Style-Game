@@ -37,7 +37,7 @@ var _direction: float = 1.0
 var _player: Player = null
 var _chasing: bool = false
 var _dead: bool = false
-## Set while the player.s tongue is dragging us in — the player owns our
+## Set while the player is magneting us in — the player owns our
 ## position during that, so our own movement code stands down.
 var _tethered: bool = false
 var _held: bool = false
@@ -62,7 +62,7 @@ func _ready() -> void:
 	stompbox.body_entered.connect(_on_stomp)
 
 func _physics_process(delta: float) -> void:
-	# Being reeled in by the tongue: the player is moving us, so do nothing and
+	# Being magneted in: the player is moving us, so do nothing and
 	# do not fight it.
 	if _tethered:
 		return
@@ -215,8 +215,8 @@ func _play(stream: AudioStream) -> void:
 # player's carry code treats a grabbed enemy exactly like any other object it
 # picked up. Nothing in player_abilities.gd knows this is an enemy.
 
-## The tongue has latched on and is dragging us in.
-func tongue_pulled(_by: Player) -> void:
+## The player's spin magnet has latched on and is dragging us in.
+func being_pulled(_by: Player) -> void:
 	if _dead:
 		return
 	_tethered = true

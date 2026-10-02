@@ -24,11 +24,9 @@ extends CharacterBody3D
 ## Each one is a separate file you can read in a couple of minutes, and each has
 ## its own tuning values in the Inspector:
 ##
-##   Abilities        player_abilities.gd  grabbing and throwing objects
+##   Abilities        player_abilities.gd  the spin attack, carrying and throwing
 ##   LedgeSensor      ledge_sensor.gd      "is there a ledge in front of me?"
-##   GrappleTargeting grapple_targeting.gd "which target does the player mean?"
 ##   Visual           player_visuals.gd    the body meshes and which way they face
-##   RopeLine         rope_line.gd         drawing the grapple rope
 ##   CameraRig        player_camera.gd     the third-person camera
 ##   Health           health.gd            hit points (shared with enemies)
 ##
@@ -58,9 +56,12 @@ extends CharacterBody3D
 ## ─── THE ONE DESIGN RULE ─────────────────────────────────────────────────────
 ##
 ## Abilities must *combine*, not take turns. Every state is written to hand off
-## into the others — a swing releases into a dive, a dive bounces off an enemy
-## into another dive, a wall run launches a grapple. If you add a state, make
-## sure it has exits into the others rather than trapping the player inside it.
+## into the others — a slide feeds a long jump, a long jump off a ramp crosses a
+## gap nothing else does, a wall kick sets up a ledge grab. If you add a state,
+## make sure it has exits into the others rather than trapping the player in it.
+##
+## Count the exits when you read a `_do_` function. A state with no way out is a
+## bug, and it is the easiest kind to write by accident.
 ##
 ## The state machine is a plain enum plus a `match`, rather than Godot's node
 ## based approach, because these states share a lot of velocity maths and
@@ -81,7 +82,7 @@ enum State {
 	## a WALL_RUN as well; see the wall section for why it went.
 	WALL_SLIDE,
 	LEDGE_HANG,
-	SWING,
+
 	## The ground pound. Still called SLAM throughout — same move, and renaming
 	## eleven exports would have been churn for nothing.
 	SLAM,
@@ -199,51 +200,6 @@ signal state_changed(from: State, to: State)
 @export var ledge_climb_forward: float = 3.5
 @export var ledge_cooldown: float = 0.28
 
-@export_group("Grapple")
-## Grace period after hooking on, before the grapple button can let go again.
-## Without it the button press that attaches you is still "just pressed" when the
-## swing code runs later in the SAME frame, so you detach instantly. It also
-## means a quick tap still gets you a short swing rather than nothing.
-@export var grapple_repress_delay: float = 0.2
-
-@export_subgroup("Swing")
-## Gravity while swinging.
-##
-## Its own number, and deliberately NOT routed through `_apply_gravity()` — that
-## function softens gravity near the apex and clamps the fall to `max_fall_speed`,
-## and both of those are caps. Nothing in the swing is allowed to cap speed; a
-## pendulum that cannot wind up is not worth having.
-@export var swing_gravity: float = 26.0
-## How hard the stick accelerates you along the arc.
-##
-## There is NO speed limit on this, on purpose. Winding a swing up as far as you
-## can be bothered to and spending it on one enormous jump IS the mechanic.
-@export var swing_pump_accel: float = 26.0
-## How fast `grab` shortens the rope and `drop` lets it out.
-##
-## Reeling in while moving fast is the main exploit the swing offers: the same
-## angular rate on a shorter rope is a faster one, so rope length converts
-## straight into speed. That is meant to be there.
-@export var swing_reel_speed: float = 16.0
-## Shortest the rope can get. Reach this and you are at the anchor itself, so you
-## bounce off it — see the Anchor bounce settings below.
-@export var swing_min_rope: float = 1.4
-## Longest the rope can be let out to. A bound on the ROPE, not on your speed.
-@export var swing_max_rope: float = 45.0
-## Steering while the rope is SLACK, i.e. in free flight inside the arc or up
-## over the top of the anchor. Added as acceleration rather than steering toward
-## `max_speed`, because moving toward a target speed would brake a fast swing.
-@export var swing_slack_accel: float = 14.0
-
-@export_subgroup("Anchor bounce")
-## Height of the bounce when you reel all the way in to the anchor, as a
-## multiple of `jump_height`. At 1.0 arriving returns exactly as much height as a
-## jump would, so it never costs altitude. Anchors can scale this themselves.
-@export var anchor_bounce_height_scale: float = 1.0
-## Fraction of your horizontal speed kept through that bounce. Arrive fast and
-## you leave fast — the bounce reads as a launch rather than a full stop.
-@export var anchor_bounce_keep: float = 0.6
-
 @export_group("Slam")
 ## The GROUND POUND. Crouch in mid-air to drive yourself into the floor.
 ##
@@ -284,7 +240,7 @@ signal state_changed(from: State, to: State)
 @export var sfx_jump: AudioStream
 @export var sfx_land: AudioStream
 @export var sfx_hurt: AudioStream
-@export var sfx_grapple: AudioStream
+@export var sfx_spin: AudioStream
 @export var sfx_slam: AudioStream
 
 @export_group("Weight")
@@ -346,15 +302,10 @@ var _slam_recover: float = 0.0
 var _wall_normal: Vector3 = Vector3.ZERO
 var _wall_lock: float = 0.0
 var _ledge_lock: float = 0.0
-var _grapple: Node3D = null
 ## Current rope length while swinging. Set from the distance you hooked at, then
 ## changed only by reeling — see _do_swing.
-var _rope_length: float = 0.0
 ## Whether the rope is pulling right now. False means slack, which means free
 ## flight: the rope only pulls, it never pushes. Read by the F3 readout.
-var _rope_taut: bool = false
-var _grapple_lock: float = 0.0
-var _grapple_buffered: float = 0.0
 var _hurt_left: float = 0.0
 var _spawn: Transform3D
 var _pre_move_vy: float = 0.0
@@ -366,12 +317,10 @@ var _air_peak_y: float = 0.0
 
 @onready var rig: PlayerCamera = $CameraRig
 @onready var health: HealthComponent = $Health
-@onready var targeting: GrappleTargeting = $GrappleTargeting
 @onready var ledges: LedgeSensor = $LedgeSensor
 @onready var abilities: PlayerAbilities = $Abilities
 @onready var visual: PlayerVisuals = $Visual
 @onready var hold_point: Node3D = $Visual/HoldPoint
-@onready var rope_line: RopeLine = $RopeLine
 @onready var sfx: AudioStreamPlayer3D = $Sfx
 
 
@@ -380,7 +329,6 @@ func _ready() -> void:
 	facing = -global_transform.basis.z
 	health.changed.connect(_on_health_changed)
 	health.died.connect(_on_died)
-	rope_line.visible = false
 	Events.player_health_changed.emit(health.current, health.max_health)
 
 
@@ -402,7 +350,6 @@ func _physics_process(delta: float) -> void:
 		State.AIR: _do_air(delta)
 		State.WALL_SLIDE: _do_wall_slide(delta)
 		State.LEDGE_HANG: _do_ledge_hang(delta)
-		State.SWING: _do_swing(delta)
 		State.SLAM: _do_slam(delta)
 		State.HURT: _do_hurt(delta)
 		State.DEAD: _do_dead(delta)
@@ -420,7 +367,6 @@ func _physics_process(delta: float) -> void:
 	_after_move(delta)
 
 	_update_visual(delta)
-	_update_rope()
 
 
 # ---------------------------------------------------------------- input & timers
@@ -447,8 +393,6 @@ func _tick_timers(delta: float) -> void:
 	_jump_buffered -= delta
 	_wall_lock -= delta
 	_ledge_lock -= delta
-	_grapple_lock -= delta
-	_grapple_buffered -= delta
 	_slam_recover -= delta
 
 	# The jump chain only decays on the ground. Let the window lapse without
@@ -469,8 +413,6 @@ func _read_input() -> void:
 
 	if Input.is_action_just_pressed(&"jump"):
 		_jump_buffered = jump_buffer
-	if Input.is_action_just_pressed(&"grapple"):
-		_grapple_buffered = jump_buffer
 	if Input.is_action_just_released(&"jump"):
 		_jump_released = true
 		if _jumping and velocity.y > 0.0:
@@ -478,11 +420,10 @@ func _read_input() -> void:
 			_jumping = false
 
 	if state != State.DEAD and state != State.HURT:
-		_update_targeting()
 		# `grab` doubles as reel-in while swinging, so hand-grabbing is switched
 		# off for the duration. Without this, holding it to reel also tries to
 		# pick up every keg you swing past.
-		abilities.handle_input(get_physics_process_delta_time(), state != State.SWING)
+		abilities.handle_input(get_physics_process_delta_time())
 
 	if Input.is_action_just_pressed(&"debug_toggle"):
 		Events.debug_toggled.emit(true)
@@ -692,9 +633,6 @@ func _do_ground(delta: float) -> void:
 	if Input.is_action_pressed(&"crouch"):
 		_set_state(State.SLIDE if _flat_speed() >= slide_min_speed else State.CROUCH)
 		return
-	# The grapple is usable from standing too, now that it has its own button.
-	if _try_grapple():
-		return
 	if not is_on_floor():
 		_set_state(State.AIR)
 
@@ -776,9 +714,6 @@ func _do_air(delta: float) -> void:
 	if Input.is_action_just_pressed(&"crouch"):
 		_jump_buffered = 0.0
 		_set_state(State.SLAM)
-		return
-
-	if _try_grapple():
 		return
 
 	if _ledge_lock <= 0.0 and velocity.y <= 0.5 and _find_ledge():
@@ -931,180 +866,6 @@ func _do_ledge_hang(delta: float) -> void:
 			global_position += step
 
 
-## Swinging on an anchor.
-##
-## ─── THE RULE THAT MATTERS ───────────────────────────────────────────────────
-##
-## **Nothing in here caps your speed.** Not the pump, not gravity, not the
-## release, not the top of the arc. That is not an oversight, it is the whole
-## design, and it is the second thing this mechanic has been through:
-##
-##   • Version one was a pendulum on the JUMP button. Wrong input: a pendulum is
-##     sustained momentum management, a jump is one impulse. Cut.
-##   • Version two had five caps stacked in one function — a speed limit, an
-##     apex clamp, drag, an outward-velocity cancel and a spring. Each one was
-##     added to smooth a complaint, and together they removed the only reason to
-##     use a swing at all. Cut.
-##
-## The fun is in *exploiting* the physics: wind the arc up, reel in to trade rope
-## for speed, and spend the lot on one absurd jump. A cap is the mechanic
-## apologising for itself. If a swing ever feels wrong again, do NOT reach for a
-## limit — check the rope geometry below first.
-##
-## ─── HOW IT WORKS ────────────────────────────────────────────────────────────
-##
-##   hold grapple  stay attached; let go and you keep every bit of speed
-##   stick         pumps along the arc (uncapped) — push the way you are going
-##   grab / drop   reel the rope in and out
-##   jump          leave the rope with a jump added ON TOP of the swing's speed
-##
-## Reel all the way in and you arrive at the anchor and bounce off it.
-func _do_swing(delta: float) -> void:
-	# The anchor can be freed under us, so re-check every frame.
-	if _grapple == null or not is_instance_valid(_grapple):
-		_release_swing()
-		return
-
-	# Letting go. No release penalty and no exit cap — what you wound up, you
-	# keep. The repress lock is why a quick tap still gets a short swing: without
-	# it the press that attached you is still held on the very next frame and
-	# nothing would ever latch.
-	if _grapple_lock <= 0.0 and not Input.is_action_pressed(&"grapple"):
-		_release_swing()
-		return
-
-	# Jump off the rope. Added to the swing's velocity rather than replacing it,
-	# so a wound-up swing plus a jump is bigger than either — this is the "far
-	# jump / high jump" the whole thing exists to produce.
-	if _jump_buffered > 0.0:
-		_jump_buffered = 0.0
-		velocity.y += _jump_velocity()
-		# NOT marked as a live jump, so the jump-cut cannot touch it. A normal
-		# jump is cut short when you release the button early, which is good for
-		# a jump and wrong here: you have to release the button to let go of the
-		# rope, so a cuttable swing-jump would halve itself every single time.
-		_jumping = false
-		_jump_released = true
-		play_sfx(sfx_jump)
-		_release_swing()
-		return
-
-	# Rope length is the player's to control, and the only thing about the rope
-	# that changes over time. Its *enforcement* never changes, which is what
-	# keeps the radius continuous — see _constrain_to_rope.
-	if Input.is_action_pressed(&"grab"):
-		_rope_length -= swing_reel_speed * delta
-	elif Input.is_action_pressed(&"drop"):
-		_rope_length += swing_reel_speed * delta
-	_rope_length = clampf(_rope_length, swing_min_rope, swing_max_rope)
-
-	var to_anchor := _grapple.global_position - global_position
-	var distance := to_anchor.length()
-
-	# Reeled all the way in: we have arrived at the anchor, so bounce off it.
-	if distance <= swing_min_rope:
-		_bounce_off_anchor()
-		return
-
-	# Raw gravity: no apex softening, no fall-speed clamp. See swing_gravity.
-	velocity.y -= swing_gravity * delta
-
-	var rope_dir := to_anchor / distance
-	if distance >= _rope_length - 0.05:
-		# Taut. Push along the ARC, not through the rope: the part of the stick
-		# pointing along the rope would only fight the constraint and get thrown
-		# away, so it is removed first. What is left is tangential, and
-		# tangential force is exactly what pumps a swing.
-		var push := wish_dir - rope_dir * wish_dir.dot(rope_dir)
-		velocity += push * swing_pump_accel * delta
-	else:
-		# Slack: free flight, which is how you get above the anchor and over the
-		# top of it. Plain added acceleration, never steering toward `max_speed`,
-		# because moving *toward* a target speed would brake a fast swing — that
-		# is a cap wearing a disguise.
-		velocity += wish_dir * swing_slack_accel * delta
-
-
-## Lets go of the rope. Keeps the velocity exactly as it is, deliberately.
-func _release_swing() -> void:
-	_grapple = null
-	_rope_taut = false
-	_set_state(State.AIR)
-
-
-## The rope itself, enforced as an exact position correction AFTER the move.
-##
-## Three things here each prevent a specific failure, and all three have been
-## got wrong in this file before:
-##
-## 1. **After the move, not before, and as a position correction rather than a
-##    spring.** `move_and_slide()` travels in a straight line, but a swing is an
-##    arc, so the body drifts off the circle every single frame. A spring applied
-##    *before* the move is always a frame behind: drift out, get yanked back,
-##    drift out again — a 60 Hz buzz that gets worse the faster you go, which is
-##    what made version two feel rough. Correcting the position afterwards makes
-##    the radius exact and leaves nothing to yank.
-##
-## 2. **One-sided.** A rope pulls, it does not push. Closer to the anchor than
-##    the rope is long and it does nothing at all. That is what lets you swing up
-##    over the top of the anchor and loop around it, instead of being pinned
-##    below it — and being pinned below it was half of what made the old swing
-##    feel like a cage.
-##
-## 3. **It removes only the OUTWARD velocity, never speed in general.** A rope
-##    cannot stretch, so the component along it goes to zero; everything along
-##    the arc is left completely untouched. So the constraint takes no energy out
-##    of the swing. This is the one hard assignment to `velocity` in the whole
-##    mechanic, and it is allowed because it is geometry, not tuning.
-func _constrain_to_rope() -> void:
-	if _grapple == null or not is_instance_valid(_grapple):
-		return
-
-	var anchor_position := _grapple.global_position
-	var offset := global_position - anchor_position
-	var distance := offset.length()
-
-	if distance <= _rope_length or distance < 0.001:
-		_rope_taut = false
-		return
-
-	_rope_taut = true
-	var out_dir := offset / distance
-	global_position = anchor_position + out_dir * _rope_length
-	var outward := velocity.dot(out_dir)
-	if outward > 0.0:
-		velocity -= out_dir * outward
-
-
-## Reeled all the way in to the anchor, so bounce off it like a trampoline
-## bolted to the sky.
-##
-## The bounce is at least `jump_height`, for the same reason the slam's rebound
-## is: an ability should never quietly cost you altitude. An earlier version
-## added a flat 6 m/s kick, which is *less* than a jump, so arriving set you down
-## lower than you started.
-func _bounce_off_anchor() -> void:
-	var anchor := _grapple as GrapplePoint
-	var height := jump_height * anchor_bounce_height_scale
-	if anchor != null:
-		height *= anchor.bounce_scale
-
-	# Keep some of the speed you arrived with, so coming in fast launches you
-	# hard instead of being flattened to the same hop every time.
-	velocity.x *= anchor_bounce_keep
-	velocity.z *= anchor_bounce_keep
-	_rope_taut = false
-	play_sfx(sfx_grapple)
-
-	# maxf, not a plain assignment: reeling in while already flying upward must
-	# not be slower than arriving at a standstill.
-	var kick := sqrt(2.0 * gravity_rise * height)
-	# bounce() is what enemies call when you stomp them. It sets the upward
-	# speed, clears the grapple, puts us back in AIR, and marks the jump as
-	# already released so holding the button cannot cut the bounce short.
-	bounce(maxf(velocity.y, kick))
-
-
 func _do_hurt(delta: float) -> void:
 	_hurt_left -= delta
 	_apply_gravity(delta)
@@ -1132,10 +893,6 @@ func _after_move(_delta: float) -> void:
 		State.GROUND:
 			if not is_on_floor() and velocity.y <= 0.0:
 				pass # handled next frame via coyote time
-		State.SWING:
-			# The rope has to be applied here, after the straight-line move has
-			# already pulled us off the arc. _constrain_to_rope explains why.
-			_constrain_to_rope()
 		State.SLAM:
 			# Landing is only knowable after move_and_slide().
 			if is_on_floor():
@@ -1177,67 +934,6 @@ func _snap_to_ledge() -> void:
 	_jumping = false
 
 
-# ------------------------------------------------------------------- grapple
-
-## Refreshes the aim every frame so the HUD reticle is always live. Does not
-## fire anything — [method _try_grapple] does that.
-func _update_targeting() -> void:
-	# Do not re-aim mid-swing: the reticle sweeping onto a new anchor while you
-	# are attached to one is noise, and the swing does not read it anyway.
-	if state == State.SWING:
-		return
-	targeting.pick(rig.camera, global_position + Vector3.UP * 1.0, [get_rid()])
-
-
-## Fires the tongue if a target is locked and the player asked for it.
-## Returns whether it started, so the caller knows to stop processing this frame.
-##
-## One verb with two outcomes, decided by whether the target can be moved:
-##
-##   • an **anchor** is bolted to the world, so the player swings from it
-##   • an **enemy** is not, so it is pulled to the player, and ends up carried
-##
-## Both halves matter and they came from opposite directions. The enemy half is
-## Yoshi's tongue: an attack and a way of rearranging the level. The anchor half
-## is a swing, which was cut twice and brought back, because the thing that makes
-## a grapple worth having is being able to abuse its physics — see _do_swing.
-func _try_grapple() -> bool:
-	if _grapple_buffered <= 0.0:
-		return false
-
-	# Already holding something? The button throws it. Checked before targeting
-	# so you are never stuck holding an enemy because something else is in view.
-	if abilities.carried != null:
-		_grapple_buffered = 0.0
-		_grapple_lock = grapple_repress_delay
-		abilities.throw_carried()
-		return true
-
-	var target := targeting.current
-	if target == null or not is_instance_valid(target):
-		return false
-
-	_grapple_buffered = 0.0
-	_grapple_lock = grapple_repress_delay
-	play_sfx(sfx_grapple)
-
-	if GrappleTargeting.is_anchor(target):
-		# Fixed to the level, so the player is the one that moves: attach and
-		# swing. The rope starts at exactly the distance you hooked from, which
-		# is why it is already taut and why the radius is continuous from the
-		# first frame.
-		_grapple = target
-		_rope_length = clampf(
-			global_position.distance_to(target.global_position),
-			swing_min_rope, swing_max_rope)
-		_set_state(State.SWING)
-		return true
-
-	# An enemy comes to you. Handing this to PlayerAbilities keeps player.gd
-	# about movement — reeling something in does not move the player at all, so
-	# it does not belong in the state machine.
-	abilities.tongue_grab(target)
-	return true
 
 
 # -------------------------------------------------------------- damage & death
@@ -1252,7 +948,6 @@ func take_hit(amount: int, from: Vector3) -> void:
 	play_sfx(sfx_hurt)
 	velocity = away.normalized() * hurt_knockback + Vector3.UP * hurt_lift
 	_hurt_left = hurt_time
-	_grapple = null
 	_set_state(State.HURT)
 
 
@@ -1283,7 +978,6 @@ func bounce(force: float = -1.0) -> void:
 	velocity.y = stomp_bounce if force < 0.0 else force
 	_jumping = true
 	_jump_released = true
-	_grapple = null
 	if state != State.DEAD:
 		_set_state(State.AIR)
 
@@ -1300,8 +994,6 @@ func kill() -> void:
 func respawn_at(where: Transform3D) -> void:
 	global_transform = where
 	velocity = Vector3.ZERO
-	_grapple = null
-	_rope_taut = false
 	abilities.drop_everything()
 	_hurt_left = 0.0
 	jump_chain = 0
@@ -1345,22 +1037,6 @@ func _update_visual(delta: float) -> void:
 	visual.tick(delta, facing)
 
 
-## Shows the rope while hooked on, hides it otherwise.
-func _update_rope() -> void:
-	# Drawn to whatever we are attached to: the anchor we are swinging from, or
-	# the enemy we are dragging in.
-	var tip: Node3D = null
-	if state == State.SWING and _grapple != null and is_instance_valid(_grapple):
-		tip = _grapple
-	elif abilities.tethered != null and is_instance_valid(abilities.tethered):
-		tip = abilities.tethered
-
-	if tip != null:
-		rope_line.draw_between(global_position + Vector3.UP * 1.0, tip.global_position)
-	else:
-		rope_line.clear()
-
-
 # ------------------------------------------------------------------- plumbing
 
 ## The only way the state should ever change. Always call this rather than
@@ -1401,8 +1077,6 @@ func _exit_state(which: State) -> void:
 	match which:
 		State.LEDGE_HANG:
 			_ledge_lock = maxf(_ledge_lock, ledge_cooldown)
-		State.SWING:
-			_rope_taut = false
 		_:
 			pass
 
@@ -1419,18 +1093,16 @@ func state_name() -> String:
 ## Feeds the F3 debug readout. Keeping it here means the HUD needs no knowledge
 ## of the controller's internals.
 func debug_info() -> Dictionary:
-	var target := targeting.current
 	return {
 		"state": state_name(),
 		"speed": Vector2(velocity.x, velocity.z).length(),
 		"vy": velocity.y,
 		"floor": is_on_floor(),
 		"wall": is_on_wall(),
-		"target": target.name if target != null else "-",
-		"kind": ("anchor" if GrappleTargeting.is_anchor(target) else "enemy") if target != null else "-",
 		"slam": "power %.2f" % slam_power(),
 		"chain": "%d (window %.2f)" % [jump_chain, maxf(_chain_window, 0.0)],
-		"rope": ("%.1f m %s" % [_rope_length, "taut" if _rope_taut else "slack"]) if state == State.SWING else "-",
+		"spin": ("step %d, %.2fs left" % [abilities.spin_step, maxf(abilities.spin_left, 0.0)]
+			if abilities.spin_left > 0.0 else "-"),
 		"carry": abilities.carried.name if abilities.carried != null else "-",
-		"tongue": abilities.tethered.name if abilities.tethered != null else "-",
+		"magnet": abilities.magnetised.name if abilities.magnetised != null else "-",
 	}

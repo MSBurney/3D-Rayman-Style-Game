@@ -15,7 +15,7 @@ build speed that nothing then takes away from you.
 Momentum being *level geometry* rather than a player ability is deliberate. A ramp is content, so a
 level has speed where you put a ramp in it and a level with no ramps has none — which means each
 level sets its own pace. Abilities still combine rather than take turns: a slam bounce feeds the next
-slam, a tongue-grabbed enemy becomes a thrown weapon, a long ramp feeds a jump across a gap nothing
+slam, a spin-grabbed enemy becomes a thrown weapon, a long ramp feeds a jump across a gap nothing
 else can cross.
 
 Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.godot` and press F5.
@@ -35,9 +35,9 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | **Long jump** | crouch at a run, then `Space` | LB then A |
 | **Ground pound** | **crouch in mid-air** | LB in mid-air |
 | **Wall kick** | touch a wall falling, then `Space` | A |
-| **Tongue / swing** | `Q` or `RMB` — **hold** on an anchor to swing | RB |
-| **Reel rope in / out** | `E` / `Ctrl` while swinging | B / LB |
-| Grab & throw | `E` | B |
+| **Spin attack** | `F` or `LMB` — press again to chain | X |
+| **Throw what you hold** | `F` or `LMB` | X |
+| Pick something up | just walk into it | — |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
 | Debug readout | `F3` | — |
 | Respawn / restart | `R` / `F5` | — |
@@ -101,34 +101,24 @@ awkward on a laptop trackpad.
   with every third one in a chain going 50% higher. That needed the jump button in mid-air, which
   the double and triple jump now own — and a pound that launches you is not a pound. The fall-distance
   scaling was kept because it is the part that carried the weight-is-a-resource idea.
-- **Tongue** — press `Q` and it reaches for the ringed target. One button, and what happens depends
-  on whether the target can be moved:
-  - **Anchor (purple ring)** — bolted to the level, so *you* are the one that moves: you **swing**
-    from it. See below.
-  - **Enemy (red ring)** — not bolted down, so *it* is pulled to *you*, and you end up carrying it.
-    Press `Q` again to throw it.
-  - **A turret** cannot be dragged, so the tongue lashes it for damage instead.
-- **Swing** — hold `Q` on an anchor and you are on a rope. **Nothing about it is capped**, and that
-  is the entire point: the fun of a grapple is abusing its physics to get somewhere you have no
-  business being.
+- **Spin attack** — press `F` and the character spins, Mario Galaxy style. It hurts enemies in a
+  radius, trips switches, and **drags anything carryable to you** so you end up holding it. Press
+  again to chain: the second spin is wider, and the **third is the biggest and hardest-hitting**.
+  After the third the chain resets, so the big one is always the pay-off for three presses rather
+  than a lucky accident mid-string.
 
-  | | |
-  | --- | --- |
-  | hold `Q` | stay attached; let go and you keep **every bit** of the speed you built |
-  | stick | pumps along the arc, with no speed limit at all |
-  | `E` / `Ctrl` | reel the rope in and out |
-  | `Space` | leave the rope with a jump added **on top of** the swing's speed |
+  Anything can answer to a spin by joining the `spinnable` group and implementing `spin_hit()` —
+  that is two lines, and it is how "a variety of other interactions" is meant to grow. `spin_switch.gd`
+  is the first user and is deliberately tiny.
 
-  A free drop through the arc already reaches about 22 m/s — three times running speed — and the
-  pump has no ceiling above that. The rope is **one-sided**: it pulls but never pushes, so with
-  enough speed you go clean over the top of the anchor and loop around it. Reeling in while moving
-  fast trades rope for speed, which is the main exploit on offer. Reel all the way in and you arrive
-  at the anchor and bounce off it at jump height.
-
-  This is the mechanic's third version. The first put the pendulum on the jump button — wrong kind
-  of input. The second had five caps stacked in one function, each added to answer a feel complaint,
-  and between them they removed the only reason to use a swing at all. If it ever feels wrong again,
-  the fix is to take something away.
+  **It replaced the grapple**, which had been through four versions: a pendulum on the jump button,
+  a pendulum with five caps, a pull-and-bounce, and finally an uncapped swing that was genuinely fun
+  and still got shelved. The reason is the same one that made slopes a better bet than swinging — a
+  grapple is a *traversal* system, so every level has to be designed around where you can hook. A
+  spin is an *action with a radius*, so a level only has to care about what is standing near you.
+- **Carrying** — walk into something carryable and you are holding it, no button. A spin reaches
+  further than your hands do and magnets things in from 5 m. Press the attack button while holding
+  something to throw it.
 - **Throwing** — a thrown object is not a lob, it is a **rocket**. Modelled on the Yoshi egg in
   Super Mario 64 DS: it picks the nearest enemy, sets off straight at it at 34 m/s, and steers to
   stay on it. You are not meant to aim well; you are meant to throw in roughly the right direction
@@ -140,24 +130,25 @@ awkward on a laptop trackpad.
   also adds damage, so working the walls pays.
 
   It bursts at the end with a ring at its real radius, hurting everything in reach. Applies to
-  anything throwable — a tongue-grabbed enemy and a hand-grabbed keg use the same `ThrownFlight`
+  anything throwable — a spin-magneted enemy and a keg you walked into use the same `ThrownFlight`
   component.
 
   Aiming is camera-driven with assist: the ringed target is whatever is nearest the centre of the
   screen, in range and in line of sight. Anchors win ties against enemies.
 
-  The enemy half is modelled on Yoshi's tongue and the Mario Galaxy 2 spin-grab: an attack and a way
+  Modelled on the Mario Galaxy spin-grab: an attack and a way
   of rearranging the level, not only a way of moving yourself.
 - **Combat** — slam them, stomp them from above, or throw something at them.
 
 Two moves have been cut as the game found its own shape: the **thrown fist** and the **helicopter**
 (2026-09-29), the two most Rayman-specific moves in the set.
 
-The grapple is the thing that has been reworked most, and the record is worth keeping. It was a
-pendulum on the jump button (wrong kind of input, cut), then a capped pendulum (five limits in one
-function, cut), then a pull-and-bounce with no swing at all — which worked exactly as specified and
-was dull, because **the caps were what was wrong, not the pendulum.** It is now a swing again with
-nothing capped. The enemy-grabbing half survived all of it unchanged.
+The grapple went through four versions and was then deleted outright, and the record is worth
+keeping: a pendulum on the jump button (wrong kind of input), then a capped pendulum (the caps were
+the bug, not the pendulum), then a pull-and-bounce (worked exactly as specified and was dull), then
+an uncapped swing that was genuinely fun — and still got shelved, because an open-ended traversal
+ability means every level has to be built around it. The **spin attack** replaced it on 2026-10-02.
+The grab-and-throw half survived all five versions unchanged.
 
 ## Two scenes
 
@@ -175,18 +166,25 @@ The showcase level in `main.tscn`: one hub with four zones, each built around a 
 
 | Direction | Zone | Teaches |
 | --- | --- | --- |
-| North | Rising platforms, then a gap with two anchors | Jumping, then **swinging** across |
+| North | Rising platforms, then a gap (anchors removed) | Jumping, then a **long jump** across  |
 | East | Pit spanned by a tan wall, then a shaft | **Wall kick** — ⚠️ see below |
 | West | Three terraces with 3.3 m lips | **Ledge grab** (too high to jump onto) |
-| South | Chain of anchors over a pit, tower | **Swinging** (nothing else crosses it) |
+| South | A pit and a tower (anchors removed) | ⚠️ needs rebuilding, see below |
 
 Tan surfaces are the climbable walls. Falling into a pit respawns you at the last checkpoint.
 
-> ⚠️ **Zone E is stale level content.** It was built around the wall *run*, which was removed with
-> the move to a Mario moveset — the pit there was meant to be crossed by running along the tan wall,
-> and nothing crosses it now. The shaft above it still works, because a shaft is what wall *kicks*
-> are for. Needs rebuilding, or deleting; it is the only place in either level that depended on a
-> removed move.
+> ⚠️ **Two zones of this level are now stale, and both need rebuilding or deleting.**
+>
+> **East** was built around the wall *run*: its pit was meant to be crossed by running along the tan
+> wall, and nothing crosses it now. The shaft above still works, because a shaft is what wall *kicks*
+> are for.
+>
+> **North and South** were built around grapple anchors, which have been removed from this level with
+> the grapple itself. South in particular was a chain of anchors over a pit and now has no route at
+> all.
+>
+> `scenes/playground.tscn` is the level that matches the current moveset; this one is kept as a
+> reference and as a stress test for the suite.
 
 ## Layout
 
@@ -194,11 +192,11 @@ Tan surfaces are the climbable walls. Falling into a pit respawns you at the las
 scripts/
   game.gd              score, checkpoints, respawn
   events.gd            autoloaded signal bus (`Events`)
-  player/              player.gd (state machine), camera, grapple targeting, ledge sensor
+  player/              player.gd (state machine), abilities (spin + carry), camera, ledge sensor
   enemies/             walker, turret, bullet
   components/          health, thrown_flight (homing + ricochet for anything thrown)
-  props/               lum, grapple point, throwable keg, checkpoint, hazard, crumbling floor
-  ui/                  hud.gd (hearts, lums, grapple reticle, F3 debug)
+  props/               lum, throwable keg, checkpoint, hazard, crumbling floor, spin switch
+  ui/                  hud.gd (hearts, lums, F3 debug)
 scenes/                one scene per script, plus the two levels
                        playground.tscn  momentum playground (current direction)
                        main.tscn        moveset showcase (reference)
@@ -211,8 +209,9 @@ share a lot of velocity maths and constantly interrupt each other.
 ## Tuning
 
 Every feel number is an `@export` on the player, grouped in the inspector (Run, Jump, Wall moves,
-Ledge grab, Grapple, Weight, Slam, Combat, Sounds; Jump has Jump chain and Crouch moves subgroups). Select the Player node and edit them there — no
-code changes needed. Enemies, lums and grapple points expose their own knobs the same way.
+Ledge grab, Weight, Slam, Combat, Sounds; Jump has Jump chain and Crouch moves subgroups; the
+Abilities child node owns Spin and Carry). Select the Player node and edit them there — no
+code changes needed. Enemies, lums, kegs and switches expose their own knobs the same way.
 
 ## Smoke test
 
@@ -222,8 +221,8 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 53 behaviours (each state, damage, death, respawn, stomp, grab
-and throw, plus every Mario move, slopes, crumbling floors, the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
+It drives the player through all 48 behaviours (each state, damage, death, respawn, stomp, grab
+and throw, plus every Mario move, the spin and its combo, slopes, crumbling floors, the homing throw) and prints a PASS/FAIL table. Exit code 0
 means everything passed. It caught several real bugs during the initial build and is worth
 rerunning whenever the controller changes.
 
