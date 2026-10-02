@@ -12,11 +12,29 @@ tell when it works.
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 42).
+If you add an ability, add a check to `tests/moveset_smoke_test.gd` and bump `EXPECTED_CHECKS` (currently 48).
 
 ---
 
 ## Tier 1 — get comfortable
+
+### 0. Build a ramp and find out what it is worth
+The game's speed comes from slopes, so the most useful thing to understand first is what a given
+slope is actually worth.
+
+- Open `scenes/levels/momentum_playground.tscn`, select `GentleRamp`, and duplicate it.
+- Change its angle. **Do not type numbers into `transform`** — use the rotation fields in the
+  Inspector, or the rotate gizmo. The nine numbers in a `.tscn` transform are the basis *rows*, and
+  hand-writing them gets the tilt backwards. (It did, for both of the ramps that are in there.)
+- Run it, hold F3, and write down the speed you reach at the bottom of each angle you try.
+
+*Watch out:* below about 7° a slope does not build speed at all, and below about 27° you can stand
+still on it. Both of those thresholds come out of `Slope Gravity` on the player — see the Weight
+group and the note in CLAUDE.md.
+
+*Done when:* you can say what angle gives a fun amount of speed, and add a row to this file saying so.
+
+---
 
 ### 1. Tune the feel and write down what you learn
 No code. Select the Player, change values in the Inspector, play, repeat. Then add a short section

@@ -7,11 +7,16 @@ point; now heading somewhere of its own.
 > walkthrough for developers who can code but haven't used Godot before. Then pick something from
 > **[docs/TASKS.md](docs/TASKS.md)**.
 
-The design bet: **abilities combine rather than take turns**, and **weight is a resource**. Height
-becomes stored energy you spend on a slam; momentum carries between moves. Every state hands off into the
-others — a slam bounce feeds the next slam, a tongue-grabbed enemy becomes a thrown weapon, a wall run
-launches a grapple. Levels are meant to be solved by stringing the moveset together, not by
-performing one scripted move per obstacle.
+The design bet: **weight is a resource, and momentum lives in the level.** The character is heavy,
+which costs you the ability to change your mind — slow to start, slow to stop, hard to turn in the
+air. In exchange, height becomes stored energy you spend on a slam, and slopes become somewhere to
+build speed that nothing then takes away from you.
+
+Momentum being *level geometry* rather than a player ability is deliberate. A ramp is content, so a
+level has speed where you put a ramp in it and a level with no ramps has none — which means each
+level sets its own pace. Abilities still combine rather than take turns: a slam bounce feeds the next
+slam, a tongue-grabbed enemy becomes a thrown weapon, a long ramp feeds a jump across a gap nothing
+else can cross.
 
 Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.godot` and press F5.
 
@@ -38,7 +43,22 @@ awkward on a laptop trackpad.
 ## The moveset
 
 - **Run / jump** — acceleration-based, with coyote time, jump buffering, variable jump height and
-  softened gravity at the apex.
+  softened gravity at the apex. Deliberately **heavy**: about half a second to get up to speed, a
+  couple of metres to stop, and very little steering once you are in the air. That commitment is the
+  price of everything below.
+- **Slopes** — the momentum engine. Downhill is free speed and nothing takes it back off you; uphill
+  spends it fast. There are no new buttons for this, it is just gravity along the floor.
+
+  Measured, starting at 9 m/s: a **12° ramp takes you to 16.6 m/s**, a **30° ramp to 17.7**, flat
+  ground bleeds you back to walking pace, and running **uphill kills all 9 m/s in under 3 metres**.
+  Running speed is 7.5, so a good ramp is worth more than double it.
+
+  Two thresholds fall out of one number (`slope_gravity`) rather than needing their own settings:
+  past about **7°** a slope beats friction, so speed keeps growing; past about **27°** it beats your
+  own braking, so you slide down it standing still.
+- **Crumbling floors** — slabs your own weight destroys. Walking over one is fine; landing on it from
+  a height, or slamming near it, drops it out from under you. If being heavy were only ever an
+  advantage it would stop being a constraint and quietly become a stat.
 - **Ledge grab** — automatic when you fall past a grabbable lip. Shimmy sideways, `Space` to climb,
   steer away to drop. Note a standing jump clears 2.35 m, so **lips below ~3.3 m just get landed
   on** — grabbing is for lips *above* your jump, caught on the way down.
@@ -119,9 +139,19 @@ function, cut), then a pull-and-bounce with no swing at all — which worked exa
 was dull, because **the caps were what was wrong, not the pendulum.** It is now a swing again with
 nothing capped. The enemy-grabbing half survived all of it unchanged.
 
+## Two scenes
+
+**`scenes/playground.tscn` is where the current direction is.** A momentum playground built for one
+question — does weight-and-momentum feel right? — and nothing else. A 12° ramp down into a plaza, a
+30° ramp you cannot stand still on, a 12 m gap only crossable with ramp speed, and three crumbling
+slabs bridging it that your own landing destroys. It contains **no grapple anchors**, on purpose: a
+scene with every mechanic in it cannot answer a question about one of them.
+
+**`scenes/main.tscn` is the original moveset showcase**, left untouched as a reference.
+
 ## Test level
 
-One hub with four zones, each built around a mechanic:
+The showcase level in `main.tscn`: one hub with four zones, each built around a mechanic:
 
 | Direction | Zone | Teaches |
 | --- | --- | --- |
@@ -141,9 +171,11 @@ scripts/
   player/              player.gd (state machine), camera, grapple targeting, ledge sensor
   enemies/             walker, turret, bullet
   components/          health, thrown_flight (homing + ricochet for anything thrown)
-  props/               lum, grapple point, throwable keg, checkpoint, hazard
+  props/               lum, grapple point, throwable keg, checkpoint, hazard, crumbling floor
   ui/                  hud.gd (hearts, lums, grapple reticle, F3 debug)
-scenes/                one scene per script, plus levels/test_level.tscn
+scenes/                one scene per script, plus the two levels
+                       playground.tscn  momentum playground (current direction)
+                       main.tscn        moveset showcase (reference)
 tests/                 moveset smoke test
 ```
 
@@ -153,7 +185,7 @@ share a lot of velocity maths and constantly interrupt each other.
 ## Tuning
 
 Every feel number is an `@export` on the player, grouped in the inspector (Run, Jump, Wall moves,
-Ledge grab, Grapple, Slam, Combat, Sounds). Select the Player node and edit them there — no
+Ledge grab, Grapple, Weight, Slam, Combat, Sounds). Select the Player node and edit them there — no
 code changes needed. Enemies, lums and grapple points expose their own knobs the same way.
 
 ## Smoke test
@@ -164,8 +196,8 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 42 behaviours (each state, damage, death, respawn, stomp, grab
-and throw, plus the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
+It drives the player through all 48 behaviours (each state, damage, death, respawn, stomp, grab
+and throw, plus slopes, crumbling floors, the homing throw and its ricochets) and prints a PASS/FAIL table. Exit code 0
 means everything passed. It caught several real bugs during the initial build and is worth
 rerunning whenever the controller changes.
 

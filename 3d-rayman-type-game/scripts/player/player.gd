@@ -82,12 +82,27 @@ enum State {
 signal state_changed(from: State, to: State)
 
 @export_group("Run")
+## Top speed the stick alone will take you to. Note it is NOT a limit on how
+## fast you can be going — slopes push you well past it, and nothing takes that
+## away. See the Weight group.
 @export var max_speed: float = 7.5
-@export var acceleration: float = 65.0
-@export var deceleration: float = 75.0
-## Used when the stick opposes current velocity. Higher = tighter turnarounds.
-@export var turn_acceleration: float = 110.0
-@export_range(0.0, 1.0) var air_control: float = 0.45
+## The four numbers below are what make the character HEAVY.
+##
+## They used to be 65 / 75 / 110 / 0.45, which is a light, agile, twitchy
+## character. Weight is only a trade if it costs you something, and what it
+## costs here is *commitment*: you take about half a second to get going, slide
+## a couple of metres before stopping, and cannot change your mind in mid-air.
+## That cost is what makes the speed a slope gives you feel earned.
+##
+## If the character ever feels like treacle, these are the four to raise, and
+## raise them together — they are one decision, not four.
+@export var acceleration: float = 14.0
+@export var deceleration: float = 12.0
+## Used when the stick opposes current velocity. For a heavy character this is
+## deliberately only a little above `acceleration`: a thing with mass does not
+## get to reverse faster than it gets going.
+@export var turn_acceleration: float = 18.0
+@export_range(0.0, 1.0) var air_control: float = 0.15
 ## How fast the body model swings round to face the direction of travel (rad/s).
 @export var visual_turn_speed: float = 14.0
 
@@ -223,6 +238,37 @@ signal state_changed(from: State, to: State)
 @export var sfx_hurt: AudioStream
 @export var sfx_grapple: AudioStream
 @export var sfx_slam: AudioStream
+
+@export_group("Weight")
+## Gravity pulling you down a slope. This is the game's momentum engine.
+##
+## `move_and_slide()` does not do this for you: left alone it walks you up and
+## down a ramp at whatever speed the stick asks for, which for a heavy character
+## is exactly wrong. A ramp has to be free speed going down and a real cost going
+## up, or it is just a differently-shaped floor.
+##
+## Momentum living in the LEVEL rather than in an ability is deliberate. A ramp
+## is content, so each level decides how fast it is by where ramps are put —
+## unlike a traversal ability, which every level then has to be built around.
+##
+## Two useful thresholds fall out of this number rather than needing their own
+## settings, because the pull is scaled by the slope's steepness:
+##   • steeper than about 27 degrees and the pull beats `deceleration`, so you
+##     slide down even standing still
+##   • steeper than about 7 degrees and it beats `momentum_friction`, so once
+##     you are above `max_speed` you keep gaining
+## Raise it and both thresholds get gentler.
+@export var slope_gravity: float = 30.0
+## Slopes shallower than this are treated as flat. Without it, floating-point
+## noise in the floor normal gives a dead-flat surface a tiny permanent drift.
+@export var slope_min_grade: float = 0.06
+## How fast speed ABOVE `max_speed` bleeds away while you are on the ground.
+##
+## Low on purpose: a heavy thing keeps rolling. This is the ONLY place momentum
+## decays, and it is a slow bleed rather than the hard brake the normal stick
+## handling would apply. It never takes you below `max_speed`, so it cannot
+## interfere with ordinary running.
+@export var momentum_friction: float = 3.5
 
 @export_group("Combat")
 ## Punch and carry tuning lives on the PlayerAbilities child node instead.
@@ -392,29 +438,57 @@ func _accel_for(current: Vector3, wanted: Vector3) -> float:
 ##
 ## `keep_momentum` is what stops this function being a speed cap in disguise.
 ## Normally it moves your speed *toward* `max_speed`, which means it brakes you
-## as readily as it accelerates you. In the air that is wrong: a swing released
-## at 25 m/s would decay back to walking pace in about half a second, so every
-## bit of speed you wound up gets quietly confiscated a moment after you spend
-## it. Above `max_speed` the stick is allowed to redirect your momentum but never
-## to brake it, and with no stick input at all nothing happens to it. Momentum
-## carrying between moves is the project's main design rule; this is the line
-## that makes it true.
+## as readily as it accelerates you. That is wrong for anything that arrives
+## going fast: speed earned on a slope, or carried out of a swing, gets quietly
+## confiscated a moment after you earn it. Above `max_speed` the stick is allowed
+## to REDIRECT your momentum but never to brake it away.
+##
+## `bleed` is how fast that surplus decays anyway, in metres per second per
+## second. Zero in the air, a slow trickle on the ground. It can never take you
+## below `max_speed`, so ordinary running is untouched by it.
+##
+## Note that turning hard still costs you, because `move_toward` on a reversed
+## target passes through zero on the way. That is not a bug to route around: a
+## heavy thing should not get to change its mind at speed for free.
 func _apply_horizontal(delta: float, scale: float = 1.0, control: float = 1.0,
-		keep_momentum: bool = false) -> void:
+		keep_momentum: bool = false, bleed: float = 0.0) -> void:
 	var flat := Vector3(velocity.x, 0.0, velocity.z)
 	var top := max_speed * scale
+	var speed := flat.length()
 	var wanted := wish_dir * top
 
-	if keep_momentum and flat.length() > top:
+	if keep_momentum and speed > top:
+		var heading := flat / speed
 		if wish_dir.length_squared() > 0.01:
-			wanted = wish_dir.normalized() * flat.length()
-		else:
-			wanted = flat
+			heading = wish_dir.normalized()
+		wanted = heading * maxf(top, speed - bleed * delta)
 
 	var rate := _accel_for(flat, wanted) * control * delta
 	flat = flat.move_toward(wanted, rate)
 	velocity.x = flat.x
 	velocity.z = flat.z
+
+
+## Gravity's pull along a slope, which is where all the game's speed comes from.
+##
+## The maths is the schoolbook one: take gravity, remove the part that pushes
+## into the surface, and what is left points straight downhill with magnitude
+## `g * sin(angle)`. Projecting it like this is what makes a gentle ramp gentle
+## and a steep one brutal, with no per-slope tuning at all — and it comes out as
+## exactly zero on flat ground, so there is nothing to switch off.
+##
+## Only the horizontal part is used. The vertical part is already handled, by
+## gravity and by `move_and_slide()` keeping us on the floor, and adding it twice
+## makes the body chatter on the surface.
+func _slope_pull(delta: float) -> void:
+	if not is_on_floor():
+		return
+	var normal := get_floor_normal()
+	var downhill := Vector3.DOWN - normal * Vector3.DOWN.dot(normal)
+	if downhill.length() < slope_min_grade:
+		return
+	velocity.x += downhill.x * slope_gravity * delta
+	velocity.z += downhill.z * slope_gravity * delta
 
 
 func _apply_gravity(delta: float, scale: float = 1.0) -> void:
@@ -449,7 +523,11 @@ func _try_jump() -> bool:
 # ------------------------------------------------------------------------ states
 
 func _do_ground(delta: float) -> void:
-	_apply_horizontal(delta)
+	# Order matters: the slope adds speed, then the stick steers what is there.
+	_slope_pull(delta)
+	# keep_momentum with a slow bleed, so speed earned on a ramp is not taken
+	# away the instant you stop steering — but does not last for ever either.
+	_apply_horizontal(delta, 1.0, 1.0, true, momentum_friction)
 	# Stop gravity accumulating into a huge downward number while grounded.
 	velocity.y = minf(velocity.y, 0.0)
 

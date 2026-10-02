@@ -17,11 +17,14 @@ const MAIN := preload("res://scenes/main.tscn")
 ## be relied on any more: a homing throw kills whatever it finds, so by halfway
 ## through the suite there may be none left standing.
 const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
+## Spawned for the weight-acts-on-the-world checks. Only the momentum playground
+## has these placed in it, and this suite runs on main.tscn.
+const CRUMBLING := preload("res://scenes/props/crumbling_floor.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 42
+const EXPECTED_CHECKS := 48
 
 var player: Player
 var level: Node3D
@@ -90,6 +93,39 @@ func _place(at: Vector3) -> void:
 
 func _on_burst(_where: Vector3) -> void:
 	bursts += 1
+
+
+## Builds a slope in empty space and returns it, so the momentum checks do not
+## need the test level to contain a ramp.
+##
+## `degrees` of 0 gives a flat pad. The rotation is about X, which puts the
+## downhill direction along local +Z — the same convention the playground's ramps
+## use. Worth knowing if you ever hand-write one of those in a .tscn: Godot
+## serialises a Transform3D basis ROW by row, so the obvious column-major
+## reading of those nine numbers gives you a ramp tilted the wrong way.
+func _add_slope(at: Vector3, degrees: float, length: float) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(12.0, 2.0, length)
+	var shape := CollisionShape3D.new()
+	shape.shape = box
+	body.add_child(shape)
+	level.add_child(body)
+	body.global_transform = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(degrees)), at)
+	return body
+
+
+## Drops the player onto a slope at `from`, shoves them at `push`, and returns
+## the fastest horizontal speed they reached.
+func _roll_on(_slope: StaticBody3D, from: Vector3, push: Vector3, frames: int) -> float:
+	_place(from)
+	await _step(2)
+	player.velocity = push
+	var peak := 0.0
+	for i in frames:
+		await _step(1)
+		peak = maxf(peak, Vector2(player.velocity.x, player.velocity.z).length())
+	return peak
 
 
 ## Attaches to an anchor exactly as `_try_grapple` would, and holds the button.
@@ -352,6 +388,12 @@ func _run() -> void:
 	var anchor := level.get_node("HubPull") as GrapplePoint
 	var anchor_at := anchor.global_position
 
+	# These checks are about whether the MECHANIC works, so they must not depend
+	# on how the scene happens to be tuned. main.tscn sets `swing_max_rope = 6.5`
+	# on the player, which silently clamped every rope here to 6.5 m and failed
+	# three checks for a reason that had nothing to do with the code.
+	player.swing_max_rope = 60.0
+
 	# Hooking from level with the anchor gives a horizontal rope, so the whole
 	# swing happens in open air above the hub rather than scraping the floor.
 	_place(anchor_at + Vector3(10.5, -0.2, 0))
@@ -388,12 +430,31 @@ func _run() -> void:
 	# Releasing keeps every bit of it. This is the payoff, and it is also what
 	# `keep_momentum` in _apply_horizontal protects: without that, the air
 	# control brakes a fast release back to walking pace within half a second.
-	var speed_before_release := Vector2(player.velocity.x, player.velocity.z).length()
+	#
+	# Released at a measured speed rather than after a fixed wait. A fixed wait
+	# lands at whatever phase of the arc the rope length happens to produce, and
+	# near the apex the swing is slow enough that `keep_momentum` is not even
+	# active — so the check was really measuring the rope length.
+	_release_all()
+	await _step(40)
+	_place(anchor_at + Vector3(10.5, -0.2, 0))
+	await _step(2)
+	_start_swing(anchor)
+	var speed_before_release := 0.0
+	for i in 150:
+		await _step(1)
+		if player.state != Player.State.SWING:
+			break
+		var flat_now := Vector2(player.velocity.x, player.velocity.z).length()
+		if flat_now > player.max_speed * 2.0:
+			speed_before_release = flat_now
+			break
 	_release_all()
 	await _step(20)
 	var speed_after_release := Vector2(player.velocity.x, player.velocity.z).length()
 	_check("releasing keeps the swing's momentum",
 		player.state != Player.State.SWING
+			and speed_before_release > 0.0
 			and speed_after_release > speed_before_release * 0.9,
 		"%.1f -> %.1f m/s over 20 frames" % [speed_before_release, speed_after_release])
 	await _step(40)
@@ -698,6 +759,89 @@ func _run() -> void:
 	var hp_after := -1 if killed else walker_health.current
 	_check("stomp hurts walker", killed or hp_after < hp_before,
 		"hp %d -> %d%s" % [hp_before, hp_after, " (killed)" if killed else ""])
+
+	# --- weight and momentum.
+	#
+	# The ramps are built here rather than read out of the level, for two
+	# reasons: test_level.tscn is a moveset showcase with no slopes in it, and
+	# the momentum playground is a separate scene this suite does not load.
+	# Building them in empty space well away from everything also means no
+	# wandering walker or stray keg can touch the measurement.
+
+	var ramp := _add_slope(Vector3(120, 20, 0), 20.0, 40.0)
+	await _step(4)
+
+	# Downhill. Started above `max_speed` on purpose: that is the regime the
+	# whole system is about. Below it the stick's own deceleration dominates and
+	# a shallow slope correctly holds you still.
+	var downhill_peak := await _roll_on(ramp, Vector3(120, 28.6, -17), Vector3(0, 0, 9), 150)
+	_check("a slope builds speed past max_speed", downhill_peak > player.max_speed * 2.0,
+		"9.0 -> %.1f m/s (max_speed %.1f)" % [downhill_peak, player.max_speed])
+
+	# Uphill has to cost you, or weight is not a trade. 9 m/s should not survive
+	# more than a few metres of climb.
+	await _roll_on(ramp, Vector3(120, 15.0, 17), Vector3(0, 0, -9), 90)
+	var uphill_left := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("uphill spends your momentum", uphill_left < 2.0,
+		"9.0 -> %.1f m/s" % uphill_left)
+
+	# Flat ground must never be a source of speed, only a slow drain of it.
+	var pad := _add_slope(Vector3(170, 20, 0), 0.0, 40.0)
+	await _step(4)
+	# Note `momentum_friction` only bleeds the surplus down TO `max_speed`; with
+	# no stick input the ordinary `deceleration` then takes over and brings you
+	# to a stop, which is why this does not assert a floor at `max_speed`.
+	var flat_peak := await _roll_on(pad, Vector3(170, 21.6, -10), Vector3(0, 0, 9), 40)
+	var flat_left := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("flat ground never adds speed", flat_peak <= 9.2 and flat_left < 9.0,
+		"9.0 -> peak %.1f -> %.1f m/s" % [flat_peak, flat_left])
+
+	# The cost side of heaviness: getting going takes real time. Any direction
+	# works, so this does not care where the camera is pointing.
+	_place(Vector3(170, 21.6, 0))
+	await _step(30)
+	Input.action_press("move_right")
+	var frames_to_speed := -1
+	for i in 120:
+		await _step(1)
+		if Vector2(player.velocity.x, player.velocity.z).length() >= player.max_speed * 0.9:
+			frames_to_speed = i
+			break
+	_release_all()
+	_check("a heavy character takes time to get going", frames_to_speed > 12,
+		"%d frames to reach 90%% of max_speed" % frames_to_speed)
+	await _step(20)
+
+	# --- weight acting on the world: a floor only a heavy impact breaks.
+	# Placed well clear of the flat pad above. The first version of this check sat
+	# the slab at (170, 19.5, 14), which is INSIDE the pad — so the player landed
+	# on the pad every time, never touched the slab, and "standing on it does not
+	# break it" passed for the wrong reason entirely.
+	var slab := CRUMBLING.instantiate() as CrumblingFloor
+	level.add_child(slab)
+	slab.global_position = Vector3(210, 20, 0)
+	await _step(4)
+	# The slab's own top surface, which is where the player stands. The player's
+	# origin is at its feet, so this is also the standing height.
+	var slab_top: Vector3 = slab.global_position + Vector3(0, 0.5, 0)
+
+	# Standing on it is not an impact, however heavy you are. Dropped from only
+	# 0.3 m so the landing speed is nowhere near `break_fall_speed`.
+	_place(slab_top + Vector3(0, 0.3, 0))
+	await _step(45)
+	_check("standing on a crumbling floor does not break it",
+		slab.state == CrumblingFloor.State.WHOLE,
+		"state=%s after a 0.3 m step down" % CrumblingFloor.State.keys()[slab.state])
+
+	# Arriving fast is. Note it cracks first and gives way after `warn_time`, so
+	# this waits long enough for both.
+	_place(slab_top + Vector3(0, 3, 0))
+	player.velocity = Vector3(0, -20, 0)
+	await _step(60)
+	_check("a heavy landing breaks a crumbling floor",
+		slab.state != CrumblingFloor.State.WHOLE,
+		"state=%s" % CrumblingFloor.State.keys()[slab.state])
+	await _step(20)
 
 	# --- enemies and turrets survive a long idle without erroring
 	await _step(120)

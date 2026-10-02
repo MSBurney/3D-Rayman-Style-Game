@@ -1,0 +1,150 @@
+class_name CrumblingFloor
+extends StaticBody3D
+
+## A floor slab that only a heavy impact breaks.
+##
+## This is weight as a KEY rather than a hammer: a route that behaves one way
+## for a character with mass and another way for anything else. Walking across
+## is fine. Landing on it from a height is not, and a slam anywhere near it
+## certainly is not.
+##
+## It is also weight as a LIABILITY, which matters more than it sounds. If being
+## heavy is only ever an advantage it stops being a constraint and quietly turns
+## into a stat. A floor that your own mass destroys under you is the cheapest way
+## to make the trade real.
+##
+## ### How it finds out about a slam
+##
+## It listens to `Events.slam_landed(at, force)`, which the player has emitted
+## since the slam was built and which nothing used until now. That is the
+## intended shape for this: the slab never holds a reference to the player, and
+## the player has no idea slabs exist. Anything else that wants to react to a
+## slam — a pressure plate, a shaking camera, a scoring rule — connects to the
+## same signal and needs no changes anywhere else.
+
+enum State {
+	WHOLE,
+	## Cracked and shaking, but still solid. A warning, not yet a hole.
+	CRACKING,
+	GONE,
+}
+
+@export_group("What breaks it")
+## A landing counts as heavy if the player was falling faster than this.
+##
+## For scale: a standing jump is 2.35 m and lands at about 7.6 m/s, so the
+## default deliberately lets an ordinary jump through. You have to come down
+## from somewhere to break it.
+@export var break_fall_speed: float = 9.0
+## A slam landing within this distance breaks it regardless of where it fell
+## from. The slam is the heavy verb, so it always wins.
+@export var slam_radius: float = 4.0
+## ...as long as the slam was worth at least this much, on the same 0..1 scale as
+## `Player.slam_power()`: a hop is about 0.08, a drop from the tower is 1.0.
+## Above zero so that hopping on the spot does not clear a room of floors.
+@export var slam_power_needed: float = 0.12
+
+@export_group("Timing")
+## Warning time between cracking and actually giving way, so a fast player can
+## still get across. At zero the slab reads as a trap rather than a mechanic.
+@export var warn_time: float = 0.35
+## How far it rattles while cracking. Cosmetic, but a floor that vanishes with
+## no tell at all feels unfair however fair it technically is.
+@export var shake_strength: float = 0.07
+## Seconds until it comes back. Negative means it is gone for good.
+@export var reset_delay: float = 2.5
+
+var state: State = State.WHOLE
+
+var _home: Vector3
+var _timer: float = 0.0
+
+@onready var shape: CollisionShape3D = $Shape
+@onready var visual: Node3D = $Visual
+## Detects the player touching down on us. An Area3D rather than a collision
+## check because we need to know about the contact without blocking anything.
+@onready var landing: Area3D = $Landing
+
+
+func _ready() -> void:
+	_home = position
+	landing.body_entered.connect(_on_landing)
+	Events.slam_landed.connect(_on_slam_landed)
+
+
+func _physics_process(delta: float) -> void:
+	match state:
+		State.WHOLE:
+			pass
+		State.CRACKING:
+			_timer -= delta
+			# Rattle in place. Only x and z, so the surface stays where the
+			# player's feet expect it to be.
+			position.x = _home.x + randf_range(-shake_strength, shake_strength)
+			position.z = _home.z + randf_range(-shake_strength, shake_strength)
+			if _timer <= 0.0:
+				_give_way()
+		State.GONE:
+			if reset_delay < 0.0:
+				return
+			_timer -= delta
+			if _timer <= 0.0:
+				_restore()
+
+
+## The player touched down on us. Whether that matters depends on how fast they
+## were falling.
+func _on_landing(body: Node3D) -> void:
+	var player := body as Player
+	if player == null:
+		return
+	# descent_speed(), NOT player.velocity.y. Landing on something zeroes the
+	# vertical velocity during the same physics step that an Area3D reports the
+	# overlap, so reading velocity.y here sees a stationary player and no landing
+	# is ever heavy enough. descent_speed() exists to give the speed from before
+	# the collision was resolved — its comment in player.gd explains the trap.
+	if player.descent_speed() > -break_fall_speed:
+		return
+	_crack()
+
+
+func _on_slam_landed(at: Vector3, force: float) -> void:
+	if force < slam_power_needed:
+		return
+	# Measured from our centre, which is fine for a slab about as wide as
+	# `slam_radius`. Make one much bigger than that and its far end will shrug
+	# off a slam that visibly landed on it.
+	if global_position.distance_to(at) > slam_radius:
+		return
+	_crack()
+
+
+func _crack() -> void:
+	if state != State.WHOLE:
+		return
+	state = State.CRACKING
+	_timer = warn_time
+
+
+func _give_way() -> void:
+	state = State.GONE
+	_timer = reset_delay
+	position = _home
+	# Deferred: disabling a collision shape from inside the physics step is not
+	# allowed, and Godot will complain about flushing queries.
+	shape.set_deferred(&"disabled", true)
+	landing.set_deferred(&"monitoring", false)
+
+	var tween := create_tween()
+	# ONE * 0.01, never ZERO. A scale of exactly zero is a singular transform and
+	# spams `Condition "det == 0" is true` every frame it is tweened through.
+	tween.tween_property(visual, "scale", Vector3.ONE * 0.01, 0.18)
+
+
+func _restore() -> void:
+	state = State.WHOLE
+	position = _home
+	shape.set_deferred(&"disabled", false)
+	landing.set_deferred(&"monitoring", true)
+	var tween := create_tween()
+	tween.tween_property(visual, "scale", Vector3.ONE, 0.18)

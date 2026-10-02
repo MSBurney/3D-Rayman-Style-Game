@@ -9,7 +9,21 @@ You will need the project open in **Godot 4.7**: open `3d-rayman-type-game/proje
 
 ## 0. Run it first
 
-Press **F5**. You should be standing on a green plaza with two red enemies wandering nearby.
+There are two scenes, and which one you want depends on why you are here.
+
+**`scenes/playground.tscn` is where the game currently is.** Open it and press **F6**. You start on
+a shelf at the top of a long ramp, so just walk forward and let it happen. Things to try, in order:
+
+1. Run to the bottom of the ramp and watch the `speed` line on the F3 readout. Running speed is 7.5;
+   the ramp is worth more than double that, and nothing takes it off you at the bottom.
+2. Keep going and jump the gap. At walking pace it is not crossable. With ramp speed it is.
+3. Walk back **up** the ramp and notice how fast your speed disappears. That is the trade.
+4. Cross the gap the slow way instead, over the three stone slabs — then come back and land on one
+   from a height, or slam on it. Your own weight is what breaks them.
+5. Take the steep orange ramp on the right. You cannot stand still on it at all.
+
+**`scenes/main.tscn` is the original moveset showcase**, kept as a reference. Press **F5** for it.
+You should be standing on a green plaza with two red enemies wandering nearby.
 
 Fly around for five minutes before reading any code. Try to reach all four zones:
 
@@ -80,6 +94,9 @@ main way to learn what each number does. **Go and break several of them.** Sugge
 | `Tongue Reel Speed` → `4` | Abilities node | Watch an enemy get dragged in slowly — the tongue is easiest to understand at low speed |
 | `Swing Pump Accel` → `80` | Grapple > Swing | Hold a direction while swinging and you wind up absurdly fast. Nothing stops you, which is the point |
 | `Swing Reel Speed` → `3` | Grapple > Swing | Makes it obvious what `E` and `Ctrl` do to the rope |
+| `Slope Gravity` → `0` | Weight | Run down the big ramp in the playground. It becomes an ordinary floor, and you suddenly see how much of the game's speed was coming from it |
+| `Momentum Friction` → `30` | Weight | Ramp speed evaporates the moment you reach the bottom. This is what a cap feels like, and why this number is low |
+| `Acceleration` → `65` | Run | The old, light character. Try the ramps with it and notice that weight is what makes the speed feel earned |
 | `Air Control` → `0.0` | Run | You cannot steer at all mid-jump; feels awful, and shows why it exists |
 | `Coyote Time` → `0.0` | Jump | Jumps off ledges start failing. This is the forgiveness you never notice until it is gone |
 | `Max Speed` → `20` | Run | Fast, but you overshoot every platform |
@@ -241,7 +258,7 @@ table. Run it after changing anything in `player.gd`:
 "<path-to-godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-42 checks, a few seconds. It has already caught several bugs that looked fine in play, including
+48 checks, a few seconds. It has already caught several bugs that looked fine in play, including
 the grapple problem above. If you add an ability, add a check for it in
 `tests/moveset_smoke_test.gd` — copy an existing one, they are all the same shape.
 

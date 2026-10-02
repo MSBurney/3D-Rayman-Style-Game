@@ -1,0 +1,26 @@
+[gd_scene format=3 uid="uid://j61osuua6j2v"]
+
+; Runnable version of the momentum playground. Press F6 with this scene open, or
+; run it directly:
+;
+;   "<godot>" --path 3d-rayman-type-game res://scenes/playground.tscn
+;
+; Same three parts as scenes/main.tscn — game rules, a level, the player and the
+; HUD — with momentum_playground.tscn in place of test_level.tscn. main.tscn is
+; left completely alone so the old moveset showcase stays as a reference.
+
+[ext_resource type="Script" uid="uid://dlctxiqwl8dhd" path="res://scripts/game.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://sgwr4vku1sa8" path="res://scenes/levels/momentum_playground.tscn" id="2"]
+[ext_resource type="PackedScene" uid="uid://b5papl5ibq4pg" path="res://scenes/player/player.tscn" id="3"]
+[ext_resource type="PackedScene" uid="uid://bbci0v0k12u0y" path="res://scenes/ui/hud.tscn" id="4"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1")
+player = NodePath("Player")
+
+[node name="MomentumPlayground" parent="." instance=ExtResource("2")]
+
+[node name="Player" parent="." instance=ExtResource("3")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10.4, -59)
+
+[node name="HUD" parent="." instance=ExtResource("4")]
