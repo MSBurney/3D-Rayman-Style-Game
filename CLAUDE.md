@@ -401,6 +401,38 @@ rewritten four times because the ambitious version went in before anyone knew wh
 good. If money-as-stakes feels right in play, removing hearts afterwards is easy *and the number
 ranges will already be known*. See also [[transformations]] on why health was kept for bosses.
 
+## Building levels by hand: probe the geometry
+
+**Every single time this project has placed geometry by hand, something has been wrong in a way the
+eye could not see.** Two playground ramps tilted the wrong way. Test fixtures spawned off the edge of
+a pad. And on the tree fort's first draft, **two entire staircases ran underneath the deck they were
+supposed to reach** — you would have climbed into the underside of the floor above.
+
+So: when you hand-author a level, **write a throwaway probe scene that raycasts the geometry** and
+run it before believing anything. `tests/fort_probe.gd` is the pattern (delete it once the level
+settles). It takes a couple of minutes and it has never once come back clean on the first try.
+
+Three things that make a probe actually useful:
+
+- **Start each ray just ABOVE the surface it asks about, and give it a short reach.** Casting from
+  the sky reports whatever is topmost at that x,z — so any deck with another deck above it reads
+  back the wrong one. The fort's first probe did this and produced three nonsense readings that
+  nearly sent me fixing the wrong thing.
+- **Never cast through the prop you are asking about.** A chest is a `StaticBody3D` on the world
+  layer, so a ray dropped onto it hits its own lid and reports "the floor is exactly one metre up"
+  for every chest in the level. Probe *beside* it.
+- **State the expected value and let the probe compare.** Printing measurements alone means reading
+  twenty numbers and trusting yourself; printing `expected 4.0 got 9.00 *** WRONG ***` does not.
+
+**Authoring rule that avoids half of it:** write planks as `origin y = top - size.y/2` and think in
+TOP heights, because that is what the player stands on. A deck "at y=4" means `origin 3.7, size.y
+0.6`. Stairs are a run of boxes whose tops rise by a fixed step — and for stairs resting on the
+ground, `origin y = size.y/2` makes the top equal `size.y`, which is easy to read off.
+
+**Headroom only matters below about 1.4 m** (the player's height). A step 0.8 m under a deck is a
+head-bump; the same step 3.5 m under it is fine. That distinction is what decided where the fort's
+top flight ended up.
+
 ## The money loop
 
 **Built 2026-10-02, and it is the first thing in the project with a GOAL.** Before it there were

@@ -29,7 +29,19 @@ enum State {
 	GONE,
 }
 
+@export_group("Shape")
+## Size of the plank, in metres. The scene is authored at 5 x 1 x 5 and this
+## rescales it, so one scene covers every plank in a tree fort instead of needing
+## a variant per size.
+@export var size: Vector3 = Vector3(5, 1, 5)
+
 @export_group("What breaks it")
+## Standing on it at all starts the collapse, which is the classic crumbling
+## platform. Leave it off and only a real DROP breaks it — see break_fall_speed.
+##
+## `warn_time` is what makes this fair: the plank cracks and shakes first, so a
+## quick player can still cross. At zero it is a trap rather than a mechanic.
+@export var break_on_stand: bool = false
 ## A landing counts as heavy if the player was falling faster than this.
 ##
 ## For scale: a standing jump is 2.35 m and lands at about 7.6 m/s, so the
@@ -58,6 +70,10 @@ var state: State = State.WHOLE
 
 var _home: Vector3
 var _timer: float = 0.0
+## Visual scale that matches `size`. Remembered because the break and restore
+## tweens drive this property and would otherwise snap the plank back to the
+## authored 5x5.
+var _visual_scale: Vector3 = Vector3.ONE
 
 @onready var shape: CollisionShape3D = $Shape
 @onready var visual: Node3D = $Visual
@@ -68,8 +84,35 @@ var _timer: float = 0.0
 
 func _ready() -> void:
 	_home = position
+	_apply_size()
 	landing.body_entered.connect(_on_landing)
 	Events.slam_landed.connect(_on_slam_landed)
+
+
+## Rescales the plank to `size`.
+##
+## The shape and the mesh are DUPLICATED first. Sub-resources declared in a scene
+## are shared by every instance of it, so resizing them in place would resize
+## every other crumbling floor in the level at the same time — one of the easier
+## ways to lose an afternoon in Godot.
+func _apply_size() -> void:
+	var box := (shape.shape as BoxShape3D).duplicate() as BoxShape3D
+	box.size = size
+	shape.shape = box
+
+	var sensor := landing.get_node(^"Shape") as CollisionShape3D
+	var sensor_box := (sensor.shape as BoxShape3D).duplicate() as BoxShape3D
+	# A touch narrower than the plank and a little taller, so standing anywhere on
+	# it registers but brushing past the edge in mid-air does not.
+	sensor_box.size = Vector3(size.x * 0.96, size.y + 0.4, size.z * 0.96)
+	sensor.shape = sensor_box
+	sensor.position.y = size.y * 0.4
+
+	# One scale on the Visual covers the slab mesh and its crack decorations
+	# together. Remembered because _break() and _restore() tween this property and
+	# would otherwise snap the plank back to the authored 5x5.
+	_visual_scale = size / Vector3(5.0, 1.0, 5.0)
+	visual.scale = _visual_scale
 
 
 func _physics_process(delta: float) -> void:
@@ -97,6 +140,10 @@ func _physics_process(delta: float) -> void:
 func _on_landing(body: Node3D) -> void:
 	var player := body as Player
 	if player == null:
+		return
+	# Just being on it is enough, if this plank is the fragile kind.
+	if break_on_stand:
+		_crack()
 		return
 	# descent_speed(), NOT player.velocity.y. Landing on something zeroes the
 	# vertical velocity during the same physics step that an Area3D reports the
@@ -138,7 +185,7 @@ func _give_way() -> void:
 	var tween := create_tween()
 	# ONE * 0.01, never ZERO. A scale of exactly zero is a singular transform and
 	# spams `Condition "det == 0" is true` every frame it is tweened through.
-	tween.tween_property(visual, "scale", Vector3.ONE * 0.01, 0.18)
+	tween.tween_property(visual, "scale", _visual_scale * 0.01, 0.18)
 
 
 func _restore() -> void:
@@ -147,4 +194,4 @@ func _restore() -> void:
 	shape.set_deferred(&"disabled", false)
 	landing.set_deferred(&"monitoring", true)
 	var tween := create_tween()
-	tween.tween_property(visual, "scale", Vector3.ONE, 0.18)
+	tween.tween_property(visual, "scale", _visual_scale, 0.18)

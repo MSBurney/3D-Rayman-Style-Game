@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dynsu2oybuvee"]
+
+[ext_resource type="Script" uid="uid://hdy3o8scfory" path="res://tests/fort_probe.gd" id="1"]
+
+[node name="FortProbe" type="Node"]
+script = ExtResource("1")

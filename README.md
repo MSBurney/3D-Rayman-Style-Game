@@ -188,13 +188,18 @@ an uncapped swing that was genuinely fun — and still got shelved, because an o
 ability means every level has to be built around it. The **spin attack** replaced it on 2026-10-02.
 The grab-and-throw half survived all five versions unchanged.
 
-## Two scenes
+## Three scenes
 
 **`scenes/playground.tscn` is where the current direction is.** A momentum playground built for one
 question — does weight-and-momentum feel right? — and nothing else. A 12° ramp down into a plaza, a
 30° ramp you cannot stand still on, a 12 m gap only crossable with ramp speed, and three crumbling
 slabs bridging it that your own landing destroys. It contains **no grapple anchors**, on purpose: a
 scene with every mechanic in it cannot answer a question about one of them.
+
+**`scenes/tree_fort_main.tscn` is the first proper level** — a grassy plain with a three-level
+bokoblin-style fort built around one tree, after the camps in Breath of the Wild. Climb it, loot it,
+pay the exit to leave. Roughly half the decks crumble when you stand on them, and the exit wants 150
+against 215 in chests, so you can leave one behind but only one.
 
 **`scenes/main.tscn` is the original moveset showcase**, left untouched as a reference.
 
