@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="brk"]
 [ext_resource type="PackedScene" uid="uid://c2ocooorlwkcr" path="res://scenes/props/treasure.tscn" id="chest"]
 [ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
+[ext_resource type="PackedScene" uid="uid://bxa1k4lpx8jpf" path="res://scenes/props/transformer.tscn" id="tf"]
 [ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
 [ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
 [ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
@@ -241,3 +242,20 @@ worth = 60
 [node name="Exit" parent="." instance=ExtResource("exit")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 38)
 price = 120
+
+; TOOLS, not threats: these transform you and do no damage. Each is placed in
+; front of the thing its transformation is FOR — a tool with nothing behind it is
+; just an inconvenience, which is the failure mode to avoid.
+;
+; The fire jet is lined up with the three ramp-exit walls, so catching fire here
+; sends you straight through them. You cannot steer once alight, so you have to
+; set yourself up BEFORE touching it — that is the skill the penalty creates.
+[node name="FireJet" parent="." instance=ExtResource("tf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -8)
+form = 0
+
+; The spore puff sits under the high shelf, which is 12 m up and otherwise only
+; reachable by climbing the steep ramp. Float up instead.
+[node name="SporePuff" parent="." instance=ExtResource("tf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 0, 8)
+form = 1

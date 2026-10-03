@@ -139,7 +139,11 @@ func handle_input(delta: float) -> void:
 	_auto_carry()
 
 	if Input.is_action_just_pressed(&"attack"):
-		if carried != null:
+		# A transformation has to actually cost you something, and being able to
+		# spin out of it would make it free. See Player.is_transformed().
+		if _player.is_transformed():
+			pass
+		elif carried != null:
 			throw_carried()
 		else:
 			_spin()

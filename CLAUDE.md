@@ -46,7 +46,7 @@ file to be read.
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
-                     breakable block, treasure, level exit
+                     breakable block, treasure, level exit, transformer
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase) and playground.tscn (momentum)
@@ -302,6 +302,104 @@ and uncapped momentum, crumbling floors, and a near-frictionless `SLIDE` state.
   not the geometry-access ones (Flat, Zombie). And it removes `HealthComponent` from the player, the
   HUD hearts, `take_hit`, `_do_hurt`, the respawn flow and about six smoke checks.
 - **Treasure as the goal.** Lums are still lums; Wario Land's score is money you spend.
+
+## Transformations, and the tools/threats split
+
+**Built 2026-10-02.** Wario Land's best idea: getting hit does not hurt you, it **changes** you, and
+the change is a penalty **and** a key to somewhere you could not otherwise reach. `State.FLAMING` and
+`State.PUFFY`.
+
+### Why health and death were KEPT
+
+Wario Land II onwards paired transformations with immortality. **That pairing is the series' most
+criticised decision** and the user named it before agreeing to any of this: a boss that cannot
+threaten you can only inconvenience you, so WL4 bolted a timer onto its bosses as a patch.
+
+**The two ideas are separable, and this project separates them.** Transformations only need "getting
+hit does something interesting" — they do not need you to be immortal. So:
+
+| | |
+| --- | --- |
+| a **tool** | transforms you, does **no** damage — `transformer.gd` |
+| a **threat** | damages you and can kill you — `hazard.gd`, the walker, the turret, every boss |
+
+That split is the load-bearing idea. It gives enemy design a real axis, it keeps bosses genuinely
+dangerous, and **nothing in the transformation code touches hearts, damage or death.** If you ever do
+want to remove health, that decision is still open and nothing here has foreclosed it.
+
+### The synergy that makes FLAMING worth having
+
+`flame_speed` (20) is **above every `BreakableBlock.break_speed` (12) on purpose.** Being set alight
+therefore opens every speed-gated wall in the game, and it costs **no code in the block** — the block
+already asks `approach_speed()`, and a flaming player simply arrives fast.
+
+So the penalty *is* the key: you cannot steer once alight, which means you have to line yourself up
+*before* touching the fire. That is the skill the penalty creates, and it is the reason this
+transformation is interesting rather than annoying. Keep `flame_speed` above `break_speed` or the
+whole point goes.
+
+### Two rules for placing tools
+
+- **Put a tool in front of the thing its transformation is FOR.** A fire jet with no speed-gated wall
+  past it, or a spore puff with nothing above it, is purely an inconvenience — which is exactly the
+  failure mode that earned Wario Land its criticism.
+- **Every transformation must time out.** They are states with no exit but the clock (and `crouch` to
+  pop PUFFY), so the timer is the only thing stopping them being a trap. `crouch` exists on PUFFY
+  because deciding *when* to deflate is the one real choice the state offers; without it the state is
+  pure waiting.
+
+`PlayerAbilities` refuses the spin while `Player.is_transformed()` — a transformation you can attack
+your way out of is not a penalty. `transform_into()` also drops whatever you were carrying, or it
+would stay welded to the hold point.
+
+## Money as stakes, and the no-death question
+
+**Added 2026-10-02 as a deliberate first stage.** Getting hit by a threat knocks money out of you and
+it lands on the floor where you can go back and collect it. **Health and death are still there** —
+this was staged on purpose, so the feel of money-as-stakes can be judged before anything bets the
+fail state on it.
+
+### Why it is Hollow Knight's version and not Sonic's
+
+The user proposed a Sonic hybrid: coins are your health, one coin means you live. Three problems with
+that as a flat rule, all worth remembering:
+
+1. **In a game about hoarding, a good player is always rich, so they can never die.** It recreates
+   the exact Wario Land boss problem for precisely the players who would notice. The system protects
+   whoever needs it least.
+2. **Sonic's rings work because they scatter and you have ~2 seconds to grab them back.** That
+   recovery scramble *is* the mechanic. Coins that simply vanish are a damage bar painted gold.
+3. **Money here is the WIN CONDITION** (the exit charges you), which Sonic's rings are not. So a
+   permanent loss can lock a player out of finishing: hit → poorer → cannot afford the exit → must
+   stay in the dangerous level → hit again. **Design against that spiral.**
+
+So: the money is **not destroyed, it is dropped where you lost it** — Hollow Knight's and Dark Souls'
+answer. Immediate, real, recoverable, no lockout, and "my money is lying next to the thing that hit
+me" is the most Wario sentence available.
+
+### Two rules that make it work
+
+- **`coin_cost` is per threat, not a flat rate.** A walker costs a few coins, a boss costs a lot.
+  That one number is what stops a rich player being immune to everything, and it is why
+  `Events.player_hurt` carries it rather than deriving it from damage.
+- **A hit can never take more than you have** (`Game._on_player_hurt` clamps it). With money as the
+  win condition, a hit that could push you negative is a lockout waiting to happen.
+- **The money loss is gated on the hit LANDING**, because `take_hit` bails if `health.damage()`
+  returns false. So invulnerability frames protect your wallet as well as your hearts, and you cannot
+  be drained during the flash. Worth knowing when testing: `take_hit(0, ...)` does nothing at all —
+  `damage(0)` is false — so a check that passes zero damage to "isolate the money" measures nothing.
+
+The spill lives in **`game.gd`**, not the player, because Game owns the running total and so is the
+only place that can clamp the loss. `coin.gd.spill()` handles the arc and a `pickup_delay` — without
+that delay the coins are re-collected on the frame they appear, since the player is standing in the
+middle of them, and the whole mechanic silently does nothing.
+
+### If the no-death question comes back
+
+**It is still open.** The staged order was chosen because of this project's history: the grapple was
+rewritten four times because the ambitious version went in before anyone knew whether the core felt
+good. If money-as-stakes feels right in play, removing hearts afterwards is easy *and the number
+ranges will already be known*. See also [[transformations]] on why health was kept for bosses.
 
 ## The money loop
 

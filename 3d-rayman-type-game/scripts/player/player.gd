@@ -83,6 +83,12 @@ enum State {
 	WALL_SLIDE,
 	LEDGE_HANG,
 
+	## FLAMING: set alight, sprinting the way you were facing with no steering at
+	## all until it burns out. A penalty AND a key — see _do_flaming.
+	FLAMING,
+	## PUFFY: inflated, floating upward, unable to attack. The vertical twin of
+	## FLAMING, and the way to reach what you cannot jump to.
+	PUFFY,
 	## The ground pound. Still called SLAM throughout — same move, and renaming
 	## eleven exports would have been churn for nothing.
 	SLAM,
@@ -261,6 +267,50 @@ signal state_changed(from: State, to: State)
 @export var sfx_spin: AudioStream
 @export var sfx_slam: AudioStream
 
+@export_group("Transformations")
+## Wario Land's best idea: getting hit does not hurt you, it **changes** you, and
+## the change is a penalty AND a key to somewhere you could not otherwise reach.
+##
+## Note these are a SEPARATE AXIS from health, deliberately. Wario Land II
+## onwards paired transformations with immortality, and that pairing is the
+## series' most criticised feature — a boss that cannot threaten you can only
+## inconvenience you. Nothing here touches hearts, damage or death. Enemies and
+## hazards split into **tools** (transform you, no damage) and **threats**
+## (damage you, can kill). `transformer.gd` is a tool; `hazard.gd` is a threat.
+@export_subgroup("Flaming")
+## How long you burn for. Short, because you have no steering at all — a long
+## one stops being a penalty and starts being a punishment.
+@export var flame_time: float = 2.2
+## How fast you sprint while alight.
+##
+## Must stay well above `BreakableBlock.break_speed` (12): the point of this
+## transformation is that it opens every speed-gated wall in the game for free,
+## which costs no code in the block because the block already asks
+## `approach_speed()`. The penalty IS the key.
+@export var flame_speed: float = 20.0
+## Damage done to anything you run into while alight.
+@export var flame_damage: int = 2
+## A tiny amount of steering, in **radians per second**, so running into a corner
+## is not a dead end. Keep it low — losing control is the whole penalty.
+##
+## It is a rate, not a per-frame fraction, and that distinction cost a bug: this
+## started as `slerp(wish_dir, 0.12)` applied every frame, which compounds to
+## about 72% of full steering in ten frames. The "trickle" was in practice total
+## control, the penalty did not exist, and the player could swerve off the very
+## wall the transformation is supposed to open. ~0.9 rad/s is about 50 degrees a
+## second, so over a full burn you can turn a corner but not dodge.
+@export var flame_turn_rate: float = 0.9
+
+@export_subgroup("Puffy")
+@export var puff_time: float = 3.0
+## How fast you rise. Slow enough that it reads as floating rather than flying.
+@export var puff_rise: float = 3.4
+## How much of the stick still works while inflated.
+@export_range(0.0, 1.0) var puff_control: float = 0.3
+## Speed you are left falling at when you pop early with `crouch`. Deflating is
+## the one real choice this state offers, so it has to be worth making.
+@export var puff_pop_fall: float = -6.0
+
 @export_group("Weight")
 ## Gravity pulling you down a slope. This is the game's momentum engine.
 ##
@@ -298,6 +348,9 @@ signal state_changed(from: State, to: State)
 @export var hurt_time: float = 0.45
 @export var hurt_knockback: float = 7.0
 @export var hurt_lift: float = 5.0
+## How much money a hit knocks out of you by default. Threats can override it:
+## see `Events.player_hurt`. Set to 0 to switch the whole mechanic off.
+@export var hurt_coin_loss: int = 8
 
 var state: State = State.AIR
 ## Horizontal facing of the body model, also used to aim ledge probes and throws.
@@ -317,6 +370,8 @@ var jump_chain: int = 0
 var _chain_window: float = 0.0
 ## Stuck-on-the-floor time left after a ground pound.
 var _slam_recover: float = 0.0
+## Time left on the current transformation (FLAMING or PUFFY).
+var _transform_left: float = 0.0
 var _wall_normal: Vector3 = Vector3.ZERO
 var _wall_lock: float = 0.0
 var _ledge_lock: float = 0.0
@@ -371,6 +426,8 @@ func _physics_process(delta: float) -> void:
 		State.AIR: _do_air(delta)
 		State.WALL_SLIDE: _do_wall_slide(delta)
 		State.LEDGE_HANG: _do_ledge_hang(delta)
+		State.FLAMING: _do_flaming(delta)
+		State.PUFFY: _do_puffy(delta)
 		State.SLAM: _do_slam(delta)
 		State.HURT: _do_hurt(delta)
 		State.DEAD: _do_dead(delta)
@@ -760,6 +817,106 @@ func _do_air(delta: float) -> void:
 		_set_state(State.LEDGE_HANG)
 
 
+## On fire, and running. Wario Land's Flaming Wario.
+##
+## The penalty and the key are the same thing: you sprint at `flame_speed` in
+## whatever direction you were facing with almost no steering, and that speed is
+## above every breakable block's `break_speed`. So being set alight is how you
+## get through walls you cannot otherwise open — and you have to line yourself up
+## BEFORE you catch fire, because afterwards you barely steer.
+##
+## It costs no code in the block: `breakable_block.gd` already asks
+## `approach_speed()`, and this just arrives fast.
+func _do_flaming(delta: float) -> void:
+	_transform_left -= delta
+
+	# Charge the way we are facing. Steering is a trickle rather than zero, so
+	# running into a corner is awkward instead of a dead end.
+	var run := _flatten(facing)
+	if run == Vector3.ZERO:
+		run = Vector3.FORWARD
+	if wish_dir.length_squared() > 0.04:
+		# Turned at a limited RATE, worked out flat on the XZ plane. See
+		# flame_turn_rate for why this is not a slerp fraction.
+		var heading := Vector2(run.x, run.z)
+		var wanted := Vector2(wish_dir.x, wish_dir.z).normalized()
+		var allowance := flame_turn_rate * delta
+		heading = heading.rotated(
+			clampf(heading.angle_to(wanted), -allowance, allowance))
+		run = Vector3(heading.x, 0.0, heading.y).normalized()
+	facing = run
+	velocity.x = run.x * flame_speed
+	velocity.z = run.z * flame_speed
+	_apply_gravity(delta)
+
+	_burn_what_we_touch()
+
+	if _transform_left <= 0.0:
+		_set_state(State.GROUND if is_on_floor() else State.AIR)
+
+
+## Anything we run through while alight takes a hit. Being on fire should be
+## useful offensively too, or it is purely a nuisance.
+func _burn_what_we_touch() -> void:
+	for node in get_tree().get_nodes_in_group(&"enemy"):
+		var enemy := node as Node3D
+		if enemy == null:
+			continue
+		if enemy.global_position.distance_to(global_position) > 1.6:
+			continue
+		var enemy_health := enemy.get_node_or_null(^"Health") as HealthComponent
+		if enemy_health != null:
+			enemy_health.damage(flame_damage)
+
+
+## Inflated and floating. Wario Land's Puffy Wario.
+##
+## The vertical twin of FLAMING: you rise whether you like it or not and cannot
+## attack, which is the penalty, and it is also the only way to reach things
+## above your jump. Crouch to pop early — that one input is what keeps this from
+## being pure waiting, because deciding WHEN to deflate is the whole skill.
+func _do_puffy(delta: float) -> void:
+	_transform_left -= delta
+
+	# Gravity does not apply at all; the rise is the state.
+	velocity.y = puff_rise
+	_apply_horizontal(delta, 1.0, puff_control)
+
+	if Input.is_action_just_pressed(&"crouch"):
+		velocity.y = puff_pop_fall
+		_set_state(State.AIR)
+		return
+
+	if _transform_left <= 0.0:
+		_set_state(State.AIR)
+
+
+## Turns the player into something else. Called by `transformer.gd`.
+##
+## Public and deliberately separate from `take_hit`: a tool transforms you and a
+## threat damages you, and nothing should do both. See the Transformations group.
+func transform_into(which: State, duration: float = -1.0) -> void:
+	if state == State.DEAD or state == State.HURT:
+		return
+	if which != State.FLAMING and which != State.PUFFY:
+		return
+	# Being re-dipped in the same thing refreshes the timer rather than stacking.
+	_transform_left = duration
+	if duration < 0.0:
+		_transform_left = flame_time if which == State.FLAMING else puff_time
+	# Whatever we were carrying is dropped: you cannot hold a keg while alight or
+	# inflated, and keeping it would leave it welded to the hold point.
+	abilities.drop_everything()
+	_set_state(which)
+
+
+## True while a transformation is running. `PlayerAbilities` reads this to refuse
+## the spin — a transformation that let you attack normally would not be a
+## penalty at all.
+func is_transformed() -> bool:
+	return state == State.FLAMING or state == State.PUFFY
+
+
 ## Driving into the ground. Committed: barely any steering, no cancelling.
 ## The landing itself is handled in _after_move, where is_on_floor() is valid.
 func _do_slam(delta: float) -> void:
@@ -999,7 +1156,12 @@ func _snap_to_ledge() -> void:
 # -------------------------------------------------------------- damage & death
 
 ## Called by enemy hurtboxes and hazards.
-func take_hit(amount: int, from: Vector3) -> void:
+## Called by THREATS — things that damage you. Tools transform you instead and go
+## through `transform_into()`; see the Transformations group for that split.
+##
+## `coin_cost` is how much money this particular threat knocks out of you, so a
+## boss can cost far more than a walker. Negative uses `hurt_coin_loss`.
+func take_hit(amount: int, from: Vector3, coin_cost: int = -1) -> void:
 	if state == State.DEAD or not health.damage(amount):
 		return
 	var away := _flatten(global_position - from)
@@ -1008,6 +1170,9 @@ func take_hit(amount: int, from: Vector3) -> void:
 	play_sfx(sfx_hurt)
 	velocity = away.normalized() * hurt_knockback + Vector3.UP * hurt_lift
 	_hurt_left = hurt_time
+	# Game owns the money, so it does the spilling. All we report is that we were
+	# hit and what it ought to cost.
+	Events.player_hurt.emit(global_position, coin_cost if coin_cost >= 0 else hurt_coin_loss)
 	_set_state(State.HURT)
 
 
@@ -1079,6 +1244,7 @@ func respawn_at(where: Transform3D) -> void:
 	jump_chain = 0
 	_chain_window = 0.0
 	_slam_recover = 0.0
+	_transform_left = 0.0
 	_ledge_lock = 0.0
 	_wall_lock = 0.0
 	health.reset()
@@ -1185,4 +1351,6 @@ func debug_info() -> Dictionary:
 			if abilities.spin_left > 0.0 else "-"),
 		"carry": abilities.carried.name if abilities.carried != null else "-",
 		"magnet": abilities.magnetised.name if abilities.magnetised != null else "-",
+		"form": ("%s %.2fs" % [state_name(), maxf(_transform_left, 0.0)]
+			if is_transformed() else "-"),
 	}

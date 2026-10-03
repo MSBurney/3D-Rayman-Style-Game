@@ -126,6 +126,28 @@ awkward on a laptop trackpad.
 - **Carrying** — walk into something carryable and you are holding it, no button. A spin reaches
   further than your hands do and magnets things in from 5 m. Press the attack button while holding
   something to throw it.
+- **Getting hit costs you money** — and the money lands on the floor where you lost it, so you can
+  go back for it. Hollow Knight's answer rather than Sonic's: the loss is immediate and real but
+  recoverable, which matters here because money is the *win condition* — a permanent loss could leave
+  a level unfinishable. The cost is set **per threat**, so a walker takes a few coins and a boss takes
+  a lot; that is what stops a rich player being immune to everything.
+
+  Hearts and death are still here. This is deliberately the first stage of a bigger question — see
+  below.
+- **Transformations** — Wario Land's best idea: getting hit **changes** you, and the change is a
+  penalty *and* a key.
+  - **Flaming** — you sprint uncontrollably at 20 m/s and cannot steer. That is fast enough to smash
+    through every speed-gated wall in the game, so catching fire is *how you get through them* — and
+    because you cannot steer once alight, you have to line yourself up before you touch the fire.
+    The penalty is the key.
+  - **Puffy** — you float upward and cannot attack, reaching places you cannot jump to. `Ctrl` pops
+    you early, which is the one real choice the state offers.
+
+  **Health and death were kept, deliberately.** Wario Land II onwards paired transformations with
+  immortality, and that is the series' most criticised decision — a boss that cannot threaten you can
+  only inconvenience you, which is why Wario Land 4 bolted a timer onto its bosses. The two ideas are
+  separable, so enemies split into **tools** (transform you, no damage) and **threats** (damage you,
+  can kill you — including every boss). You keep your four hearts.
 - **Breakable blocks** — three ways through a wall, and each one asks a different question. **Spin**
   it (and a block can demand the *super* spin, which gives the chain a reason beyond damage).
   **Pound** it from above, scaled by how far you fell. Or just **arrive fast** — above running pace
@@ -213,7 +235,7 @@ scripts/
   components/          health, thrown_flight (homing + ricochet for anything thrown)
   fx/                  shockwave ring, jump burst
   props/               coin, keg, checkpoint, hazard, crumbling floor, spin switch,
-                       breakable block, treasure, level exit
+                       breakable block, treasure, level exit, transformer
   ui/                  hud.gd (hearts, money, F3 debug)
 scenes/                one scene per script, plus the two levels
                        playground.tscn  momentum playground (current direction)

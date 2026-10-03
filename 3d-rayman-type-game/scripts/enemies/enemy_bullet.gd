@@ -4,6 +4,8 @@ extends Area3D
 
 @export var speed: float = 11.0
 @export var damage: int = 1
+## Money this knocks out of the player. Negative uses the player.s default.
+@export var coin_cost: int = -1
 @export var lifetime: float = 3.0
 
 var _direction: Vector3 = Vector3.FORWARD
@@ -29,7 +31,7 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	var player := body as Player
 	if player != null:
-		player.take_hit(damage, global_position)
+		player.take_hit(damage, global_position, coin_cost)
 	_pop()
 
 func _pop() -> void:

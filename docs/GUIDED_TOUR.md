@@ -274,7 +274,7 @@ scripts/
   player/          player.gd, abilities (spin + carry), camera, ledge sensor
   enemies/         walker, turret, bullet
   props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
-                   breakable block, treasure, level exit
+                   breakable block, treasure, level exit, transformer
   ui/              hud.gd
 scenes/            mirrors scripts/ — one scene per script
 ```

@@ -30,7 +30,7 @@ const KEG := preload("res://scenes/props/throwable_keg.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 58
+const EXPECTED_CHECKS := 68
 
 var player: Player
 var level: Node3D
@@ -706,6 +706,97 @@ func _run() -> void:
 		"broken=%s" % pound_wall.broken_open)
 	await _step(30)
 
+	# ------------------------------------------------------- transformations
+	#
+	# Wario Land's best idea: getting hit changes you, and the change is a
+	# penalty AND a key. These are a separate axis from health — nothing here
+	# touches hearts, damage or death.
+
+	# FLAMING: no steering, and fast enough to open a speed-gated wall for free.
+	# That synergy is the whole point, so it is what gets checked rather than the
+	# speed on its own.
+	var fire_wall := BLOCK.instantiate() as BreakableBlock
+	level.add_child(fire_wall)
+	fire_wall.global_position = PAD_TOP + Vector3(0, 1, 12)
+	await _step(10)
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 4))
+	await _step(30)
+	player.facing = Vector3(0, 0, 1)
+	player.transform_into(Player.State.FLAMING)
+	await _step(3)
+	var flame_speed := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("catching fire sprints you without steering",
+		player.state == Player.State.FLAMING and flame_speed > player.max_speed * 2.0,
+		"state=%s at %.1f m/s (max_speed %.1f)"
+			% [player.state_name(), flame_speed, player.max_speed])
+
+	# Held AGAINST the stick, and the thing that matters is the HEADING, not the
+	# speed. The first version of this check only watched the speed, so it passed
+	# while the player quietly swerved a full 72 degrees off the wall — which is
+	# what hid the per-frame steering bug. Measure what the penalty actually is.
+	var heading_before := Vector2(player.velocity.x, player.velocity.z).normalized()
+	Input.action_press("move_left")
+	await _step(12)
+	var heading_after := Vector2(player.velocity.x, player.velocity.z).normalized()
+	var swerved := rad_to_deg(absf(heading_before.angle_to(heading_after)))
+	_release_all()
+	_check("a flaming sprint barely answers the stick", swerved < 15.0,
+		"swerved %.1f degrees in 12 frames while steering away" % swerved)
+	await _step(60)
+
+	# The headline synergy, on its own run with no stick input at all: flame speed
+	# is above every block's break_speed, so being alight opens a speed-gated wall
+	# with NO code in the block. Checked separately because mixing it with the
+	# steering check above is what made the failure ambiguous.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 4))
+	await _step(30)
+	player.facing = Vector3(0, 0, 1)
+	player.transform_into(Player.State.FLAMING)
+	await _step(45)
+	_check("being alight opens a speed-gated wall for free", fire_wall.broken_open,
+		"broken=%s" % fire_wall.broken_open)
+
+	# And it burns out on its own, or it would be a trap rather than a penalty.
+	for i in 240:
+		await _step(1)
+		if player.state != Player.State.FLAMING:
+			break
+	_check("the fire burns out on its own",
+		player.state != Player.State.FLAMING,
+		"state=%s" % player.state_name())
+	await _step(20)
+
+	# PUFFY: rises whether you like it or not, and you cannot attack.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 0))
+	await _step(30)
+	var puff_from := player.global_position.y
+	player.transform_into(Player.State.PUFFY)
+	await _step(30)
+	_check("being inflated floats you upward",
+		player.state == Player.State.PUFFY and player.global_position.y > puff_from + 1.0,
+		"state=%s, rose %.2f m" % [player.state_name(), player.global_position.y - puff_from])
+
+	# The spin has to be refused, or the transformation costs nothing.
+	var step_before := player.abilities.spin_step
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	_check("you cannot spin while transformed",
+		player.abilities.spin_step == step_before,
+		"spin_step %d -> %d" % [step_before, player.abilities.spin_step])
+
+	# Crouch pops it early — the one real choice the state offers.
+	Input.action_press("crouch")
+	await _step(3)
+	_release_all()
+	_check("crouch pops you out of being inflated",
+		player.state != Player.State.PUFFY and player.velocity.y < 0.0,
+		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
+	await _step(40)
+
 	# --------------------------------------------------------- the money loop
 	#
 	# Wario Land's core: see a suspicious wall, work out which tool opens it,
@@ -894,6 +985,49 @@ func _run() -> void:
 	_check("throw releases keg", player.abilities.carried == null and thrown_speed > 20.0,
 		"kegspeed=%.2f" % thrown_speed)
 	await _step(20)
+
+	# --- money spilled on a hit. Wario's sting plus Hollow Knight's recovery: the
+	# money is not destroyed, it is lying on the floor where you lost it.
+	_place(Vector3(11, 14, 66))
+	await _step(40)
+	var purse_before := 0
+	if not money_seen.is_empty():
+		purse_before = money_seen[-1]
+	var coins_before := level.get_tree().get_nodes_in_group(&"coin").size()
+	# A real hit, with damage. The first version of this passed `amount = 0` to
+	# isolate the money from the health, and `health.damage(0)` returns false, so
+	# take_hit() bailed before emitting anything and all three checks failed.
+	#
+	# Which confirms a design decision worth keeping: the money loss is gated on
+	# the hit LANDING, so invulnerability frames protect your wallet as well as
+	# your hearts. You cannot be drained during the flash.
+	player.take_hit(1, player.global_position + Vector3(0, 0, 2), 6)
+	await _step(4)
+	var purse_after := money_seen[-1] if not money_seen.is_empty() else 0
+	_check("a hit knocks money out of you", purse_after == purse_before - 6,
+		"%d -> %d, expected -6" % [purse_before, purse_after])
+
+	# And it is recoverable, which is the whole reason it is not just a damage
+	# bar: the money has to physically exist on the floor afterwards.
+	var coins_after := level.get_tree().get_nodes_in_group(&"coin").size()
+	_check("the money lands on the floor to be collected",
+		coins_after > coins_before,
+		"%d coins in the level -> %d" % [coins_before, coins_after])
+
+	# It must never take more than you have. With money as the win condition, a
+	# hit that could push you negative would be a lockout waiting to happen.
+	#
+	# 70 frames, not 30: `invulnerable_time` on the player is 1.0s, so a second
+	# hit inside that window is refused outright and this would measure nothing.
+	await _step(70)
+	var broke_from := money_seen[-1] if not money_seen.is_empty() else 0
+	player.take_hit(1, player.global_position + Vector3(0, 0, 2), 99999)
+	await _step(4)
+	var broke_to := money_seen[-1] if not money_seen.is_empty() else 0
+	_check("a hit cannot take more money than you have",
+		broke_to == 0 and broke_from >= 0,
+		"%d -> %d" % [broke_from, broke_to])
+	await _step(40)
 
 	# --- taking damage.
 	# Run this on the zone D tower, not the hub: the hub walkers wander, and a

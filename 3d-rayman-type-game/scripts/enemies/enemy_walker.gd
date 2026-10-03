@@ -11,6 +11,10 @@ extends CharacterBody3D
 @export var detect_range: float = 11.0
 @export var lose_range: float = 16.0
 @export var contact_damage: int = 1
+## Money this knocks out of the player, on top of the damage. Negative uses the
+## player.s default. A boss would set this high — that is what stops a rich
+## player being immune to everything.
+@export var contact_coin_cost: int = -1
 @export var turn_speed: float = 9.0
 @export var gravity: float = 24.0
 ## Dropped on death so combat feeds back into collection.
@@ -152,7 +156,7 @@ func _on_hurtbox_entered(body: Node3D) -> void:
 	# stompbox have it rather than trading damage.
 	if player.descent_speed() < -1.0 and player.global_position.y > global_position.y + 0.6:
 		return
-	player.take_hit(contact_damage, global_position)
+	player.take_hit(contact_damage, global_position, contact_coin_cost)
 
 func _on_stomp(body: Node3D) -> void:
 	if _dead:
