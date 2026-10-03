@@ -17,7 +17,7 @@ extends StaticBody3D
 ##
 ## It announces itself on `Events.switch_toggled` rather than reaching for
 ## whatever it is supposed to open. Wire a door to that signal and the two never
-## have to know about each other — same shape as lums and the score.
+## have to know about each other — same shape as a coin and the score.
 
 @export_group("Behaviour")
 ## Off: one hit turns it on and it stays on. On: every hit flips it.

@@ -6,20 +6,26 @@ extends Node
 @export var respawn_delay: float = 1.1
 @export var player: Player
 
-var lums: int = 0
+var money: int = 0
 var _respawn: Transform3D
 var _respawning: bool = false
 
 func _ready() -> void:
+	# Joined so anything needing the CURRENT total can pull it instead of waiting
+	# for the next `money_changed`. A level exit created after some money was
+	# already banked — or simply one whose _ready() ran after ours — otherwise
+	# starts believing you have nothing. Same shape as the HUD pulling the
+	# player.s health once on pickup.
+	add_to_group(&"game")
 	if player == null:
 		player = get_tree().get_first_node_in_group(&"player") as Player
 	if player != null:
 		_respawn = player.global_transform
 
-	Events.lum_collected.connect(_on_lum_collected)
+	Events.money_collected.connect(_on_money_collected)
 	Events.checkpoint_reached.connect(_on_checkpoint_reached)
 	Events.player_died.connect(_on_player_died)
-	Events.lum_total_changed.emit(lums)
+	Events.money_changed.emit(money)
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Quick iteration aids for a sandbox project.
@@ -28,9 +34,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed(&"respawn"):
 		_do_respawn()
 
-func _on_lum_collected(value: int) -> void:
-	lums += value
-	Events.lum_total_changed.emit(lums)
+func _on_money_collected(value: int) -> void:
+	money += value
+	Events.money_changed.emit(money)
 
 func _on_checkpoint_reached(point: Node3D) -> void:
 	_respawn = point.global_transform

@@ -45,7 +45,8 @@ file to be read.
     components/      health, thrown_flight (drop-in Nodes, no matching scene)
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
-    props/           lum, keg, checkpoint, hazard, crumbling floor, spin switch, breakable block
+    props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
+                     breakable block, treasure, level exit
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase) and playground.tscn (momentum)
@@ -301,6 +302,37 @@ and uncapped momentum, crumbling floors, and a near-frictionless `SLIDE` state.
   not the geometry-access ones (Flat, Zombie). And it removes `HealthComponent` from the player, the
   HUD hearts, `take_hit`, `_do_hurt`, the respawn flow and about six smoke checks.
 - **Treasure as the goal.** Lums are still lums; Wario Land's score is money you spend.
+
+## The money loop
+
+**Built 2026-10-02, and it is the first thing in the project with a GOAL.** Before it there were
+thirteen verbs and nothing to use them for: you could smash through a wall that took real skill to
+open and find nothing behind it.
+
+Wario Land's core loop, and the thing to design levels around: **see a suspicious wall → work out
+which tool opens it → treasure → pay the exit.**
+
+- **`coin.gd`** — was `lum.gd` until 2026-10-02, a Rayman fossil. `Kind.COIN` is money,
+  `Kind.GARLIC` heals (Wario eats garlic to recover). One scene, tinted from `kind`.
+- **`treasure.gd`** — a chest worth many coins, opened by a spin or a pound, **not** by walking into
+  it. A chest you collect by brushing past is indistinguishable from a coin, and the reward has to
+  read as bigger than the trail that led to it. It pays straight into the total rather than
+  scattering fifty coins, which looks generous and is actually a chore.
+- **`level_exit.gd`** — **charges you to leave.** Straight from Wario Land 1, where you literally buy
+  the ending. That one rule is what makes every other system matter: the walls, the pound, the spin
+  chain and the slopes all become ways of affording the way out. `price = 0` makes it a plain goal,
+  which is useful while building.
+
+**Price a level so one chest is not enough.** The playground's exit wants 120 against three 40-and-60
+chests, each behind a wall needing a *different* tool — so the price cannot be paid by repeating one
+trick. That is the actual level-design lever this gives you.
+
+**The exit refuses loudly.** `Events.exit_refused` carries the shortfall and the HUD prints it. An
+exit that silently does nothing when you are poor is indistinguishable from an exit that is broken.
+It also brightens when you can afford it, so availability reads from across the level.
+
+Money does **not** reset on death, and the exit tracks the total by listening to
+`Events.money_changed` rather than reaching into `game.gd` — so both work in any scene.
 
 ## The breakable world
 

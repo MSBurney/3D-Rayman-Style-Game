@@ -1,19 +1,26 @@
 extends Area3D
 
-## Collectible lum. Yellow counts, red heals.
+## A coin, or a clove of garlic.
+##
+## Money is the point of a Wario game, so the yellow one is currency: it adds to
+## the running total that a level exit charges you. The red one is garlic, which
+## is what Wario eats to recover, so it heals instead.
+##
+## One scene for both, tinted from `kind`, so there is no second scene to keep in
+## sync. Was called a "lum" until 2026-10-02 — a Rayman fossil.
 
-enum Kind { YELLOW, RED }
+enum Kind { COIN, GARLIC }
 
-@export var kind: Kind = Kind.YELLOW
+@export var kind: Kind = Kind.COIN
 @export var value: int = 1
 @export var spin_speed: float = 2.0
 @export var bob_height: float = 0.16
 @export var bob_speed: float = 2.4
-## One scene, tinted from `kind`, so there's no second lum scene to keep in sync.
-@export var yellow_colour: Color = Color(1.0, 0.88, 0.32)
-@export var red_colour: Color = Color(1.0, 0.36, 0.42)
-@export var yellow_sfx: AudioStream
-@export var red_sfx: AudioStream
+## Yellow is money, red is garlic (a heal).
+@export var coin_colour: Color = Color(1.0, 0.88, 0.32)
+@export var garlic_colour: Color = Color(1.0, 0.36, 0.42)
+@export var coin_sfx: AudioStream
+@export var garlic_sfx: AudioStream
 
 var _base_y: float = 0.0
 var _t: float = 0.0
@@ -29,12 +36,12 @@ func _ready() -> void:
 
 
 func _apply_tint() -> void:
-	var colour := red_colour if kind == Kind.RED else yellow_colour
+	var colour := garlic_colour if kind == Kind.GARLIC else coin_colour
 	var material := StandardMaterial3D.new()
 	material.albedo_color = colour
 	material.emission_enabled = true
 	material.emission = colour
-	# Kept below 1 so the lum reads as yellow rather than saturating to white.
+	# Kept below 1 so the coin reads as yellow rather than saturating to white.
 	material.emission_energy_multiplier = 0.9
 	for child in get_children():
 		var mesh := child as MeshInstance3D
@@ -54,16 +61,16 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	_taken = true
 	match kind:
-		Kind.RED:
+		Kind.GARLIC:
 			player.heal(value)
 		_:
-			Events.lum_collected.emit(value)
+			Events.money_collected.emit(value)
 
 	set_deferred(&"monitoring", false)
 	# Stop the idle bob, or it fights the tween below for control of position.y.
 	set_process(false)
 
-	var sound := red_sfx if kind == Kind.RED else yellow_sfx
+	var sound := garlic_sfx if kind == Kind.GARLIC else coin_sfx
 	if sound != null:
 		_sfx.stream = sound
 		_sfx.play()

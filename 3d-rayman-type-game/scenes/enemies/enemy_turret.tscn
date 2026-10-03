@@ -3,7 +3,7 @@
 [ext_resource type="Script" uid="uid://dnd5yq36nrcmr" path="res://scripts/enemies/enemy_turret.gd" id="1"]
 [ext_resource type="Script" uid="uid://0hc4op07qxx7" path="res://scripts/components/health.gd" id="2"]
 [ext_resource type="PackedScene" uid="uid://d243c40ke6oqu" path="res://scenes/fx/enemy_bullet.tscn" id="3"]
-[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="4"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="4"]
 [ext_resource type="AudioStream" uid="uid://umtxj02x8pcr" path="res://assets/audio/enemy_hit.wav" id="5"]
 [ext_resource type="AudioStream" uid="uid://b4kq7hqs5tgxp" path="res://assets/audio/enemy_die.wav" id="6"]
 
@@ -46,7 +46,7 @@ collision_layer = 4
 collision_mask = 1
 script = ExtResource("1")
 bullet = ExtResource("3")
-lum_drop = ExtResource("4")
+coin_drop = ExtResource("4")
 sfx_hit = ExtResource("5")
 sfx_die = ExtResource("6")
 

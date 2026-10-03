@@ -43,6 +43,15 @@ signal broken(at: Vector3)
 ## How far a pound can reach. Wider than the block so landing beside it counts.
 @export var slam_radius: float = 3.0
 
+@export_group("Loot")
+## Money dropped when it breaks. Smashing has to pay something, or breaking a
+## wall is a chore you perform rather than a thing you want to do.
+@export var coin_drop: PackedScene
+@export_range(0, 12) var coin_count: int = 3
+## How far the coins scatter. Kept small so they do not end up somewhere you
+## cannot reach, which turns a reward into a tax.
+@export var coin_scatter: float = 0.9
+
 @export_group("Behaviour")
 ## Seconds until it comes back. Negative means it is gone for good, which is
 ## what you usually want for a wall guarding a route.
@@ -158,6 +167,7 @@ func _break(through: Player) -> void:
 		through.velocity.z = kept.z
 
 	_spawn_break_fx()
+	_drop_coins()
 	broken.emit(global_position)
 
 	var tween := create_tween()
@@ -189,6 +199,20 @@ func _restore() -> void:
 	sensor.set_deferred(&"monitoring", true)
 	var tween := create_tween()
 	tween.tween_property(visual, "scale", Vector3.ONE, 0.16)
+
+
+## Scatters a little money where the block was.
+func _drop_coins() -> void:
+	if coin_drop == null:
+		return
+	for i in coin_count:
+		var coin := coin_drop.instantiate() as Node3D
+		# Parented to the level, not to us — we are about to shrink to nothing,
+		# and children shrink with their parent.
+		get_tree().current_scene.add_child(coin)
+		coin.global_position = global_position + Vector3(
+			randf_range(-coin_scatter, coin_scatter), 0.3,
+			randf_range(-coin_scatter, coin_scatter))
 
 
 func _spawn_break_fx() -> void:

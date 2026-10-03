@@ -3,7 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://4nl2p1prnqmb" path="res://scenes/props/checkpoint.tscn" id="cp"]
 [ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
 [ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
-[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="lum"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
 [ext_resource type="PackedScene" uid="uid://13j0onm5mchh" path="res://scenes/enemies/enemy_turret.tscn" id="turret"]
 [ext_resource type="PackedScene" uid="uid://3htouak7kni1" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
 
@@ -73,13 +73,13 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8.5, 0.6, 9)
 [node name="KegC" parent="." unique_id=1968447016 instance=ExtResource("keg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.6, 9)
 
-[node name="HubLumA" parent="." unique_id=1876442323 instance=ExtResource("lum")]
+[node name="HubCoinA" parent="." unique_id=1876442323 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1.2, 4)
 
-[node name="HubLumB" parent="." unique_id=2059919665 instance=ExtResource("lum")]
+[node name="HubCoinB" parent="." unique_id=2059919665 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 4)
 
-[node name="HubLumC" parent="." unique_id=559055574 instance=ExtResource("lum")]
+[node name="HubCoinC" parent="." unique_id=559055574 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1.2, 4)
 
 [node name="A1" type="CSGBox3D" parent="." unique_id=1998093591]
@@ -106,13 +106,13 @@ use_collision = true
 size = Vector3(16, 1, 16)
 material = SubResource("MatGrass")
 
-[node name="AGlideLumA" parent="." unique_id=155236200 instance=ExtResource("lum")]
+[node name="AGlideCoinA" parent="." unique_id=155236200 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -46)
 
-[node name="AGlideLumB" parent="." unique_id=335188151 instance=ExtResource("lum")]
+[node name="AGlideCoinB" parent="." unique_id=335188151 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -50)
 
-[node name="AGlideLumC" parent="." unique_id=1368678721 instance=ExtResource("lum")]
+[node name="AGlideCoinC" parent="." unique_id=1368678721 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, -54)
 
 [node name="ACheckpoint" parent="." unique_id=2076159013 instance=ExtResource("cp")]
@@ -121,7 +121,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -58)
 [node name="ATurret" parent="." unique_id=1068073115 instance=ExtResource("turret")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.4, -69)
 
-[node name="ARedLum" parent="." unique_id=1881876364 instance=ExtResource("lum")]
+[node name="AGarlic" parent="." unique_id=1881876364 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 1.4, -68)
 kind = 1
 
@@ -173,16 +173,16 @@ use_collision = true
 size = Vector3(7, 1, 7)
 material = SubResource("MatStone")
 
-[node name="BShaftLumA" parent="." unique_id=950460116 instance=ExtResource("lum")]
+[node name="BShaftCoinA" parent="." unique_id=950460116 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 3, 0)
 
-[node name="BShaftLumB" parent="." unique_id=425741322 instance=ExtResource("lum")]
+[node name="BShaftCoinB" parent="." unique_id=425741322 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 6, 0)
 
-[node name="BShaftLumC" parent="." unique_id=321200698 instance=ExtResource("lum")]
+[node name="BShaftCoinC" parent="." unique_id=321200698 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 9, 0)
 
-[node name="BPerchRedLum" parent="." unique_id=1566475878 instance=ExtResource("lum")]
+[node name="BPerchGarlic" parent="." unique_id=1566475878 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 13, -7)
 kind = 1
 
@@ -207,10 +207,10 @@ material = SubResource("MatLedge")
 [node name="CCheckpoint" parent="." unique_id=869105743 instance=ExtResource("cp")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -19, 3.3, 0)
 
-[node name="CLumA" parent="." unique_id=659368424 instance=ExtResource("lum")]
+[node name="CCoinA" parent="." unique_id=659368424 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27, 8, 0)
 
-[node name="CLumB" parent="." unique_id=916142803 instance=ExtResource("lum")]
+[node name="CCoinB" parent="." unique_id=916142803 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 11.3, 0)
 
 [node name="CTurret" parent="." unique_id=917250019 instance=ExtResource("turret")]
@@ -235,16 +235,16 @@ use_collision = true
 size = Vector3(10, 1, 10)
 material = SubResource("MatStone")
 
-[node name="DTowerLumA" parent="." unique_id=670494312 instance=ExtResource("lum")]
+[node name="DTowerCoinA" parent="." unique_id=670494312 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 14.2, 64)
 
-[node name="DTowerLumB" parent="." unique_id=1479661485 instance=ExtResource("lum")]
+[node name="DTowerCoinB" parent="." unique_id=1479661485 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 14.2, 64)
 
-[node name="DTowerLumC" parent="." unique_id=30846921 instance=ExtResource("lum")]
+[node name="DTowerCoinC" parent="." unique_id=30846921 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 14.2, 64)
 
-[node name="DTowerLumD" parent="." unique_id=613507985 instance=ExtResource("lum")]
+[node name="DTowerCoinD" parent="." unique_id=613507985 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 14.2, 68)
 
 [node name="DTowerCheckpoint" parent="." unique_id=1871297241 instance=ExtResource("cp")]

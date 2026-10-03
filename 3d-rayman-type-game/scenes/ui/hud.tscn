@@ -12,13 +12,13 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("1")
 
-[node name="LumLabel" type="Label" parent="."]
+[node name="MoneyLabel" type="Label" parent="."]
 layout_mode = 0
 offset_left = 22.0
 offset_top = 54.0
 offset_right = 240.0
 offset_bottom = 84.0
-text = "Lums  0"
+text = "20a1  0"
 
 [node name="DebugLabel" type="Label" parent="."]
 layout_mode = 0

@@ -11,7 +11,7 @@ extends StaticBody3D
 ## Fires a burst of this many shots, then waits a full interval.
 @export var burst: int = 1
 @export var burst_spacing: float = 0.16
-@export var lum_drop: PackedScene
+@export var coin_drop: PackedScene
 @export var sfx_hit: AudioStream
 @export var sfx_die: AudioStream
 
@@ -89,10 +89,10 @@ func _on_died() -> void:
 	_dead = true
 	collision_layer = 0
 	Events.enemy_died.emit(self)
-	if lum_drop != null:
-		var lum := lum_drop.instantiate() as Node3D
-		get_parent().add_child(lum)
-		lum.global_position = global_position + Vector3.UP * 1.0
+	if coin_drop != null:
+		var coin := coin_drop.instantiate() as Node3D
+		get_parent().add_child(coin)
+		coin.global_position = global_position + Vector3.UP * 1.0
 	_play(sfx_die)
 	var tween := create_tween()
 	tween.tween_property(visual, "scale", Vector3.ONE * 0.01, 0.25)

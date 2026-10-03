@@ -5,10 +5,10 @@ extends Node
 ## Gameplay nodes fire these and never look each other up, so the HUD, the score
 ## and the respawn rules can all be rewritten without touching the player.
 
-## A lum was picked up. `value` is how much that single lum was worth.
-signal lum_collected(value: int)
-## Running total, re-emitted by Game after it accumulates lums.
-signal lum_total_changed(total: int)
+## Money was picked up. `value` is how much that single pickup was worth.
+signal money_collected(value: int)
+## Running total, re-emitted by Game after it accumulates money.
+signal money_changed(total: int)
 
 signal player_health_changed(current: int, maximum: int)
 signal player_died
@@ -21,6 +21,16 @@ signal enemy_died(enemy: Node3D)
 ## breakable floors and pressure plates can require a genuinely big drop rather
 ## than any old landing. `crumbling_floor.gd` listens.
 signal slam_landed(at: Vector3, force: float)
+
+## The player reached the exit with enough money and the level is done.
+## `taken` is what they left with, for a tally.
+signal level_cleared(exit: Node3D, taken: int)
+## ...and they reached it without enough. `short` is how much more they need.
+##
+## Emitted rather than handled on the spot because a refusal has to be *said*:
+## an exit that silently does nothing when you are poor is indistinguishable
+## from an exit that is broken. The HUD listens and shows the shortfall.
+signal exit_refused(exit: Node3D, short: int)
 
 ## A spin attack tripped a switch. Wire a door to this and the door and the
 ## switch never have to know about each other.

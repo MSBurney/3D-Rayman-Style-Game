@@ -4,9 +4,11 @@
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
 [ext_resource type="PackedScene" uid="uid://b546i5pe5gix4" path="res://scenes/props/spin_switch.tscn" id="sw"]
 [ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="brk"]
+[ext_resource type="PackedScene" uid="uid://c2ocooorlwkcr" path="res://scenes/props/treasure.tscn" id="chest"]
+[ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
 [ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
 [ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
-[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="lum"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
 [ext_resource type="PackedScene" uid="uid://3htouak7kni1" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
@@ -144,22 +146,22 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 0.6, -4)
 [node name="KegB" parent="." unique_id=1153256922 instance=ExtResource("keg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 0.6, -4)
 
-[node name="LumRampA" parent="." unique_id=2128796835 instance=ExtResource("lum")]
+[node name="CoinRampA" parent="." unique_id=2128796835 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7.4, -47)
 
-[node name="LumRampB" parent="." unique_id=656946497 instance=ExtResource("lum")]
+[node name="CoinRampB" parent="." unique_id=656946497 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.3, -37)
 
-[node name="LumRampC" parent="." unique_id=127636925 instance=ExtResource("lum")]
+[node name="CoinRampC" parent="." unique_id=127636925 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.2, -27)
 
-[node name="LumGapA" parent="." unique_id=432541994 instance=ExtResource("lum")]
+[node name="CoinGapA" parent="." unique_id=432541994 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.2, 16)
 
-[node name="LumGapB" parent="." unique_id=750782103 instance=ExtResource("lum")]
+[node name="CoinGapB" parent="." unique_id=750782103 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.6, 20)
 
-[node name="LumLanding" parent="." unique_id=906679622 instance=ExtResource("lum")]
+[node name="CoinLanding" parent="." unique_id=906679622 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 30)
 
 [node name="KillPlane" type="Area3D" parent="." unique_id=1991189429]
@@ -189,12 +191,15 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 38)
 ; pace (7.5) and below what the ramp delivers (~16).
 [node name="RampWallA" parent="." instance=ExtResource("brk")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1, -14)
+coin_drop = ExtResource("coin")
 
 [node name="RampWallB" parent="." instance=ExtResource("brk")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -14)
+coin_drop = ExtResource("coin")
 
 [node name="RampWallC" parent="." instance=ExtResource("brk")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1, -14)
+coin_drop = ExtResource("coin")
 
 ; Only the super spin opens this one, so the chain has a reason to exist beyond
 ; doing more damage.
@@ -213,3 +218,26 @@ break_speed = 999.0
 require_spin_step = 0
 require_slam_power = 0.4
 colour = Color(0.4, 0.62, 0.68, 1)
+
+; The loop, assembled. Each chest sits behind a wall that needs a DIFFERENT tool,
+; so the exit price cannot be paid by repeating one trick:
+;   - behind the super-spin block      -> needs the three-chain
+;   - behind the pound-only block      -> needs a drop off the steep ramp
+;   - across the gap on the landing    -> needs ramp speed and a long jump
+[node name="ChestSpin" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 0, 4)
+worth = 40
+
+[node name="ChestPound" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, 4)
+worth = 40
+
+[node name="ChestLanding" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0, 38)
+worth = 60
+
+; Priced so one chest is not enough. 120 needs two chests plus loose change, or
+; all three, which is the point: the exit is a reason to go and get the rest.
+[node name="Exit" parent="." instance=ExtResource("exit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 38)
+price = 120

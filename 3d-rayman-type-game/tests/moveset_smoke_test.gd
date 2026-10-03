@@ -23,12 +23,14 @@ const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
 const CRUMBLING := preload("res://scenes/props/crumbling_floor.tscn")
 const SWITCH := preload("res://scenes/props/spin_switch.tscn")
 const BLOCK := preload("res://scenes/props/breakable_block.tscn")
+const TREASURE := preload("res://scenes/props/treasure.tscn")
+const EXIT := preload("res://scenes/props/level_exit.tscn")
 const KEG := preload("res://scenes/props/throwable_keg.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 55
+const EXPECTED_CHECKS := 58
 
 var player: Player
 var level: Node3D
@@ -703,6 +705,77 @@ func _run() -> void:
 	_check("a hard pound opens a pound-only block", pound_wall.broken_open,
 		"broken=%s" % pound_wall.broken_open)
 	await _step(30)
+
+	# --------------------------------------------------------- the money loop
+	#
+	# Wario Land's core: see a suspicious wall, work out which tool opens it,
+	# treasure. The blocks above were two thirds of that; these checks are the
+	# third, and the exit is what makes any of it matter.
+
+	# NOTE on the coordinates below: the pad is 60x60 centred on (250, 20, 0), so
+	# anything placed outside z -30..+30 drops into the void. The first version of
+	# these checks sat the chest at z=-38 and the exit at z=-44, and the player
+	# simply fell past both — which read as the chest refusing to open.
+	# Money has to actually accumulate, or nothing downstream of it can work.
+	var money_seen: Array[int] = []
+	Events.money_changed.connect(func(total: int) -> void: money_seen.append(total))
+	var money_before := 0
+	if not money_seen.is_empty():
+		money_before = money_seen[-1]
+
+	# A chest pays a lot more than a coin, which is the whole reason to go and
+	# find one rather than hoovering the floor.
+	var chest := TREASURE.instantiate() as Treasure
+	level.add_child(chest)
+	chest.global_position = PAD_TOP + Vector3(1.7, 0, 20)
+	chest.worth = 40
+	await _step(10)
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 20))
+	await _step(40)
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(8)
+	var after_chest := money_seen[-1] if not money_seen.is_empty() else 0
+	_check("a spin opens a chest and it pays",
+		chest.open and after_chest >= money_before + 40,
+		"open=%s, money %d -> %d" % [chest.open, money_before, after_chest])
+	await _step(20)
+
+	# The exit refuses you while you are short, and says by how much. An exit
+	# that silently does nothing is indistinguishable from a broken one.
+	var refusals: Array[int] = []
+	Events.exit_refused.connect(func(_e: Node3D, short: int) -> void:
+		refusals.append(short))
+	var way_out := EXIT.instantiate() as LevelExit
+	level.add_child(way_out)
+	way_out.global_position = PAD_TOP + Vector3(0, 0, 26)
+	way_out.price = after_chest + 500
+	await _step(10)
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, 26))
+	await _step(25)
+	_check("the exit refuses you when you are short and says how much",
+		not way_out.cleared and refusals.size() > 0 and refusals[0] > 0,
+		"cleared=%s, refused short by %s"
+			% [way_out.cleared, "nothing" if refusals.is_empty() else str(refusals[0])])
+
+	# And opens once you can afford it. Priced below what is already banked, then
+	# re-entered — the money total is the only thing that changed.
+	var cleared_with: Array[int] = []
+	Events.level_cleared.connect(func(_e: Node3D, taken: int) -> void:
+		cleared_with.append(taken))
+	way_out.price = 1
+	_place(PAD_TOP + Vector3(0, 0.4, 22))
+	await _step(20)
+	_place(PAD_TOP + Vector3(0, 0.4, 26))
+	await _step(25)
+	_check("the exit opens once you can afford it",
+		way_out.cleared and cleared_with.size() > 0,
+		"cleared=%s, left with %s" % [way_out.cleared,
+			"nothing" if cleared_with.is_empty() else str(cleared_with[0])])
+	await _step(20)
 
 	# --- a thrown object is a homing, ricocheting rocket (thrown_flight.gd).
 	#

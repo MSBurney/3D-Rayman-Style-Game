@@ -212,8 +212,9 @@ scripts/
   enemies/             walker, turret, bullet
   components/          health, thrown_flight (homing + ricochet for anything thrown)
   fx/                  shockwave ring, jump burst
-  props/               lum, keg, checkpoint, hazard, crumbling floor, spin switch, breakable block
-  ui/                  hud.gd (hearts, lums, F3 debug)
+  props/               coin, keg, checkpoint, hazard, crumbling floor, spin switch,
+                       breakable block, treasure, level exit
+  ui/                  hud.gd (hearts, money, F3 debug)
 scenes/                one scene per script, plus the two levels
                        playground.tscn  momentum playground (current direction)
                        main.tscn        moveset showcase (reference)
@@ -228,7 +229,7 @@ share a lot of velocity maths and constantly interrupt each other.
 Every feel number is an `@export` on the player, grouped in the inspector (Run, Jump, Wall moves,
 Ledge grab, Weight, Slam, Combat, Sounds; Jump has Jump chain and Crouch moves subgroups; the
 Abilities child node owns Spin and Carry). Select the Player node and edit them there — no
-code changes needed. Enemies, lums, kegs and switches expose their own knobs the same way.
+code changes needed. Enemies, coins, kegs, chests and switches expose their own knobs the same way.
 
 ## Smoke test
 

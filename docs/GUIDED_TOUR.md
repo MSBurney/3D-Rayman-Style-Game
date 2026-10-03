@@ -45,9 +45,9 @@ Enough to read this project. Four ideas:
 **Nodes** are the building blocks — a mesh, a light, a collision shape, a plain container. Every
 node has a type that decides what it can do, and they form a tree.
 
-**Scenes** are a saved tree of nodes (a `.tscn` file). The player is a scene. So is a lum. A scene
-can be *instanced* inside another scene, which is how the level contains 30 lums without 30 copies
-of the work. Change `lum.tscn` and every lum in the game changes. Roughly: a scene is a class, an
+**Scenes** are a saved tree of nodes (a `.tscn` file). The player is a scene. So is a coin. A scene
+can be *instanced* inside another scene, which is how a level holds 30 coins without 30 copies
+of the work. Change `coin.tscn` and every coin in the game changes. Roughly: a scene is a class, an
 instance is an object.
 
 **Scripts** attach to a node and extend it. `extends CharacterBody3D` at the top of `player.gd`
@@ -107,11 +107,11 @@ Set them back afterwards (or just don't save the scene).
 
 ---
 
-## 3. Follow one lum from pickup to screen (15 minutes)
+## 3. Follow one coin from pickup to screen (15 minutes)
 
 This teaches how the project's parts talk. Open three files side by side:
 
-**`scripts/props/lum.gd`** — the collectible. It is an `Area3D`, a node that detects overlaps
+**`scripts/props/coin.gd`** — the collectible. It is an `Area3D`, a node that detects overlaps
 without blocking anything. In `_ready()` it connects the built-in `body_entered` signal:
 
 ```gdscript
@@ -121,7 +121,7 @@ body_entered.connect(_on_body_entered)
 When the player walks in, `_on_body_entered` runs and does the important line:
 
 ```gdscript
-Events.lum_collected.emit(value)
+Events.money_collected.emit(value)
 ```
 
 It does not know the score exists. It just announces what happened.
@@ -132,16 +132,16 @@ Project Settings, so it exists everywhere as `Events` with no setup. It is a not
 **`scripts/game.gd`** — subscribes in `_ready()`, keeps the running total, and re-announces it:
 
 ```gdscript
-Events.lum_collected.connect(_on_lum_collected)
+Events.money_collected.connect(_on_money_collected)
 ```
 
 **`scripts/ui/hud.gd`** — listens for the total and updates the label.
 
-So the chain is: **lum → Events → game → Events → HUD.** Four files, none of which holds a direct
-reference to another. That is the point: you can rewrite the HUD without opening `lum.gd`.
+So the chain is: **coin → Events → game → Events → HUD.** Four files, none of which holds a direct
+reference to another. That is the point: you can rewrite the HUD without opening `coin.gd`.
 
-> **Try it:** make lums worth 5. You could edit `lum.gd`, but you don't have to — select a lum in
-> the level and change its `Value` in the Inspector. Only that lum changes. That is per-instance
+> **Try it:** make coins worth 5. You could edit `coin.gd`, but you do not have to — select a coin in
+> the level and change its `Value` in the Inspector. Only that coin changes. That is per-instance
 > override, and it is a big part of why Godot scenes are useful.
 
 ---
@@ -273,7 +273,8 @@ scripts/
   events.gd        the signal noticeboard (autoloaded as `Events`)
   player/          player.gd, abilities (spin + carry), camera, ledge sensor
   enemies/         walker, turret, bullet
-  props/           lum, keg, checkpoint, hazard, crumbling floor, spin switch
+  props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
+                   breakable block, treasure, level exit
   ui/              hud.gd
 scenes/            mirrors scripts/ — one scene per script
 ```
@@ -315,6 +316,6 @@ Good first tasks, roughly in order of difficulty:
 1. A **moving platform** (a `Node3D` with a script that lerps between two points).
 2. A **collectible that unlocks a door** — needs counting, and a signal.
 3. A **new enemy** — copy `enemy_walker.gd` and change how it moves.
-4. **Sound effects** — there are none yet. `AudioStreamPlayer3D` on the lum is a good start.
+4. **Sound effects** — there are none yet. `AudioStreamPlayer3D` on the coin is a good start.
 5. **Animation** — the character is spheres moved by code in `_update_visual()`. Replacing that
    with a real rigged model and an `AnimationTree` is the biggest single upgrade available.
