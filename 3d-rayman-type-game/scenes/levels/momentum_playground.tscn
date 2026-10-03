@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" uid="uid://4nl2p1prnqmb" path="res://scenes/props/checkpoint.tscn" id="cp"]
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
 [ext_resource type="PackedScene" uid="uid://b546i5pe5gix4" path="res://scenes/props/spin_switch.tscn" id="sw"]
+[ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="brk"]
 [ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
 [ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
 [ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/lum.tscn" id="lum"]
@@ -181,3 +182,34 @@ momentary = true
 
 [node name="SwitchLanding" parent="." instance=ExtResource("sw")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 38)
+
+; A wall across the bottom of the gentle ramp. The whole point of the ramp is
+; the speed it gives you, so this is the first thing in the project that spends
+; that speed on ACCESS rather than on distance. break_speed 12 is above running
+; pace (7.5) and below what the ramp delivers (~16).
+[node name="RampWallA" parent="." instance=ExtResource("brk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1, -14)
+
+[node name="RampWallB" parent="." instance=ExtResource("brk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -14)
+
+[node name="RampWallC" parent="." instance=ExtResource("brk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1, -14)
+
+; Only the super spin opens this one, so the chain has a reason to exist beyond
+; doing more damage.
+[node name="SpinOnlyBlock" parent="." instance=ExtResource("brk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1, 4)
+break_speed = 999.0
+require_spin_step = 3
+require_slam_power = -1.0
+colour = Color(0.55, 0.45, 0.72, 1)
+
+; And this one only opens to a real drop, which means climbing the steep ramp
+; first. Pound-only.
+[node name="PoundOnlyBlock" parent="." instance=ExtResource("brk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1, 4)
+break_speed = 999.0
+require_spin_step = 0
+require_slam_power = 0.4
+colour = Color(0.4, 0.62, 0.68, 1)

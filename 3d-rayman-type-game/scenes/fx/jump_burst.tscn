@@ -1,0 +1,44 @@
+[gd_scene format=3 uid="uid://kqfsbm07xrgp"]
+
+[ext_resource type="Script" uid="uid://cebsxcu8pyeiv" path="res://scripts/fx/jump_burst.gd" id="1"]
+
+[sub_resource type="StandardMaterial3D" id="MatPuff"]
+; Unshaded so the puff reads the same whatever the lighting is doing, and
+; vertex-coloured so CPUParticles3D's `color` property actually tints it —
+; without VERTEX_COLOR_USE_AS_ALBEDO the particles come out plain white and the
+; colour tell, which is the whole point of this effect, silently does nothing.
+shading_mode = 0
+vertex_color_use_as_albedo = true
+transparency = 1
+blend_mode = 0
+cull_mode = 2
+
+[sub_resource type="QuadMesh" id="MeshPuff"]
+material = SubResource("MatPuff")
+size = Vector2(0.22, 0.22)
+
+[sub_resource type="Curve" id="CurveFade"]
+_data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(0.35, 0.9), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[node name="JumpBurst" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Particles" type="CPUParticles3D" parent="."]
+emitting = false
+amount = 14
+lifetime = 0.55
+one_shot = true
+explosiveness = 0.9
+mesh = SubResource("MeshPuff")
+particle_flag_align_y = true
+direction = Vector3(0, -1, 0)
+spread = 55.0
+initial_velocity_min = 2.8
+initial_velocity_max = 5.0
+gravity = Vector3(0, -4, 0)
+damping_min = 3.0
+damping_max = 5.0
+scale_amount_min = 0.7
+scale_amount_max = 1.4
+scale_amount_curve = SubResource("CurveFade")

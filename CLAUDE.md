@@ -45,7 +45,7 @@ file to be read.
     components/      health, thrown_flight (drop-in Nodes, no matching scene)
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
-    props/           lum, throwable keg, checkpoint, hazard, crumbling floor, spin switch
+    props/           lum, keg, checkpoint, hazard, crumbling floor, spin switch, breakable block
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase) and playground.tscn (momentum)
@@ -69,9 +69,28 @@ site, but they are worth knowing up front:
 - **Wall and floor contact is only known after `move_and_slide()`.** `is_on_wall()` and
   `is_on_floor()` are meaningless before it. That is why `player.gd` has a separate
   `_after_move()` step for entering wall states.
-- **Landing on something zeroes your velocity before an `Area3D` reports the overlap.** Stomping an
-  enemy cannot check `velocity.y` in the area callback. `Player.descent_speed()` exists to give the
-  speed from *before* collision resolution.
+- **Collision resolution zeroes your velocity before an `Area3D` reports the overlap** — and it
+  happens in **both axes**, which caught this project twice. Stomping an enemy cannot check
+  `velocity.y` in the area callback, and a breakable block cannot check horizontal speed there
+  either: running into the block means `move_and_slide()` has already stopped you by the time the
+  sensor fires, so it reads zero and refuses every hit however fast you arrived. Two accessors exist
+  for this: **`Player.descent_speed()`** and **`Player.approach_velocity()`**, both giving the value
+  from *before* collision resolution. If you write an `Area3D` callback that asks "how fast were
+  they going", use one of them — never `velocity`. The same applies to WRITING: if you want the
+  player to keep going through whatever they just broke, restore from `approach_velocity()` rather
+  than scaling `velocity`, which keeps nothing because it is already zero.
+- **GDScript lambdas capture local variables by VALUE.** Assigning to a captured local inside a
+  closure writes to the lambda's own copy and the outer variable never changes — silently, with no
+  warning. This bit the smoke test: a signal handler recording a measurement into a captured `float`
+  always reported the initial value, which read as *"the signal never fired"* and sent me hunting a
+  bug in the prop that was not there. Capture a **reference type** and mutate it (`var out: Array[float] = []`
+  then `out.append(...)`), or use a member variable. The array captures elsewhere in that file work
+  for exactly this reason, which makes the float version look like it should too.
+- **A node spawned from code is positioned a line AFTER it enters the tree**, so anything `_ready()`
+  caches about its own position is the position it had before it was placed. `breakable_block.gd`
+  cached a rest position that way and its shake tween teleported refused blocks to the level origin.
+  Scene instances are fine, which is what makes it so easy to miss. Read positions when you need
+  them, not in `_ready()`.
 - **A `RigidBody3D` ignores a velocity set on the frame it unfreezes.** Thrown objects need the
   impulse applied deferred, or they just drop limply.
 - **Tweening a node's `scale` to exactly zero** produces a singular transform and spams
@@ -159,6 +178,19 @@ reference to the player and the player has no idea the prop exists. `spin_switch
 user and is deliberately tiny — copy it. This is what "a variety of other interactions" means in
 practice, and it needs no changes in `player_abilities.gd` ever.
 
+### The mid-air lift
+
+Spinning in the air gives you a little height, as in Galaxy. Two things about it are deliberate:
+
+- **`min(velocity.y + boost, boost)`, not a plain assignment.** That makes it two useful things at
+  once: falling slowly you get a small hop, falling fast your descent is *slowed but not cancelled*.
+  Wiping a 20 m/s fall would make the character feel weightless, and heaviness is the identity.
+- **Gated on `State.AIR`, not on `not is_on_floor()`.** So a spin cannot rescue you out of a ground
+  pound, a wall cling or a ledge hang. Those are committed states and the spin has no business
+  overriding them.
+- **The third spin sets a `spin_chain_lockout`.** Three lifts per chain is a deliberate burst of
+  airtime; without a pause between chains you could spin your way upward for ever.
+
 ### Three things that are the way they are for a reason
 
 - **Hits are resolved by walking groups, not with an `Area3D`.** An area added and queried in the
@@ -217,6 +249,22 @@ Two more that bite in the *test*, not in the game:
   outside that and it drops into the pit, and the check then fails for a reason that has nothing to
   do with what it is testing.
 
+## Jump effects are legibility, not polish
+
+`jump_burst.gd`. Six moves now leave the ground and several share a button and a posture, so without
+a tell the player cannot see which one fired — that complaint is what produced the file.
+
+- **A plain jump gets NO puff, deliberately.** That is what makes the others stand out; adding one
+  to it would undo the point.
+- **Two tells, of different kinds:** colour (one per move, the primary) and the direction the dust is
+  thrown (down for a double jump, sideways for a side flip, backwards for a backflip). The direction
+  is what you notice before you have consciously read the colour.
+- **Keep the colours far apart in hue.** Two moves in similar colours is the same as no tell.
+- **`CPUParticles3D`, not GPU.** The project renders with GL Compatibility and CPU particles are the
+  option guaranteed to work on it. A few dozen quads cost nothing.
+- **The material needs `vertex_color_use_as_albedo`.** Without it `CPUParticles3D.color` does nothing
+  and every puff comes out white — the colour tell silently stops working while still "running".
+
 ### The lesson from the grapple, worth more than any of its three versions
 
 The grapple was a pendulum on the jump button (wrong input), then a pendulum with five caps (the
@@ -228,6 +276,60 @@ survives two or three rounds of tuning, stop tuning. Ask instead whether the abi
 thing that made it fun. Both times the swing was fixed by taking something away, never by adding a
 number. And when a mechanic survives four rewrites without settling, question whether it belongs
 in the game at all — that is what finally resolved it.
+
+## Where this is going: a 3D Wario Land
+
+**Stated 2026-10-02.** The target is *a 3D Wario Land* — the equivalent of Mario 64 or Odyssey for
+the Wario games, taking heavy influence from Mario 64 DS's Wario. Not a Mario game with a heavy
+character. That distinction is the thing to protect.
+
+Much of what is already built lines up, which is why this is a direction rather than a fifth
+rewrite: heavy committal handling, the ground pound (Wario's butt stomp), grab-carry-throw, slopes
+and uncapped momentum, crumbling floors, and a near-frictionless `SLIDE` state.
+
+**What is deliberately NOT yet Wario:**
+
+- **The spin attack is the least Wario thing in the build.** Wario's signature ground move is the
+  shoulder dash, and the mid-air spin lift pulls it further toward Mario Galaxy. It is there because
+  it was asked for and it works; just know it is the piece that would look out of place if the Wario
+  framing is pushed harder. A dash was offered and not taken yet.
+- **Health.** Wario Land II onwards has **no health and no death** — damage *transforms* you, and
+  each transformation is both a loss of control and a key to somewhere you could not otherwise
+  reach. That is the single most distinctive idea in the series and the biggest available identity
+  swing. It was offered and deferred in favour of the breakable world. If it is ever taken up: the
+  transformations that translate to 3D are the **movement** ones (Flaming, Frozen, Puffy, Bouncy),
+  not the geometry-access ones (Flat, Zombie). And it removes `HealthComponent` from the player, the
+  HUD hearts, `take_hit`, `_do_hurt`, the respawn flow and about six smoke checks.
+- **Treasure as the goal.** Lums are still lums; Wario Land's score is money you spend.
+
+## The breakable world
+
+**Built 2026-10-02, and chosen as the first Wario experiment.** `breakable_block.gd`. The idea in one
+line: **Wario goes THROUGH a level rather than over it.** Mario respects the geometry; Wario removes
+it.
+
+Why this one mattered more than it looks: it is the first thing in the project that spends momentum
+on **access** rather than on distance. Before it, a ramp made you fast and that was the whole reward.
+Now a ramp can be the only way through a wall.
+
+Three ways in, and each answers a different question the player might ask:
+
+| | |
+| --- | --- |
+| **spin** (`require_spin_step`) | "can I open this from standing?" At 3, only the super spin does — which gives the chain a reason to exist beyond damage |
+| **pound** (`require_slam_power`) | "can I open this from above?" Scales with fall distance, so a drop is worth fetching |
+| **speed** (`break_speed`) | "can I open this by arriving fast?" The Wario one. 12 sits above running pace (7.5) and below what a ramp gives (~16) |
+
+Two details that are load-bearing:
+
+- **A refused hit still shakes the block.** "I need to hit this harder" has to be readable from one
+  failed attempt, or a block that is merely too tough is indistinguishable from a block that is
+  broken.
+- **`speed_kept` (0.8) preserves most of your momentum through the break.** Stopping you dead on the
+  frame a wall gives way takes back the exact thing you spent to open it.
+
+The sensor is an `Area3D` **wider than the block**, because by the time the solid collision resolves
+the speed being measured is already gone.
 
 ## Weight and momentum
 

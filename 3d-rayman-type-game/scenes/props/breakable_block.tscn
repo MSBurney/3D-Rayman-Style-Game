@@ -1,0 +1,49 @@
+[gd_scene format=3 uid="uid://b28hxoxpvc4cm"]
+
+[ext_resource type="Script" uid="uid://dxli4o2lyyvo7" path="res://scripts/props/breakable_block.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://xwhp0bfervqw" path="res://scenes/fx/shockwave.tscn" id="2"]
+
+[sub_resource type="BoxShape3D" id="ShapeBlock"]
+size = Vector3(2, 2, 2)
+
+; Wider than the block itself, so the sensor notices the player a moment before
+; the solid collision would stop them — which is the only way to read the speed
+; they were actually travelling at.
+[sub_resource type="BoxShape3D" id="ShapeSensor"]
+size = Vector3(2.7, 2.1, 2.7)
+
+[sub_resource type="BoxMesh" id="MeshBlock"]
+size = Vector3(2, 2, 2)
+
+[sub_resource type="BoxMesh" id="MeshTrim"]
+size = Vector3(2.06, 0.12, 2.06)
+
+[node name="BreakableBlock" type="StaticBody3D"]
+collision_layer = 1
+collision_mask = 0
+script = ExtResource("1")
+break_fx = ExtResource("2")
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+shape = SubResource("ShapeBlock")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Block" type="MeshInstance3D" parent="Visual"]
+mesh = SubResource("MeshBlock")
+
+[node name="TrimTop" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.96, 0)
+mesh = SubResource("MeshTrim")
+
+[node name="TrimBottom" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.96, 0)
+mesh = SubResource("MeshTrim")
+
+[node name="Sensor" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+
+[node name="Shape" type="CollisionShape3D" parent="Sensor"]
+shape = SubResource("ShapeSensor")

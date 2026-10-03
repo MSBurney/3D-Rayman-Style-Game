@@ -22,12 +22,13 @@ const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
 ## has these placed in it, and this suite runs on main.tscn.
 const CRUMBLING := preload("res://scenes/props/crumbling_floor.tscn")
 const SWITCH := preload("res://scenes/props/spin_switch.tscn")
+const BLOCK := preload("res://scenes/props/breakable_block.tscn")
 const KEG := preload("res://scenes/props/throwable_keg.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 48
+const EXPECTED_CHECKS := 55
 
 var player: Player
 var level: Node3D
@@ -93,6 +94,11 @@ func _place(at: Vector3) -> void:
 	player.jump_chain = 0
 	player._chain_window = 0.0
 	player._slam_recover = 0.0
+	# Spin state too, for exactly the same reason as the jump chain: a chain left
+	# half-finished by an earlier check turns the next press into the super spin,
+	# or into nothing at all because of its lockout. That cost the lockout check
+	# one of its three spins and looked like the chain being short.
+	player.abilities.drop_everything()
 	player._set_state(Player.State.AIR)
 
 
@@ -488,6 +494,47 @@ func _run() -> void:
 		"step=%d" % player.abilities.spin_step)
 	await _step(40)
 
+	# --- spinning in mid-air lifts you, and the chain locks out afterwards so it
+	# cannot be ridden upward for ever.
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 9, 0))
+	await _step(24)
+	var falling_vy := player.velocity.y
+	Input.action_press("attack")
+	await _step(2)
+	Input.action_release("attack")
+	_check("an air spin slows your fall", player.velocity.y > falling_vy + 1.0,
+		"vy %.2f -> %.2f" % [falling_vy, player.velocity.y])
+
+	# Three lifts per chain, then nothing until the lockout expires. Pressing
+	# through it must do nothing at all.
+	_release_all()
+	# 60 m up, not 30: three spins plus their cooldowns take about 1.7 seconds, and
+	# from 30 m the player reached the ground before the third one, so the check
+	# counted two lifts and looked like the chain was short.
+	_place(PAD_TOP + Vector3(0, 60, 0))
+	await _step(10)
+	var lifts := 0
+	for i in 3:
+		var before_lift := player.velocity.y
+		Input.action_press("attack")
+		await _step(2)
+		Input.action_release("attack")
+		if player.velocity.y > before_lift:
+			lifts += 1
+		await _step(30)
+	# The chain is spent, so this press is inside the lockout.
+	var locked_from := player.velocity.y
+	Input.action_press("attack")
+	await _step(2)
+	Input.action_release("attack")
+	var lifted_again := player.velocity.y > locked_from
+	_check("the chain lockout stops an endless air spin",
+		lifts == 3 and not lifted_again,
+		"%d lifts in the chain, then lifted again=%s" % [lifts, lifted_again])
+	_release_all()
+	await _step(60)
+
 	# --- a spin trips a switch. The `spinnable` group plus a `spin_hit` method is
 	# the whole contract, and this is what makes it extensible.
 	var switch := SWITCH.instantiate() as SpinSwitch
@@ -557,6 +604,105 @@ func _run() -> void:
 		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
 	player.abilities.throw_carried()
 	await _step(40)
+
+	# ------------------------------------------------------- the breakable world
+	#
+	# Wario goes THROUGH a level rather than over it. Three ways in, and the
+	# interesting one is speed: this is the first thing in the project that spends
+	# momentum on *access* rather than on distance.
+
+	# Arriving slowly must NOT open it, or "arrive fast" means nothing.
+	var wall := BLOCK.instantiate() as BreakableBlock
+	level.add_child(wall)
+	wall.global_position = PAD_TOP + Vector3(0, 1, -20)
+	await _step(10)
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, -14))
+	await _step(30)
+	player.velocity = Vector3(0, 0, -6)
+	await _step(25)
+	_check("a slow walk does not break a block", not wall.broken_open,
+		"broken=%s at %.1f m/s" % [wall.broken_open, 6.0])
+
+	# Arriving fast does.
+	#
+	# The speed that survives is sampled from the `broken` signal, not read after
+	# a fixed wait. The block restores the player's momentum inside that signal,
+	# and the player's own ground handling gets a say on every frame afterwards —
+	# so a later reading measures the two of them combined rather than whether
+	# the block did its job.
+	# An ARRAY, not a float, and appended to rather than assigned.
+	#
+	# GDScript lambdas capture locals **by value**. `kept_speed = ...` inside the
+	# closure writes to the lambda's own copy and the outer variable never
+	# changes — which read as "the signal never fired" and sent me looking for a
+	# bug in the block that was not there. An Array is a reference, so mutating
+	# it is visible outside. Same reason the `radii` capture above works.
+	var kept: Array[float] = []
+	wall.broken.connect(func(_at: Vector3) -> void:
+		kept.append(Vector2(player.velocity.x, player.velocity.z).length()))
+	_place(PAD_TOP + Vector3(0, 0.4, -14))
+	await _step(20)
+	player.velocity = Vector3(0, 0, -18)
+	await _step(25)
+	_check("arriving fast breaks a block", wall.broken_open,
+		"broken=%s" % wall.broken_open)
+
+	# And it does not cost you everything — the whole point of arriving fast is
+	# that you keep going.
+	_check("smashing through keeps most of your speed",
+		kept.size() > 0 and kept[0] > 18.0 * 0.5,
+		"%s m/s kept of 18.0" % ("none, the break never fired" if kept.is_empty()
+			else "%.1f" % kept[0]))
+	await _step(20)
+
+	# A super-spin-only block: any spin must be refused until the third.
+	var spin_wall := BLOCK.instantiate() as BreakableBlock
+	level.add_child(spin_wall)
+	spin_wall.global_position = PAD_TOP + Vector3(1.9, 1, -26)
+	spin_wall.break_speed = 999.0
+	spin_wall.require_spin_step = 3
+	spin_wall.require_slam_power = -1.0
+	await _step(10)
+	_release_all()
+	_place(PAD_TOP + Vector3(0, 0.4, -26))
+	await _step(40)
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(4)
+	var survived_first := not spin_wall.broken_open
+	# Two more to reach the super spin.
+	for i in 2:
+		await _step(30)
+		Input.action_press("attack")
+		await _step(3)
+		Input.action_release("attack")
+	await _step(6)
+	_check("only the super spin opens a spin-only block",
+		survived_first and spin_wall.broken_open,
+		"survived first=%s, open after three=%s"
+			% [survived_first, spin_wall.broken_open])
+	_release_all()
+	await _step(60)
+
+	# A pound-only block, which is what makes a drop worth fetching.
+	var pound_wall := BLOCK.instantiate() as BreakableBlock
+	level.add_child(pound_wall)
+	pound_wall.global_position = PAD_TOP + Vector3(0, 1, -32)
+	pound_wall.break_speed = 999.0
+	pound_wall.require_spin_step = 0
+	pound_wall.require_slam_power = 0.4
+	await _step(10)
+	_place(PAD_TOP + Vector3(0, 16, -32))
+	await _step(10)
+	Input.action_press("crouch")
+	await _step(3)
+	_release_all()
+	await _step(70)
+	_check("a hard pound opens a pound-only block", pound_wall.broken_open,
+		"broken=%s" % pound_wall.broken_open)
+	await _step(30)
 
 	# --- a thrown object is a homing, ricocheting rocket (thrown_flight.gd).
 	#

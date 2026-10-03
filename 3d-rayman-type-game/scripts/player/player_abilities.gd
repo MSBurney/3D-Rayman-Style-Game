@@ -65,6 +65,25 @@ signal spun(step: int, radius: float)
 ## uses. Without it the reach is invisible and the chain cannot be read at all.
 @export var spin_fx: PackedScene
 
+@export_subgroup("Air spin")
+## Spinning in mid-air gives you a little lift, as in Mario Galaxy.
+##
+## It is applied as `min(velocity.y + boost, boost)`, which is two useful things
+## in one line: falling slowly, you get a small hop; falling fast, you get your
+## descent slowed but NOT cancelled. Deliberately not a plain assignment —
+## wiping a 20 m/s fall would make the character feel weightless, and heaviness
+## is the whole identity.
+@export var spin_air_boost: float = 5.0
+## Dead time after the third spin in a chain before you can spin again at all.
+##
+## This is the anti-abuse rule: three lifts per chain is a deliberate burst of
+## extra airtime, but without a pause between chains you could spin your way
+## upward for ever. Holding the button through the lockout does nothing.
+@export var spin_chain_lockout: float = 0.85
+## Colour of the puff thrown by an air spin, so the lift is visible as well as
+## felt. Uses the same effect as the jumps — see Player.spawn_jump_fx.
+@export var spin_boost_colour: Color = Color(0.8, 0.7, 1.0)
+
 @export_group("Carry")
 ## Walk within this of a carryable and you pick it up, no button needed. The
 ## user asked for this directly: "the player can also auto-carry items by just
@@ -161,15 +180,32 @@ func _spin() -> void:
 	_trip_switches(radius)
 	_grab_nearest_within(magnet_radius * scale)
 
+	_air_lift()
 	_player.play_sfx(_player.sfx_spin)
 	spun.emit(spin_step, radius)
 
 	# The third spin ends the chain rather than wrapping round to the first, so
 	# the big one is always the pay-off for three presses and never a lucky
-	# accident in the middle of a longer string.
+	# accident in the middle of a longer string. It also locks the spin out for
+	# a moment, which is what stops the air lift being an infinite ladder.
 	if spin_step >= 3:
 		spin_step = 0
 		_combo_left = 0.0
+		_cooldown = maxf(_cooldown, spin_chain_lockout)
+
+
+## A little lift for spinning in mid-air, as in Mario Galaxy.
+##
+## Gated on `State.AIR` rather than just `not is_on_floor()`, which matters: it
+## means a spin cannot rescue you out of a ground pound, a wall cling or a ledge
+## hang. Those are committed states and the spin has no business overriding them.
+func _air_lift() -> void:
+	if _player.state != Player.State.AIR:
+		return
+	# min(v + boost, boost): a slow fall becomes a small hop, a fast fall is
+	# merely slowed. See spin_air_boost for why it is not a plain assignment.
+	_player.velocity.y = minf(_player.velocity.y + spin_air_boost, spin_air_boost)
+	_player.spawn_jump_fx(spin_boost_colour, 10, 4.0, Vector3.DOWN)
 
 
 ## Everything hostile in reach takes the hit and gets shoved away.
@@ -327,6 +363,9 @@ func drop_everything() -> void:
 	spin_step = 0
 	_combo_left = 0.0
 	_regrab_left = 0.0
+	# The cooldown goes too. Respawning into a lockout left over from the spin you
+	# were mid-chain on when you died would read as the button being broken.
+	_cooldown = 0.0
 
 
 func _flat(v: Vector3) -> Vector3:

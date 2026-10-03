@@ -145,6 +145,24 @@ signal state_changed(from: State, to: State)
 ## the biggest jump in the game being available while standing on the spot.
 @export var triple_jump_min_speed: float = 3.0
 
+@export_subgroup("Jump effects")
+## The dust puff spawned on every jump that is not an ordinary one.
+##
+## These exist for legibility, not polish. Six moves now leave the ground and
+## several share a button and a posture, so without a tell you cannot see which
+## one fired. A plain jump deliberately gets NOTHING — that is what makes the
+## others stand out, and adding a puff to it would undo the whole point.
+@export var jump_fx: PackedScene
+## One colour per move: the primary tell. Keep them far apart in hue; two moves
+## in similar colours is the same as having no tell at all.
+@export var double_jump_colour: Color = Color(0.55, 0.85, 1.0)
+@export var triple_jump_colour: Color = Color(1.0, 0.82, 0.3)
+@export var side_flip_colour: Color = Color(0.6, 1.0, 0.55)
+@export var backflip_colour: Color = Color(1.0, 0.55, 0.85)
+@export var long_jump_colour: Color = Color(1.0, 0.6, 0.35)
+## How many particles an ordinary burst throws. Bigger moves scale this up.
+@export var jump_fx_amount: int = 14
+
 @export_subgroup("Crouch moves")
 ## Below this speed, crouching ducks you on the spot; at or above it you slide.
 @export var slide_min_speed: float = 3.5
@@ -309,6 +327,9 @@ var _ledge_lock: float = 0.0
 var _hurt_left: float = 0.0
 var _spawn: Transform3D
 var _pre_move_vy: float = 0.0
+## Horizontal velocity from before this frame.s collision resolution. See
+## approach_velocity() for the trap this exists to work around.
+var _pre_move_flat: Vector3 = Vector3.ZERO
 ## Highest point reached since last touching the ground. The slam measures its
 ## power against this, so a fall counts from wherever you actually came down from.
 var _air_peak_y: float = 0.0
@@ -358,6 +379,7 @@ func _physics_process(delta: float) -> void:
 	# move_and_slide() is about to zero it if we land on something. Enemies read
 	# this to tell a stomp from a bump. See descent_speed().
 	_pre_move_vy = velocity.y
+	_pre_move_flat = Vector3(velocity.x, 0.0, velocity.z)
 
 	move_and_slide()
 
@@ -534,20 +556,33 @@ func _try_jump() -> bool:
 		return true
 
 	var height := jump_height
+	# Which puff to throw, decided alongside the height so the two can never
+	# disagree — a triple-jump-coloured puff on a double-height jump would be
+	# worse than no puff at all.
+	var tint := Color.TRANSPARENT
+	var amount := jump_fx_amount
+
 	match jump_chain:
 		1:
 			height = jump_height * double_jump_scale
+			tint = double_jump_colour
 		2:
 			# A triple jump has to be earned by going somewhere, as Mario's is.
-			# Too slow and the chain quietly starts again from an ordinary jump.
+			# Too slow and the chain quietly starts again from an ordinary jump,
+			# and it must look like one too.
 			if _flat_speed() >= triple_jump_min_speed:
 				height = jump_height * triple_jump_scale
+				tint = triple_jump_colour
+				amount = int(jump_fx_amount * 1.8)
 			else:
 				jump_chain = 0
 	jump_chain = (jump_chain + 1) % 3
 
 	velocity.y = sqrt(2.0 * gravity_rise * height)
 	play_sfx(sfx_jump)
+	# A plain jump gets nothing, on purpose. See the Jump effects group.
+	if tint.a > 0.0:
+		spawn_jump_fx(tint, amount, 5.5, Vector3.DOWN)
 	return true
 
 
@@ -576,6 +611,8 @@ func _side_flip() -> void:
 	# letting it feed the triple jump would make the biggest jump too easy.
 	jump_chain = 0
 	play_sfx(sfx_jump)
+	# Dust thrown the way you came FROM, which is the direction you just refused.
+	spawn_jump_fx(side_flip_colour, jump_fx_amount, 6.0, -wish_dir.normalized())
 
 
 ## Backflip — crouch still, then jump. High, and backwards.
@@ -589,6 +626,7 @@ func _backflip() -> void:
 	velocity.y = sqrt(2.0 * gravity_rise * backflip_height)
 	jump_chain = 0
 	play_sfx(sfx_jump)
+	spawn_jump_fx(backflip_colour, jump_fx_amount, 6.0, _flatten(facing))
 	_set_state(State.AIR)
 
 
@@ -611,6 +649,8 @@ func _long_jump() -> void:
 	velocity.y = sqrt(2.0 * gravity_rise * long_jump_height)
 	jump_chain = 0
 	play_sfx(sfx_jump)
+	# Low and backwards: a long jump throws dust out behind it like a sprinter.
+	spawn_jump_fx(long_jump_colour, int(jump_fx_amount * 1.4), 7.0, -forward)
 	_set_state(State.AIR)
 
 
@@ -792,6 +832,26 @@ func _slam_impact() -> void:
 	_set_state(State.CROUCH)
 
 
+## Throws a coloured puff of dust at the player's feet.
+##
+## Public because `PlayerAbilities` uses it too, for the mid-air spin boost: that
+## is another thing you need to be able to see happen, and there is no reason for
+## it to own a second copy of this.
+##
+## `burst_dir` is which way the dust goes, and it is the tell you read before the
+## colour: down for a jump, sideways for a flip. See jump_burst.gd.
+func spawn_jump_fx(tint: Color, amount: int, speed: float, burst_dir: Vector3) -> void:
+	if jump_fx == null:
+		return
+	var puff := jump_fx.instantiate() as Node3D
+	# Parented to the level rather than to us, so the dust stays where the jump
+	# happened instead of riding along on it.
+	get_tree().current_scene.add_child(puff)
+	puff.global_position = global_position + Vector3.UP * 0.25
+	if puff.has_method(&"play"):
+		puff.call(&"play", tint, amount, speed, burst_dir)
+
+
 ## Draws the ring showing how far the shockwave actually reached.
 func _spawn_shockwave(at: Vector3, radius: float, combo: bool) -> void:
 	if shockwave_fx == null:
@@ -971,6 +1031,26 @@ func play_sfx(stream: AudioStream) -> void:
 ## there sees a stationary player and the stomp silently never registers.
 func descent_speed() -> float:
 	return _pre_move_vy
+
+
+## Horizontal velocity as it was *before* this frame.s collision resolution.
+##
+## The horizontal twin of descent_speed(), and it exists for the identical
+## reason: running into a wall means move_and_slide() zeroes the horizontal
+## velocity in the SAME physics step that a touching Area3D reports the overlap.
+## A breakable block asking "how fast were they going?" in that callback reads
+## zero and refuses every hit, however fast the player actually arrived.
+##
+## It is also what you must WRITE BACK from if you want the player to keep going
+## through whatever they just broke. Scaling `velocity` there keeps nothing,
+## because `velocity` is already zero.
+func approach_velocity() -> Vector3:
+	return _pre_move_flat
+
+
+## Just the magnitude of the above, for the common case of asking "how fast".
+func approach_speed() -> float:
+	return _pre_move_flat.length()
 
 
 ## Called by an enemy that was stomped, so the player bounces off it.

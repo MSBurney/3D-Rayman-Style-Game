@@ -1,7 +1,10 @@
 # 3D Rayman Style Game
 
-A movement-first 3D platformer about being **heavy**. Started from Rayman 2 and 3 as a reference
-point; now heading somewhere of its own.
+**The target: a 3D Wario Land.** What Mario 64 and Odyssey were for Mario, for the Wario games —
+heavy influence from Mario 64 DS's Wario. A movement-first 3D platformer about being **heavy**,
+where the point is going *through* a level rather than over it.
+
+The repo name is a fossil. It started from Rayman 2 and 3, became its own thing, and landed here.
 
 > **New to the project?** Start with **[docs/GUIDED_TOUR.md](docs/GUIDED_TOUR.md)** — a hands-on
 > walkthrough for developers who can code but haven't used Godot before. Then pick something from
@@ -36,6 +39,7 @@ Godot **4.7.2**, GL Compatibility renderer. Open `3d-rayman-type-game/project.go
 | **Ground pound** | **crouch in mid-air** | LB in mid-air |
 | **Wall kick** | touch a wall falling, then `Space` | A |
 | **Spin attack** | `F` or `LMB` — press again to chain | X |
+| **Air spin (small lift)** | `F` or `LMB` in mid-air | X in mid-air |
 | **Throw what you hold** | `F` or `LMB` | X |
 | Pick something up | just walk into it | — |
 | Drop from a ledge | `Ctrl`, or steer away | LB |
@@ -116,9 +120,21 @@ awkward on a laptop trackpad.
   and still got shelved. The reason is the same one that made slopes a better bet than swinging — a
   grapple is a *traversal* system, so every level has to be designed around where you can hook. A
   spin is an *action with a radius*, so a level only has to care about what is standing near you.
+  Spinning in **mid-air** gives you a little lift, as in Galaxy — enough to slow a fall or stretch a
+  jump, never enough to cancel a long drop, because the character is heavy. Three lifts per chain,
+  then a short lockout so it cannot be ridden upward for ever.
 - **Carrying** — walk into something carryable and you are holding it, no button. A spin reaches
   further than your hands do and magnets things in from 5 m. Press the attack button while holding
   something to throw it.
+- **Breakable blocks** — three ways through a wall, and each one asks a different question. **Spin**
+  it (and a block can demand the *super* spin, which gives the chain a reason beyond damage).
+  **Pound** it from above, scaled by how far you fell. Or just **arrive fast** — above running pace
+  and you go straight through, keeping most of your speed.
+
+  That last one is the point: it is the first thing in the project that spends momentum on **access**
+  rather than on distance. Before it, a ramp made you fast and that was the whole reward; now a ramp
+  can be the only way through a wall. A block that refuses you still shakes, so "come back faster"
+  is readable from one failed attempt.
 - **Throwing** — a thrown object is not a lob, it is a **rocket**. Modelled on the Yoshi egg in
   Super Mario 64 DS: it picks the nearest enemy, sets off straight at it at 34 m/s, and steers to
   stay on it. You are not meant to aim well; you are meant to throw in roughly the right direction
@@ -195,7 +211,8 @@ scripts/
   player/              player.gd (state machine), abilities (spin + carry), camera, ledge sensor
   enemies/             walker, turret, bullet
   components/          health, thrown_flight (homing + ricochet for anything thrown)
-  props/               lum, throwable keg, checkpoint, hazard, crumbling floor, spin switch
+  fx/                  shockwave ring, jump burst
+  props/               lum, keg, checkpoint, hazard, crumbling floor, spin switch, breakable block
   ui/                  hud.gd (hearts, lums, F3 debug)
 scenes/                one scene per script, plus the two levels
                        playground.tscn  momentum playground (current direction)
@@ -221,8 +238,8 @@ After changing movement numbers, run:
 "<godot>" --headless --path 3d-rayman-type-game res://tests/moveset_smoke_test.tscn
 ```
 
-It drives the player through all 48 behaviours (each state, damage, death, respawn, stomp, grab
-and throw, plus every Mario move, the spin and its combo, slopes, crumbling floors, the homing throw) and prints a PASS/FAIL table. Exit code 0
+It drives the player through all 55 behaviours (each state, damage, death, respawn, stomp, grab
+and throw, plus every Mario move, the spin and its combo, breakable blocks, slopes, crumbling floors, the homing throw) and prints a PASS/FAIL table. Exit code 0
 means everything passed. It caught several real bugs during the initial build and is worth
 rerunning whenever the controller changes.
 
