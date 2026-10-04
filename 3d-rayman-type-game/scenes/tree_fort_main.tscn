@@ -1,26 +1,19 @@
 [gd_scene format=3 uid="uid://ugq61wsou088"]
 
-; Runnable version of the tree fort. Press F6 with this open, or:
-;   "<godot>" --path 3d-rayman-type-game res://scenes/tree_fort_main.tscn
-;
-; Same four parts as the other two mains — game rules, a level, the player and
-; the HUD. The player starts out on the plain facing the camp, so the first thing
-; you see is the fort rather than the inside of it.
-
 [ext_resource type="Script" uid="uid://dlctxiqwl8dhd" path="res://scripts/game.gd" id="1"]
 [ext_resource type="PackedScene" uid="uid://bbusfh1qllslm" path="res://scenes/levels/tree_fort.tscn" id="2"]
 [ext_resource type="PackedScene" uid="uid://b5papl5ibq4pg" path="res://scenes/player/player.tscn" id="3"]
 [ext_resource type="PackedScene" uid="uid://bbci0v0k12u0y" path="res://scenes/ui/hud.tscn" id="4"]
 [ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="5"]
 
-[node name="Main" type="Node"]
+[node name="Main" type="Node" unique_id=1737523862]
 script = ExtResource("1")
 player = NodePath("Player")
 coin_scene = ExtResource("5")
 
-[node name="TreeFort" parent="." instance=ExtResource("2")]
+[node name="TreeFort" parent="." unique_id=1079521060 instance=ExtResource("2")]
 
-[node name="Player" parent="." instance=ExtResource("3")]
+[node name="Player" parent="." unique_id=1008181275 instance=ExtResource("3")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 28)
 
-[node name="HUD" parent="." instance=ExtResource("4")]
+[node name="HUD" parent="." unique_id=1027778306 instance=ExtResource("4")]
