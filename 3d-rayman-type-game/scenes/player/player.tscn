@@ -18,26 +18,8 @@
 radius = 0.4
 height = 1.6
 
-[sub_resource type="SphereShape3D" id="Shape_arm"]
-radius = 0.3
-
 [sub_resource type="StandardMaterial3D" id="Mat_body"]
 albedo_color = Color(0.35, 0.55, 0.9, 1)
-
-[sub_resource type="StandardMaterial3D" id="Mat_skin"]
-albedo_color = Color(1, 0.86, 0.72, 1)
-
-[sub_resource type="StandardMaterial3D" id="Mat_glove"]
-albedo_color = Color(0.98, 0.97, 0.94, 1)
-
-[sub_resource type="StandardMaterial3D" id="Mat_shoe"]
-albedo_color = Color(0.85, 0.3, 0.25, 1)
-
-[sub_resource type="StandardMaterial3D" id="Mat_rope"]
-albedo_color = Color(0.75, 0.55, 1, 1)
-emission_enabled = true
-emission = Color(0.6, 0.4, 1, 1)
-emission_energy_multiplier = 1.2
 
 [sub_resource type="SphereMesh" id="Mesh_torso"]
 material = SubResource("Mat_body")
@@ -45,6 +27,9 @@ radius = 0.42
 height = 0.9
 radial_segments = 18
 rings = 9
+
+[sub_resource type="StandardMaterial3D" id="Mat_skin"]
+albedo_color = Color(1, 0.86, 0.72, 1)
 
 [sub_resource type="SphereMesh" id="Mesh_head"]
 material = SubResource("Mat_skin")
@@ -60,12 +45,18 @@ height = 0.26
 radial_segments = 10
 rings = 6
 
+[sub_resource type="StandardMaterial3D" id="Mat_glove"]
+albedo_color = Color(0.98, 0.97, 0.94, 1)
+
 [sub_resource type="SphereMesh" id="Mesh_hand"]
 material = SubResource("Mat_glove")
 radius = 0.19
 height = 0.38
 radial_segments = 12
 rings = 6
+
+[sub_resource type="StandardMaterial3D" id="Mat_shoe"]
+albedo_color = Color(0.85, 0.3, 0.25, 1)
 
 [sub_resource type="SphereMesh" id="Mesh_foot"]
 material = SubResource("Mat_shoe")
@@ -74,82 +65,97 @@ height = 0.4
 radial_segments = 12
 rings = 6
 
-[node name="Player" type="CharacterBody3D" groups=["player"]]
+[sub_resource type="SphereShape3D" id="Shape_arm"]
+radius = 0.3
+
+[node name="Player" type="CharacterBody3D" unique_id=15283412 groups=["player"]]
 collision_layer = 2
 collision_mask = 69
 floor_max_angle = 0.872665
 floor_snap_length = 0.6
 script = ExtResource("1")
+max_speed = 10.0
+acceleration = 28.0
+deceleration = 24.0
+turn_acceleration = 36.0
+air_control = 0.39
+visual_turn_speed = 28.0
+jump_height = 2.5
+gravity_rise = 20.0
+gravity_fall = 35.0
+max_fall_speed = 25.0
+apex_threshold = 2.5
+jump_cut = 0.5
+coyote_time = 0.15
+jump_buffer = 0.15
+jump_fx = ExtResource("16")
+shockwave_fx = ExtResource("15")
 sfx_jump = ExtResource("9")
 sfx_land = ExtResource("10")
 sfx_hurt = ExtResource("11")
 sfx_spin = ExtResource("12")
-shockwave_fx = ExtResource("15")
-jump_fx = ExtResource("16")
 sfx_slam = ExtResource("14")
 
-[node name="Shape" type="CollisionShape3D" parent="."]
+[node name="Shape" type="CollisionShape3D" parent="." unique_id=1123869406]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
 shape = SubResource("Shape_player")
 
-[node name="Visual" type="Node3D" parent="."]
+[node name="Visual" type="Node3D" parent="." unique_id=1179937452]
 script = ExtResource("6")
 
-[node name="Torso" type="MeshInstance3D" parent="Visual"]
+[node name="Torso" type="MeshInstance3D" parent="Visual" unique_id=500088917]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.85, 0, 0.72, 0)
 mesh = SubResource("Mesh_torso")
 
-[node name="Head" type="MeshInstance3D" parent="Visual"]
+[node name="Head" type="MeshInstance3D" parent="Visual" unique_id=135502930]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.36, 0)
 mesh = SubResource("Mesh_head")
 
-[node name="Nose" type="MeshInstance3D" parent="Visual"]
+[node name="Nose" type="MeshInstance3D" parent="Visual" unique_id=1728874751]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1.7, 0, 1.3, 0.34)
 mesh = SubResource("Mesh_nose")
 
-[node name="HandL" type="MeshInstance3D" parent="Visual"]
+[node name="HandL" type="MeshInstance3D" parent="Visual" unique_id=1689686409]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6, 0.82, 0.06)
 mesh = SubResource("Mesh_hand")
 
-[node name="HandR" type="MeshInstance3D" parent="Visual"]
+[node name="HandR" type="MeshInstance3D" parent="Visual" unique_id=1403379658]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.6, 0.82, 0.06)
 mesh = SubResource("Mesh_hand")
 
-[node name="FootL" type="MeshInstance3D" parent="Visual"]
+[node name="FootL" type="MeshInstance3D" parent="Visual" unique_id=1359008512]
 transform = Transform3D(1, 0, 0, 0, 0.7, 0, 0, 0, 1.5, -0.24, 0.16, 0.06)
 mesh = SubResource("Mesh_foot")
 
-[node name="FootR" type="MeshInstance3D" parent="Visual"]
+[node name="FootR" type="MeshInstance3D" parent="Visual" unique_id=292863818]
 transform = Transform3D(1, 0, 0, 0, 0.7, 0, 0, 0, 1.5, 0.24, 0.16, 0.06)
 mesh = SubResource("Mesh_foot")
 
-[node name="HoldPoint" type="Node3D" parent="Visual"]
+[node name="HoldPoint" type="Node3D" parent="Visual" unique_id=1303505588]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.12, 0.85)
 
-[node name="Health" type="Node" parent="."]
+[node name="Health" type="Node" parent="." unique_id=1322808639]
 script = ExtResource("2")
-max_health = 4
 invulnerable_time = 1.0
 
-[node name="Sfx" type="AudioStreamPlayer3D" parent="."]
+[node name="Sfx" type="AudioStreamPlayer3D" parent="." unique_id=542873890]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 unit_size = 18.0
 max_db = 0.0
 
-[node name="LedgeSensor" type="Node3D" parent="."]
+[node name="LedgeSensor" type="Node3D" parent="." unique_id=801712769]
 script = ExtResource("5")
 
-[node name="Abilities" type="Node" parent="."]
+[node name="Abilities" type="Node" parent="." unique_id=795039580]
 script = ExtResource("8")
 spin_fx = ExtResource("15")
 
-[node name="CameraRig" type="Node3D" parent="."]
+[node name="CameraRig" type="Node3D" parent="." unique_id=1009870054]
 script = ExtResource("4")
 
-[node name="SpringArm3D" type="SpringArm3D" parent="CameraRig"]
-collision_mask = 1
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraRig" unique_id=1900019863]
+shape = SubResource("Shape_arm")
 spring_length = 6.5
 margin = 0.4
-shape = SubResource("Shape_arm")
 
-[node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm3D"]
+[node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm3D" unique_id=852142505]

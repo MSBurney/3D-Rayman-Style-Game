@@ -30,7 +30,7 @@ const KEG := preload("res://scenes/props/throwable_keg.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 68
+const EXPECTED_CHECKS := 69
 
 var player: Player
 var level: Node3D
@@ -369,6 +369,65 @@ func _run() -> void:
 			% [before_long, after_long, player.velocity.y, plain_launch])
 	await _step(70)
 
+	# --- chaining long jumps must CONVERGE, not stack.
+	#
+	# The long jump is the only move whose impulse is added to the speed you
+	# already had, which is deliberate — a long jump out of a fast slide should
+	# beat one off the flat. But a flat addition compounds: land, crouch, jump,
+	# and you were 17 m/s faster every single time. Four in a row passed 60 m/s.
+	#
+	# This drives the actual exploit rather than calling _long_jump() directly,
+	# because the exploit was in how cheaply the loop could be re-entered.
+	# A 400 m runway, not the 60 m pad. Five chained long jumps at 20+ m/s cover
+	# well over 100 m, and on the pad the player ran off the end, died and
+	# respawned — so the last two readings were a walking respawned player, the
+	# "gain is shrinking" test compared 0.0 against 19.9, and the check would
+	# have passed even if the exploit were still there.
+	#
+	# No stick input either: one shove sets it going, and `facing` follows
+	# velocity, so the chain self-sustains in whatever direction it started. That
+	# avoids depending on where the camera happens to point.
+	var runway := _add_slope(Vector3(400, 20, 0), 0.0, 400.0, 24.0)
+	await _step(4)
+	_release_all()
+	_place(Vector3(400, 21.4, -180))
+	await _step(30)
+	player.velocity = Vector3(0, 0, 14)
+	var chain_speeds: Array[float] = []
+	for i in 5:
+		for j in 200:
+			await _step(1)
+			if player.is_on_floor():
+				break
+		Input.action_press("crouch")
+		await _step(4)
+		Input.action_press("jump")
+		await _step(3)
+		Input.action_release("jump")
+		Input.action_release("crouch")
+		chain_speeds.append(Vector2(player.velocity.x, player.velocity.z).length())
+	_release_all()
+
+	# Tuning-independent: the gain from the last jump must be smaller than the
+	# gain from the first, and the chain must settle near the fade speed rather
+	# than running away.
+	var first_gain := chain_speeds[0]
+	var last_gain := 0.0
+	if chain_speeds.size() >= 2:
+		last_gain = chain_speeds[-1] - chain_speeds[-2]
+	# The last clause is what stops this passing vacuously: the player must still
+	# be long-jumping at the end, not standing around at walking pace having died
+	# somewhere. Without it, anything that kills the run reads as "converged".
+	_check("chained long jumps converge instead of stacking",
+		chain_speeds.size() == 5
+			and chain_speeds[-1] < player.long_jump_fade_speed + 4.0
+			and chain_speeds[-1] > player.max_speed * 1.5
+			and last_gain < first_gain,
+		"speeds=%s (fade speed %.0f, running %.0f)"
+			% [str(chain_speeds.map(func(s): return "%.1f" % s)),
+				player.long_jump_fade_speed, player.max_speed])
+	await _step(50)
+
 	# --- side flip: at speed, flick the stick back the way you came and jump.
 	# Triggered on the INPUT reversing, not the velocity, because heavy handling
 	# will not let velocity turn round quickly — see Player._wants_side_flip.
@@ -394,17 +453,25 @@ func _run() -> void:
 	await _step(70)
 
 	# --- the shockwave hits things standing nearby, not only underfoot.
+	#
+	# Two bugs lived here at once, and they hid each other. It pressed `jump` to
+	# pound, which stopped working when the pound moved to `crouch` — and it read
+	# the level's DWalker, which earlier checks had usually already killed, so
+	# `shock_gone` was true and the check passed without testing anything. It
+	# only surfaced when retuning kept DWalker alive.
+	#
+	# Hence: its own walker, and the right button.
 	_release_all()
+	var shock_enemy := WALKER.instantiate() as Node3D
+	level.add_child(shock_enemy)
+	shock_enemy.global_position = PAD_TOP + Vector3(0, 0.2, 26)
 	await _step(10)
-	# DWalker, not BWalker: the shockwave kills what it hits, and BWalker is the
-	# fixture the dive test needs later on.
-	var shock_enemy := level.get_node("DWalker") as Node3D
 	var shock_health := shock_enemy.get_node("Health") as HealthComponent
 	var shock_hp: int = shock_health.current
-	# Land beside it, not on it, so a stomp cannot be what does the damage.
+	# Land BESIDE it, not on it, so a stomp cannot be what does the damage.
 	_place(shock_enemy.global_position + Vector3(2.0, 16, 0))
 	await _step(8)
-	Input.action_press("jump")
+	Input.action_press("crouch")
 	await _step(3)
 	_release_all()
 	await _step(90)
@@ -726,10 +793,21 @@ func _run() -> void:
 	player.transform_into(Player.State.FLAMING)
 	await _step(3)
 	var flame_speed := Vector2(player.velocity.x, player.velocity.z).length()
+	# Measured against BREAK_SPEED, not against max_speed. Being above a block.s
+	# break_speed is the load-bearing property — it is what makes catching fire
+	# open speed-gated walls for free. Tying this to max_speed instead meant that
+	# raising max_speed from 7.5 to 10 broke the check without breaking anything
+	# real, because flame_speed sat exactly on the 2x threshold.
+	var gate_speed := 12.0
+	var wall_probe := BLOCK.instantiate() as BreakableBlock
+	gate_speed = wall_probe.break_speed
+	wall_probe.queue_free()
 	_check("catching fire sprints you without steering",
-		player.state == Player.State.FLAMING and flame_speed > player.max_speed * 2.0,
-		"state=%s at %.1f m/s (max_speed %.1f)"
-			% [player.state_name(), flame_speed, player.max_speed])
+		player.state == Player.State.FLAMING
+			and flame_speed > gate_speed
+			and flame_speed > player.max_speed * 1.5,
+		"state=%s at %.1f m/s  (running %.1f, a wall needs %.1f)"
+			% [player.state_name(), flame_speed, player.max_speed, gate_speed])
 
 	# Held AGAINST the stick, and the thing that matters is the HEADING, not the
 	# speed. The first version of this check only watched the speed, so it passed
@@ -1098,19 +1176,25 @@ func _run() -> void:
 	var ramp := _add_slope(Vector3(120, 20, 0), 20.0, 40.0)
 	await _step(4)
 
-	# Downhill. Started above `max_speed` on purpose: that is the regime the
-	# whole system is about. Below it the stick's own deceleration dominates and
-	# a shallow slope correctly holds you still.
-	var downhill_peak := await _roll_on(ramp, Vector3(120, 28.6, -17), Vector3(0, 0, 9), 150)
-	_check("a slope builds speed past max_speed", downhill_peak > player.max_speed * 2.0,
-		"9.0 -> %.1f m/s (max_speed %.1f)" % [downhill_peak, player.max_speed])
+	# Started just above `max_speed`, derived rather than hard-coded, because that
+	# is the regime the whole system is about: below it the stick.s own
+	# deceleration dominates and a slope correctly holds you still. The push used
+	# to be a literal 9, which silently became a BELOW-max_speed push the moment
+	# max_speed was retuned from 7.5 to 10 — so the check measured the wrong
+	# regime and reported the slope as broken when it was not.
+	var push_speed := player.max_speed + 2.0
+	var downhill_peak := await _roll_on(ramp, Vector3(120, 28.6, -17),
+		Vector3(0, 0, push_speed), 150)
+	_check("a slope builds speed past max_speed", downhill_peak > push_speed + 4.0,
+		"%.1f -> %.1f m/s (max_speed %.1f)"
+			% [push_speed, downhill_peak, player.max_speed])
 
 	# Uphill has to cost you, or weight is not a trade. 9 m/s should not survive
 	# more than a few metres of climb.
-	await _roll_on(ramp, Vector3(120, 15.0, 17), Vector3(0, 0, -9), 90)
+	await _roll_on(ramp, Vector3(120, 15.0, 17), Vector3(0, 0, -push_speed), 90)
 	var uphill_left := Vector2(player.velocity.x, player.velocity.z).length()
 	_check("uphill spends your momentum", uphill_left < 2.0,
-		"9.0 -> %.1f m/s" % uphill_left)
+		"%.1f -> %.1f m/s" % [push_speed, uphill_left])
 
 	# Flat ground must never be a source of speed, only a slow drain of it.
 	var flat_pad := _add_slope(Vector3(170, 20, 0), 0.0, 40.0)
@@ -1118,10 +1202,11 @@ func _run() -> void:
 	# Note `momentum_friction` only bleeds the surplus down TO `max_speed`; with
 	# no stick input the ordinary `deceleration` then takes over and brings you
 	# to a stop, which is why this does not assert a floor at `max_speed`.
-	var flat_peak := await _roll_on(flat_pad, Vector3(170, 21.6, -10), Vector3(0, 0, 9), 40)
+	var flat_peak := await _roll_on(flat_pad, Vector3(170, 21.6, -10), Vector3(0, 0, push_speed), 40)
 	var flat_left := Vector2(player.velocity.x, player.velocity.z).length()
-	_check("flat ground never adds speed", flat_peak <= 9.2 and flat_left < 9.0,
-		"9.0 -> peak %.1f -> %.1f m/s" % [flat_peak, flat_left])
+	_check("flat ground never adds speed",
+		flat_peak <= push_speed + 0.3 and flat_left < push_speed,
+		"%.1f -> peak %.1f -> %.1f m/s" % [push_speed, flat_peak, flat_left])
 
 	# The cost side of heaviness: getting going takes real time. Any direction
 	# works, so this does not care where the camera is pointing.

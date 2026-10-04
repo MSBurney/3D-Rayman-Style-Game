@@ -571,6 +571,20 @@ Two consequences already baked in, and both will look wrong if you don't know wh
   jump out of a fast slide down a ramp goes much further than one off the flat. That is the one place
   the Mario moveset and the slope system reinforce each other, and it is worth protecting.
 
+  **But a flat addition compounds, and it got farmed.** Land, crouch, jump, repeat: you were 17 m/s
+  faster every single time, and four in a row passed 60 m/s. The push now fades to nothing at
+  `long_jump_fade_speed`, so a chain converges there instead of diverging.
+
+  The distinction that matters, because it looks like a cap and is not one: **this caps the BONUS,
+  not your speed.** Nothing about it touches what a slope can give you. It only declines to pay full
+  price for the same button twice. If you ever need to make the long jump stronger, raise the fade
+  speed rather than the push — raising the push makes the exploit worth doing again.
+
+  Worth knowing: **every other move in the set SETS velocity rather than adding to it** (side flip,
+  backflip, the spin's air lift is `min(v + boost, boost)`). The long jump was the only additive one,
+  which is exactly why it was the only one that could be farmed. Apply the same suspicion to any new
+  move whose impulse adds.
+
 ### `slide_friction` has to beat the wrong number
 
 A slide feels like nothing if you tune it against `deceleration` (12). What it actually has to beat

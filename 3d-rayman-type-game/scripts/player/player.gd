@@ -189,6 +189,22 @@ signal state_changed(from: State, to: State)
 ## Long jump: crouch while running, then jump. Low and very long.
 @export var long_jump_height: float = 1.5
 @export var long_jump_push: float = 17.0
+## The speed at which the long jump's push has faded to nothing.
+##
+## **This is what stops the long jump being farmed.** The push is ADDED to the
+## speed you already had — which is deliberate, because a long jump out of a fast
+## slide should go further than one off the flat. But a flat addition with no
+## cost compounds: land, crouch, jump, and you are 17 m/s faster every time, for
+## ever. Chaining four of them used to pass 60 m/s.
+##
+## Fading the push out as you get faster fixes it without taking anything away:
+## from a standstill you get the whole push, from a fast slide you get a little
+## on top, and a chain converges here instead of diverging.
+##
+## Note this caps the BONUS, not your speed. Nothing here touches what a slope
+## can give you — see the Weight group — so the no-caps rule still holds. It only
+## declines to pay full price for the same button twice.
+@export var long_jump_fade_speed: float = 24.0
 ## Side flip: at speed, flick the stick back the way you came and jump.
 ##
 ## Triggered on the INPUT reversing, not on the velocity reversing. On a heavy
@@ -700,7 +716,13 @@ func _long_jump() -> void:
 	var forward := _flatten(facing)
 	if forward == Vector3.ZERO:
 		forward = _flatten(velocity)
-	var flat := Vector3(velocity.x, 0.0, velocity.z) + forward * long_jump_push
+	# The push fades out as you get faster, so chaining long jumps converges on
+	# `long_jump_fade_speed` rather than adding the full push every time. See
+	# that export for why — this is the one move in the set whose impulse is
+	# additive, and it was the one that could be farmed.
+	var flat := Vector3(velocity.x, 0.0, velocity.z)
+	var fade := clampf(1.0 - flat.length() / maxf(long_jump_fade_speed, 0.01), 0.0, 1.0)
+	flat += forward * long_jump_push * fade
 	velocity.x = flat.x
 	velocity.z = flat.z
 	velocity.y = sqrt(2.0 * gravity_rise * long_jump_height)
