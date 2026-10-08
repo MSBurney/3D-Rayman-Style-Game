@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://c61sljpj2pfr7"]
+
+[ext_resource type="Script" uid="uid://svmxia6ket5d" path="res://tests/hitch_probe5.gd" id="1"]
+
+[node name="HitchProbe5" type="Node"]
+script = ExtResource("1")

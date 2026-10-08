@@ -23,6 +23,23 @@ extends Node
 ## How hard they are thrown out. Enough to scatter, not enough to lose.
 @export var spill_force: float = 4.5
 
+@export_group("Effect warm-up")
+## Effects drawn once, invisibly, as the level starts. Fixes a stutter.
+##
+## Godot compiles a material's shader the first time it is actually DRAWN, not
+## when it is loaded, and that compile costs around 28ms — two dropped frames at
+## 60fps. For a prop standing in the level it happens while the level loads and
+## nobody notices. For something that only appears when you press a button it
+## happens on the first press, and reads as that move freezing the game.
+##
+## So the effects spawned from code get drawn once here, at 2% alpha, to get the
+## compile over with before play starts. A scene opts in by implementing a
+## `prewarm()` method; anything listed here without one is skipped.
+##
+## Worth keeping this list short: it is for effects the player cannot see until
+## they do something, which is jump_burst and shockwave.
+@export var prewarm_scenes: Array[PackedScene] = []
+
 var money: int = 0
 var _respawn: Transform3D
 var _respawning: bool = false
@@ -44,6 +61,40 @@ func _ready() -> void:
 	Events.player_died.connect(_on_player_died)
 	Events.player_hurt.connect(_on_player_hurt)
 	Events.money_changed.emit(money)
+	_prewarm_effects()
+
+
+## See `prewarm_scenes`. Deliberately NOT awaited by _ready(): it waits a couple
+## of frames itself, because the camera has not been placed yet when _ready()
+## runs, and these have to be drawn somewhere the camera can actually see them.
+func _prewarm_effects() -> void:
+	if prewarm_scenes.is_empty():
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	# Three metres in front of the camera. It has to be inside the view: an
+	# effect that gets culled is never drawn, so its shader is never compiled
+	# and the whole warm-up silently does nothing. A version of this that put
+	# them there but shrank them to 2cm measured as having changed nothing.
+	var at := cam.global_position - cam.global_transform.basis.z * 3.0
+	for scene in prewarm_scenes:
+		if scene == null:
+			continue
+		var fx := scene.instantiate() as Node3D
+		if fx == null:
+			continue
+		if not fx.has_method(&"prewarm"):
+			fx.free()
+			continue
+		add_child(fx)
+		fx.global_position = at
+		# Each effect frees itself when it finishes, so there is nothing to
+		# clean up here.
+		fx.call(&"prewarm")
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Quick iteration aids for a sandbox project.

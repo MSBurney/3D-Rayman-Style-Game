@@ -42,6 +42,7 @@ var _spill_velocity: Vector3 = Vector3.ZERO
 var _no_pickup: float = 0.0
 
 @onready var _sfx: AudioStreamPlayer3D = $Sfx
+@onready var _mesh: MeshInstance3D = $Mesh
 
 func _ready() -> void:
 	# Grouped so a spill can be counted (and so anything else can find loose
@@ -56,9 +57,20 @@ func _ready() -> void:
 
 func _apply_tint() -> void:
 	var colour := garlic_colour if kind == Kind.GARLIC else coin_colour
-	var material := StandardMaterial3D.new()
+
+	# Duplicated from the scene's own material rather than built with
+	# `StandardMaterial3D.new()`, for exactly the reason spelled out in
+	# shockwave.gd's `play()` — worth reading there once. Short version: Godot
+	# frees a material's compiled shader when the last material using it is
+	# destroyed, so a coin that mints its own takes that shader with it when it
+	# is collected, and the next coin has to compile it again mid-play. Coins
+	# are spawned at runtime by a spill, so that is a stall at the exact moment
+	# you get hit.
+	var base := (_mesh.mesh as PrimitiveMesh).material as StandardMaterial3D
+	if base == null:
+		return
+	var material := base.duplicate() as StandardMaterial3D
 	material.albedo_color = colour
-	material.emission_enabled = true
 	material.emission = colour
 	# Kept below 1 so the coin reads as yellow rather than saturating to white.
 	material.emission_energy_multiplier = 0.9

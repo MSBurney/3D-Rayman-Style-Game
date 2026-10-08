@@ -1,8 +1,26 @@
 [gd_scene format=3 uid="uid://xwhp0bfervqw"]
 
-[ext_resource type="Script" path="res://scripts/fx/shockwave.gd" id="1"]
+[ext_resource type="Script" uid="uid://ceownl8epeo4j" path="res://scripts/fx/shockwave.gd" id="1"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_ring"]
+; The ring's material lives HERE, in the scene, rather than being built in
+; shockwave.gd — and that is a performance fix, not tidiness. See the comment on
+; `play()`: a material created in code is freed with the ring, and Godot frees
+; its compiled shader along with it, so the next ring recompiled and the game
+; dropped two frames on almost every spin.
+;
+; Unshaded so the ring reads the same whatever the lighting is doing.
+;
+; Deliberately NOT additive (`blend_mode` left at 0, mix): the game's palette is
+; bright pastel, and an additive ring saturates straight to white on it, which
+; throws away the colour that distinguishes a combo hit from an ordinary one.
+shading_mode = 0
+transparency = 1
+cull_mode = 2
+albedo_color = Color(1, 0.86, 0.45, 1)
 
 [sub_resource type="TorusMesh" id="Mesh_ring"]
+material = SubResource("Mat_ring")
 inner_radius = 0.84
 outer_radius = 1.0
 rings = 48

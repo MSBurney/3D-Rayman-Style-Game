@@ -26,11 +26,14 @@ const BLOCK := preload("res://scenes/props/breakable_block.tscn")
 const TREASURE := preload("res://scenes/props/treasure.tscn")
 const EXIT := preload("res://scenes/props/level_exit.tscn")
 const KEG := preload("res://scenes/props/throwable_keg.tscn")
+## Used by the warm-up check at the end, which guards the fix for the ~28ms
+## stall the spin used to cause on nearly every press.
+const SHOCKWAVE := preload("res://scenes/fx/shockwave.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 69
+const EXPECTED_CHECKS := 70
 
 var player: Player
 var level: Node3D
@@ -1259,3 +1262,31 @@ func _run() -> void:
 	await _step(120)
 	_check("no crash after idle", is_instance_valid(player), "state=%s" % player.state_name())
 
+
+	# --- the spin's ring does not mint its own material, and the effects that
+	# only appear when a button is pressed are warmed up at startup.
+	#
+	# This guards a fix for a real stutter, and the fix is invisible: Godot frees
+	# a material's compiled shader when the last material using it dies, so a
+	# ring that built its own with StandardMaterial3D.new() made the next spin
+	# recompile it — about 28ms, two dropped frames, on most spins. The repair is
+	# that the material lives in shockwave.tscn and each ring duplicates it. None
+	# of that can be felt headless, so check the shape of it instead.
+	var warm_ring := SHOCKWAVE.instantiate() as Node3D
+	level.add_child(warm_ring)
+	warm_ring.global_position = PAD_TOP + Vector3(0, 2, 0)
+	var ring_mesh := warm_ring.get_node("Mesh") as MeshInstance3D
+	var scene_material := (ring_mesh.mesh as PrimitiveMesh).material
+	var game_node := get_node("Main") as Node
+	var warm_list: Array[PackedScene] = game_node.prewarm_scenes
+	var all_warmable := warm_list.size() > 0
+	for scene in warm_list:
+		var probe: Node = scene.instantiate()
+		if not probe.has_method(&"prewarm"):
+			all_warmable = false
+		probe.free()
+	_check("code-spawned effects share a scene material",
+		scene_material != null and warm_ring.has_method(&"prewarm") and all_warmable,
+		"ring material from scene=%s, %d prewarm scenes, all have prewarm()=%s"
+			% [scene_material != null, warm_list.size(), all_warmable])
+	warm_ring.queue_free()

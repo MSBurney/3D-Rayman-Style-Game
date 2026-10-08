@@ -58,3 +58,13 @@ func play(tint: Color = default_tint, amount: int = default_amount,
 
 	await get_tree().create_timer(linger).timeout
 	queue_free()
+
+
+## Fires one puff, as near invisible as makes no difference, so its shader is
+## compiled while the level loads instead of on the first double jump of the
+## game. Called by `Game` at startup — see `prewarm_scenes` there.
+##
+## The real particle count and speed, on purpose: warming it with one slow
+## particle was measured and changed nothing at all.
+func prewarm() -> void:
+	play(Color(1.0, 1.0, 1.0, 0.02), default_amount, default_speed, Vector3.DOWN)

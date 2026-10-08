@@ -96,6 +96,26 @@ site, but they are worth knowing up front:
   impulse applied deferred, or they just drop limply.
 - **Tweening a node's `scale` to exactly zero** produces a singular transform and spams
   `Condition "det == 0" is true` errors. Shrink to `Vector3.ONE * 0.01` instead.
+- **A `StandardMaterial3D` created in code takes its compiled shader with it when it dies.** Godot
+  compiles one shader per distinct material *configuration* and frees that shader the moment the
+  last material using that configuration is destroyed. So an effect that calls
+  `StandardMaterial3D.new()` and then frees itself makes the **next** one recompile — measured at
+  about **28 ms, two dropped frames at 60 fps**. `shockwave.gd` did exactly this, and because the
+  ring is both the spin's effect and the ground pound's, nearly every press of either stuttered.
+  It hid from three separate probes in a row, because spamming the button keeps two rings alive at
+  once and one of them always holds the shader — it only reproduces at a *human* pace, with a gap
+  longer than the ring's own 0.38 s life. The fix: keep the material in the `.tscn` and
+  `duplicate()` it per instance. The scene's copy is never freed, so the shader compiles once, and
+  colours are uniforms rather than part of what Godot keys a shader on, so the duplicates all
+  still share it. `jump_burst.tscn` had always done it that way, which is why the puff never
+  stuttered and was the control that identified this.
+- **A shader is compiled on first DRAW, not on load.** So even with the material shared, that one
+  compile lands on the first spin of the session rather than during loading. `Game.prewarm_scenes`
+  draws each code-spawned effect once at 2% alpha as the level starts; a scene opts in by
+  implementing `prewarm()`. Two things about warming that are not optional: do it at **full size
+  and real particle counts** (a version that shrank them to 2 cm measured as having changed
+  nothing at all), and do it **inside the camera frustum**, because an effect that gets culled is
+  never drawn and the warm-up then silently does nothing.
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
 - **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
