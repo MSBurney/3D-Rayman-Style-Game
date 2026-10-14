@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://c0wo3bfgmuepx"]
+
+[ext_resource type="Script" path="res://tests/rail_probe.gd" id="1"]
+
+[node name="RailProbe" type="Node"]
+script = ExtResource("1")

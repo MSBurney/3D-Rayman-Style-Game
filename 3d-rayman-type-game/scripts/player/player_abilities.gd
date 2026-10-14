@@ -143,6 +143,12 @@ func handle_input(delta: float) -> void:
 		# spin out of it would make it free. See Player.is_transformed().
 		if _player.is_transformed():
 			pass
+		elif _player.state == Player.State.GRIND:
+			# While grinding, `attack` is the rail ACCELERATOR instead — see
+			# Player._do_grind(). It is also refused for the same reason as a
+			# transformation above: spinning off a rail would hand you a free escape
+			# from a committed state.
+			pass
 		elif carried != null:
 			throw_carried()
 		else:

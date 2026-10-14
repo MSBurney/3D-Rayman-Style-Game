@@ -3,6 +3,33 @@
 A 3D platformer in Godot **4.7.2**, GL Compatibility renderer. The Godot project lives in
 `3d-rayman-type-game/` — one level down from the repo root.
 
+## What this is for, right now
+
+**Set 2026-10-11, and it governs the dated direction sections further down.** This is **not** a game
+in development. Nobody has settled on what the game is yet, and rather than commit to a design
+before anyone is confident in one, the project is deliberately being used as **a series of
+experiments in 3D platformer mechanics**.
+
+That changes a few things about working here:
+
+- **An experiment does not have to fit a bigger plan.** The question to ask about a new mechanic is
+  "is it interesting, and did we learn something from building it?", not "does it serve the Wario
+  framing?".
+- **Do not defend a direction.** Everything from **The spin attack** onwards is a *record of an
+  experiment that was run*: what it does, why each number is what it is, and what it cost to get
+  working. All of that is still true about the code and still worth reading. None of it is a
+  commitment. Where an entry says something "is the thing to protect", that means it was being
+  protected while that experiment ran — not that it binds the next one.
+- **Surface conflicts, do not quietly resolve them.** Two experiments are allowed to contradict
+  each other and both stay in the repo. If a new one would undo an existing one, say so plainly and
+  let the team decide, rather than picking for them.
+- **Still unconditional:** everything in **Things that will bite you**, **Conventions**, **Layout**
+  and **Before you change gameplay code**. Those are about Godot and about this codebase, not about
+  what the game is, so no change of direction touches them. The smoke test in particular stays
+  green — an experiment is allowed to be thrown away, but not to leave the build broken.
+
+Read the older direction statements below as history. They are all dated.
+
 ## Who this is for
 
 This is a **learning project**. The people working on it can program but are **new to Godot**.
@@ -46,11 +73,12 @@ file to be read.
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
-                     breakable block, treasure, level exit, transformer
+                     breakable block, treasure, level exit, transformer, grind rail
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
-                     main.tscn (moveset showcase) and playground.tscn (momentum)
-  tests/             moveset smoke test
+                     main.tscn (moveset showcase), playground.tscn (momentum),
+                     tree_fort_main.tscn and rail_yard_main.tscn (experiments)
+  tests/             moveset smoke test, plus throwaway level probes (fort, rail)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
 
@@ -116,6 +144,15 @@ site, but they are worth knowing up front:
   and real particle counts** (a version that shrank them to 2 cm measured as having changed
   nothing at all), and do it **inside the camera frustum**, because an effect that gets culled is
   never drawn and the warm-up then silently does nothing.
+- **A `CSGPolygon3D` in Path mode bakes the path in WORLD space unless you set `path_local = true`.**
+  It turns the path it follows into its own vertices, and with `path_local` left at its default of
+  false those vertices are the path's *global* positions. Make the polygon a CHILD of the `Path3D`,
+  which is the obvious way to arrange it, and it then inherits the path's transform on top — so the
+  offset is applied twice, the model is drawn at double its distance from the origin, and anything
+  reading the curve directly stays where it should. In the rail yard that put the rail you could
+  see 44 m from the rail you could grind, and it reads as the collision being broken rather than
+  the mesh being misplaced. `tests/rail_probe.gd` measures the mesh AABB against the curve now,
+  because there is no way to notice this without measuring.
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
 - **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
@@ -169,6 +206,115 @@ The renderer is deliberately **GL Compatibility**, not Forward+. Do not switch i
 Not built yet, on purpose: animation (the character is primitives moved by code), swimming,
 menus, saving. Ask before starting any of these.
 
+
+## Rail grinding (experiment, 2026-10-13)
+
+**The first experiment after the project stopped aiming at a particular game.** Sonic Adventure 2's
+rails, asked for as "exactly like that game": the rail's slope decides your speed, weight affects it,
+and `attack` accelerates.
+
+- **`scripts/props/grind_rail.gd`** — a `Path3D` that holds the shape and answers three questions:
+  how far along me is this point, where am I at that distance, and which way do I run there. It
+  contains no movement code at all.
+- **`Player.State.GRIND` and `_do_grind()`** — the movement. Keeps one number, `_rail_offset`, and
+  asks the rail where that is.
+- **`scenes/levels/rail_yard.tscn`** — four rails off one deck: downhill, flat, uphill and an
+  S-curve, with a coloured post at the head of each. `tests/rail_probe.gd` checks it.
+
+**Why it was a good first experiment, and the thing to keep:** it is the only thing built so far
+that *tests* the slope system rather than sitting beside it. A rail is a slope you cannot steer off,
+so it asks the same question a ramp does with the steering taken away. It also reuses `slope_gravity`
+rather than introducing a gravity of its own, which means a rail physically cannot disagree with a
+ramp about which way is downhill.
+
+### This one IS a state, unlike the spin
+
+The spin deliberately is not a `State` because it does not change how you move. Grinding changes
+*everything* about how you move: no steering, no gravity, and **`move_and_slide()` does not run at
+all** — `_physics_process` returns before it. The rail sets `global_position` directly, and letting
+the physics body also move you drags you straight off the line. Same reasoning as `ThrownFlight`,
+which moves its parent itself for the same reason. If a grind ever stutters or sags off the rail,
+something re-enabled that.
+
+### Weight, and why the obvious version of it does nothing
+
+`g·sin(angle)` has no mass term, so "being heavier" cannot make a descent faster. Weight has to act
+on the things that genuinely depend on it, and `grind_weight` divides two of them: **drag**, so a
+heavier grind holds its speed better, and **the accelerator**, so it takes longer to get going under
+its own power. Weight therefore buys top speed and costs response — the same trade the rest of the
+character makes.
+
+**Note that is the opposite sign from "heavy things grind slower".** If that is the feel wanted, the
+change is a division to a multiplication in `_do_grind()` and nothing else.
+
+### `attack` is rebound while grinding, which is a real conflict
+
+While in `GRIND`, `attack` is the accelerator and `PlayerAbilities.handle_input` refuses the spin —
+so the spin experiment loses its button for the duration. Refusing it is also consistent with the
+transformation rule: a committed state you can attack your way out of is not committed. Worth
+knowing if the spin is ever revisited.
+
+### Four things found building it
+
+- **Curve points are in the RAIL's local space.** Every question has a `to_local`/`to_global` in it.
+  Miss one and the rail answers as though it were at the level origin, which looks exactly like the
+  curve data being wrong and is not.
+- **Rails dodge the row-major `Transform3D` trap**, because a rail needs no rotation — its shape is
+  in the curve data. That is why the rail yard probe came back clean on the first run, which had
+  never previously happened in this project.
+- **The speed is kept SIGNED**, not as a magnitude plus a direction. One line of slope maths then
+  handles both ways along a rail correctly. Write it with absolute values and an uphill grind
+  accelerates, which reads as the rail's data being backwards.
+- **`grind_relatch_delay` is the third time this trap has appeared**, after `ledge_cooldown` and the
+  spin's `regrab_delay`: without it, jumping off re-attaches you on the very next frame, because you
+  are still well inside the snap distance, and the jump looks like it did nothing. Assume any new
+  "let go of a thing" needs one. Note `_place()` in the smoke test has to clear it *after*
+  `_set_state`, because leaving `GRIND` sets the lock on the way out.
+
+
+### Two bugs that only showed up in play, and what they share
+
+Both lived where the tests could not see them, because the first version of the suite only ever
+jumped off the MIDDLE of a rail.
+
+- **A clamped sampling window can collapse, and then a fallback lies to you.** `tangent_at()`
+  sampled the curve 5 cm either side of an offset and subtracted the two. `_do_grind()` overshoots
+  the end of a rail by however far it travelled that frame — 0.27 m at 16 m/s, so nearly always —
+  so the exit asked for the tangent past the end, both samples clamped on to the same point, the
+  subtraction came out zero, and the degenerate branch returned a hardcoded `Vector3.FORWARD`.
+  Every rail in the yard runs towards +Z, so leaving one launched you at −Z at full speed. Reported
+  as "I sometimes dash in the opposite direction I was grinding", where "sometimes" meant "whenever
+  you ran off the end instead of jumping off the middle". The window now slides inward so it always
+  spans real distance.
+- **A direction remembered between uses is a direction from the LAST use.** `_rail_dir` exists so a
+  momentary zero speed does not lose which way you are going. But landing on a flat rail out of a
+  fall projects to about zero speed along it, so there was nothing in the velocity to read a
+  direction from — and `_rail_dir` still held the previous rail's. The accelerator then pushed you
+  whichever way the rail before happened to point. It now falls back to `facing`.
+
+**The shared lesson, and the one worth keeping: a fallback that returns a plausible value hides the
+bug that reached it.** Both of these would have been obvious instantly from an assertion, and both
+survived a 79-check suite because a hardcoded default looked like an answer.
+
+### Known, and a decision rather than a bug
+
+**Landing on a FLAT rail with no speed along it drops you straight off again.** The projection gives
+you nothing, `grind_stall_speed` sees a stalled grind, and it lets go on the next frame. On any
+sloped rail you are fine, because the slope gives you speed at once. Sonic Adventure 2 starts you
+grinding with whatever you arrive with, so if that is the feel wanted, the fix is a floor on the
+entry speed in `_attach_to_rail()`. Offered, not taken yet.
+### Measured, running off the deck at 12 m/s
+
+| | |
+| --- | --- |
+| downhill (9.5°) | 11.9 → **16.5 m/s** |
+| flat | 12.0 → 7.0 m/s in two seconds, so you need the accelerator |
+| uphill (5.7°) | 11.6 → **0.0 and you fall off** — coasting cannot finish it |
+| the accelerator, flat rail | coasting 4.4 m/s against **17.7 m/s** holding `attack` |
+| weight, same 9.5° rail | 1.0 → 7.3 m/s, 3.0 → **11.5 m/s** |
+
+The uphill rail being uncompletable without the accelerator is the design working rather than a bug,
+but it does mean that rail is currently a dead end for a player who does not know about the button.
 ## The spin attack
 
 **Added 2026-10-02, and it replaced the whole grapple.** `attack` (F / LMB / gamepad X) does one of
@@ -299,6 +445,11 @@ number. And when a mechanic survives four rewrites without settling, question wh
 in the game at all — that is what finally resolved it.
 
 ## Where this is going: a 3D Wario Land
+
+**Superseded 2026-10-11 — see "What this is for, right now" at the top.** Kept in full because the
+systems described here are built and working, and the reasoning behind each number still explains
+the code you will be reading. Read "the target is" below as "the target was, while this experiment
+was running". Nothing here obliges a future experiment to be Wario-shaped.
 
 **Stated 2026-10-02.** The target is *a 3D Wario Land* — the equivalent of Mario 64 or Odyssey for
 the Wario games, taking heavy influence from Mario 64 DS's Wario. Not a Mario game with a heavy

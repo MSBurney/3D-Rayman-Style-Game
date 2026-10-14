@@ -29,11 +29,14 @@ const KEG := preload("res://scenes/props/throwable_keg.tscn")
 ## Used by the warm-up check at the end, which guards the fix for the ~28ms
 ## stall the spin used to cause on nearly every press.
 const SHOCKWAVE := preload("res://scenes/fx/shockwave.tscn")
+## Spawned by the rail grinding checks. Each one builds its own curve — see
+## _make_rail().
+const RAIL := preload("res://scenes/props/grind_rail.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 70
+const EXPECTED_CHECKS := 81
 
 var player: Player
 var level: Node3D
@@ -105,6 +108,10 @@ func _place(at: Vector3) -> void:
 	# one of its three spins and looked like the chain being short.
 	player.abilities.drop_everything()
 	player._set_state(Player.State.AIR)
+	# Must come AFTER _set_state(), not before: leaving GRIND sets this lock
+	# itself (see Player._exit_state), so zeroing it any earlier is undone on the
+	# way out and every rail check that follows finds itself unable to attach.
+	player._grind_lock = 0.0
 
 
 func _on_burst(_where: Vector3) -> void:
@@ -1290,3 +1297,223 @@ func _run() -> void:
 		"ring material from scene=%s, %d prewarm scenes, all have prewarm()=%s"
 			% [scene_material != null, warm_list.size(), all_warmable])
 	warm_ring.queue_free()
+
+	# ----------------------------------------------------------- rail grinding
+	#
+	# Sonic Adventure 2 rails, built as the first experiment after the project
+	# stopped aiming at one particular game.
+	#
+	# Every rail is spawned by the check that needs it, out at x=400 and well away
+	# from everything else: a rail is tens of metres long and would otherwise run
+	# straight through whatever an earlier check left lying about. Nothing in this
+	# project kills you for falling, so a player who comes off a rail simply keeps
+	# falling and the next _place() recovers them.
+	#
+	# These reach into `_rail_speed` on purpose. It is the one number the whole
+	# mechanic is about, and measuring it directly beats inferring it from
+	# positions two frames apart.
+
+	# --- catching one. The entry speed is the velocity PROJECTED on to the rail,
+	# so the player has to actually be travelling along it, not just near it.
+	var rail_catch := _make_rail(Vector3(400, 30, -20), Vector3(0, 0, 40))
+	await _step(2)
+	_place(Vector3(400, 30.6, -19.0))
+	player.velocity = Vector3(0, 0, 12)
+	await _step(6)
+	_check("you catch a rail in mid-air", player.state == Player.State.GRIND,
+		"state=%s, rail speed %.1f" % [player.state_name(), player._rail_speed])
+
+	# --- the spin is refused while grinding, because `attack` is the accelerator
+	# now. A spin that worked here would also be a free escape from a committed
+	# state, which is the same rule transformations follow.
+	var spin_before: int = player.abilities.spin_step
+	Input.action_press("attack")
+	await _step(3)
+	_check("no spinning while grinding",
+		player.abilities.spin_step == spin_before and player.state == Player.State.GRIND,
+		"step=%d, state=%s" % [player.abilities.spin_step, player.state_name()])
+	_release_all()
+	await _step(2)
+
+	# --- jumping off keeps the speed you earned, which is the rule that makes a
+	# rail traversal rather than scenery.
+	player._rail_speed = 16.0
+	await _step(2)
+	Input.action_press("jump")
+	await _step(2)
+	Input.action_release("jump")
+	await _step(2)
+	var off_rail_flat := Vector2(player.velocity.x, player.velocity.z).length()
+	_check("jumping off a rail keeps your speed",
+		player.state == Player.State.AIR and off_rail_flat > 13.0 and player.velocity.y > 0.0,
+		"state=%s, flat %.1f m/s, vy %.1f" % [player.state_name(), off_rail_flat, player.velocity.y])
+
+	# --- and does not instantly re-attach. Without grind_relatch_delay you are
+	# still well inside grind_snap_distance on the very next frame, so the jump
+	# reads as having done nothing at all.
+	await _step(6)
+	_check("you do not re-catch the rail you just left",
+		player.state != Player.State.GRIND, "state=%s" % player.state_name())
+	rail_catch.queue_free()
+	await _step(3)
+
+	# --- a downhill rail is free speed. The grade is 7 over 42, which is about
+	# 9.5 degrees, and `slope_gravity` (30) beats the drag comfortably.
+	var rail_down := _make_rail(Vector3(400, 60, -20), Vector3(0, -7, 42))
+	await _step(2)
+	_place(Vector3(400, 60.6, -19.0))
+	player.velocity = Vector3(0, -7, 42).normalized() * 6.0
+	await _step(4)
+	var down_entry := absf(player._rail_speed)
+	await _step(90)
+	var down_later := absf(player._rail_speed)
+	_check("a downhill rail builds speed",
+		player.state == Player.State.GRIND and down_later > down_entry + 2.0,
+		"%.1f -> %.1f m/s" % [down_entry, down_later])
+
+	# --- weight: the headline of the request. Heavier divides the drag down, so
+	# it holds speed better and ends the same slope faster. If this ever reverses,
+	# someone has swapped the division in _do_grind() for a multiplication.
+	var weight_was: float = player.grind_weight
+	var ends: Array[float] = []
+	for weight in [1.0, 3.0]:
+		player.grind_weight = weight
+		_place(Vector3(400, 60.6, -19.0))
+		player.velocity = Vector3(0, -7, 42).normalized() * 6.0
+		await _step(4)
+		await _step(90)
+		ends.append(absf(player._rail_speed))
+		_release_all()
+		await _step(2)
+	player.grind_weight = weight_was
+	_check("a heavier grind reaches a higher speed",
+		ends.size() == 2 and ends[1] > ends[0] + 1.0,
+		"weight 1.0 -> %.1f m/s, weight 3.0 -> %.1f m/s" % [ends[0], ends[1]])
+	rail_down.queue_free()
+	await _step(3)
+
+	# --- an uphill rail is a real cost, same as a ramp.
+	var rail_up := _make_rail(Vector3(400, 30, -20), Vector3(0, 7, 42))
+	await _step(2)
+	_place(Vector3(400, 30.6, -19.0))
+	player.velocity = Vector3(0, 7, 42).normalized() * 12.0
+	await _step(4)
+	var up_entry := absf(player._rail_speed)
+	await _step(45)
+	var up_later := absf(player._rail_speed)
+	_check("an uphill rail costs you speed", up_later < up_entry - 3.0,
+		"%.1f -> %.1f m/s" % [up_entry, up_later])
+	rail_up.queue_free()
+	await _step(3)
+
+	# --- the accelerator. On a FLAT rail drag is the only thing acting, so this
+	# is the cleanest possible measurement of what the button is worth: the same
+	# rail, the same entry speed, run once coasting and once holding `attack`.
+	var rail_push := _make_rail(Vector3(400, 30, -20), Vector3(0, 0, 60))
+	await _step(2)
+	var coasted := 0.0
+	var pushed := 0.0
+	for holding in [false, true]:
+		_place(Vector3(400, 30.6, -19.0))
+		player.velocity = Vector3(0, 0, 8)
+		await _step(4)
+		if holding:
+			Input.action_press("attack")
+		await _step(80)
+		if holding:
+			pushed = absf(player._rail_speed)
+		else:
+			coasted = absf(player._rail_speed)
+		_release_all()
+		await _step(2)
+	_check("the accelerator beats coasting on a flat rail",
+		pushed > coasted + 4.0,
+		"coasting %.1f m/s, holding attack %.1f m/s" % [coasted, pushed])
+
+	# --- and a flat rail does run out if you do nothing, which is what the
+	# accelerator is FOR. Entering slowly and coasting should drop you off.
+	_place(Vector3(400, 30.6, -19.0))
+	player.velocity = Vector3(0, 0, 4)
+	await _step(4)
+	var stalled_from: float = absf(player._rail_speed)
+	await _step(90)
+	_check("coasting a flat rail stalls you off it",
+		player.state != Player.State.GRIND,
+		"entered at %.1f m/s, ended %s" % [stalled_from, player.state_name()])
+	rail_push.queue_free()
+	await _step(3)
+
+
+
+	# --- leaving the END of a rail keeps your direction.
+	#
+	# This is the one that was broken, and it was reported as "I sometimes dash in
+	# the opposite direction I was grinding". _do_grind() overshoots the end of a
+	# rail by however far it travelled that frame, so the exit asked for the
+	# tangent at an offset past the end; the two samples clamped on to the same
+	# point, the subtraction came out zero, and GrindRail.tangent_at() fell through
+	# to a hardcoded Vector3.FORWARD. Full speed, fixed direction, wrong way.
+	var rail_end := _make_rail(Vector3(400, 30, -20), Vector3(0, 0, 14))
+	await _step(2)
+	_place(Vector3(400, 30.6, -19.0))
+	player.velocity = Vector3(0, 0, 18)
+	await _step(4)
+	var ran_on := player.state == Player.State.GRIND
+	for i in 120:
+		await _step(1)
+		if player.state != Player.State.GRIND:
+			break
+	_check("leaving the end of a rail keeps your direction",
+		ran_on and player.state != Player.State.GRIND and player.velocity.z > 10.0,
+		"caught=%s, ran off at vz %+.1f (wanted strongly positive; -18 was the bug)"
+			% [ran_on, player.velocity.z])
+	rail_end.queue_free()
+	await _step(3)
+
+	# --- dropping on to a rail must not use a direction left over from the LAST
+	# rail. Landing out of a fall projects to almost no speed along the rail, so
+	# there is nothing in the velocity to take a direction from, and `_rail_dir`
+	# survives between grinds. This check sets it backwards first on purpose.
+	# `grind_stall_speed` is switched off for this one check. Arriving with no
+	# speed at all on a FLAT rail is otherwise an immediate and entirely correct
+	# stall — the player attaches and drops off again on the very next frame,
+	# which is the behaviour the coasting check above tests for. Here we need them
+	# held on the rail long enough to see which way the accelerator pushes.
+	var stall_was: float = player.grind_stall_speed
+	player.grind_stall_speed = 0.0
+	var rail_drop := _make_rail(Vector3(400, 30, -20), Vector3(0, 0, 40))
+	await _step(2)
+	_place(Vector3(400, 31.8, -10.0))
+	player._rail_dir = -1.0
+	player.facing = Vector3(0, 0, 1)
+	player.velocity = Vector3(0, -6, 0)
+	await _step(8)
+	var dropped_on := player.state == Player.State.GRIND
+	Input.action_press("attack")
+	await _step(24)
+	_check("dropping on to a rail accelerates the way you face",
+		dropped_on and player._rail_speed > 0.5,
+		"caught=%s, rail speed %+.1f facing +Z (a stale -1 was the bug)"
+			% [dropped_on, player._rail_speed])
+	_release_all()
+	player.grind_stall_speed = stall_was
+	rail_drop.queue_free()
+	await _step(3)
+## Builds a straight rail starting at `at` and running `run` metres from there,
+## as a world-space offset, and returns it.
+##
+## Each rail gets its OWN `Curve3D`. One made up front and shared between rails
+## would be re-pointed by whichever check asked for a different shape last — the
+## same sub-resource sharing trap the crumbling floor hit with its box shape.
+func _make_rail(at: Vector3, run: Vector3) -> GrindRail:
+	var rail := RAIL.instantiate() as GrindRail
+	var curve := Curve3D.new()
+	curve.add_point(Vector3.ZERO)
+	curve.add_point(run)
+	rail.curve = curve
+	level.add_child(rail)
+	# Set AFTER add_child, and read nowhere in the rail's own _ready(), which is
+	# the trap breakable_block.gd fell into: a node spawned from code is placed a
+	# line later than it enters the tree.
+	rail.global_position = at
+	return rail

@@ -89,6 +89,11 @@ enum State {
 	## PUFFY: inflated, floating upward, unable to attack. The vertical twin of
 	## FLAMING, and the way to reach what you cannot jump to.
 	PUFFY,
+	## Locked to a rail, Sonic Adventure 2 style. Unlike the spin, this one IS a
+	## state: while grinding you do not steer, gravity does not apply, and
+	## `move_and_slide()` does not run at all — the rail drives your position
+	## along its own curve. See _do_grind().
+	GRIND,
 	## The ground pound. Still called SLAM throughout — same move, and renaming
 	## eleven exports would have been churn for nothing.
 	SLAM,
@@ -358,6 +363,77 @@ signal state_changed(from: State, to: State)
 ## interfere with ordinary running.
 @export var momentum_friction: float = 3.5
 
+@export_group("Rail grinding")
+## Sonic Adventure 2's rails. Lock on to a line in the air and ride it, with the
+## rail's own slope deciding how fast you go.
+##
+## Note what this group does NOT contain: a gravity number. A rail IS a slope, so
+## it pulls you with `slope_gravity` from the Weight group above. That means the
+## thresholds documented there carry straight over to rails, and a rail cannot
+## accidentally disagree with a ramp about which way is downhill.
+##
+## How close you have to pass a rail to catch it, in metres. Generous on purpose:
+## a rail is a thin line in the air, and a grind you have to aim at precisely is
+## a grind nobody ever uses.
+@export var grind_snap_distance: float = 1.6
+## Drag on a rail, in metres per second per second.
+##
+## This is the number that makes a FLAT rail interesting. Without it you would
+## keep your entry speed for ever, so a long rail would be a free ride and the
+## accelerator would have nothing to do. With it, a flat rail slowly bleeds you
+## and holding the accelerator is how you keep going.
+@export var grind_friction: float = 4.0
+## Added to your speed per second while `attack` is held. The accelerator.
+##
+## On `attack` because that is how the move was asked for, and it costs nothing:
+## the spin is refused while grinding anyway (see PlayerAbilities.handle_input),
+## so the button is free. It pushes along whichever way you are already going and
+## cannot turn you round — a rail decides your direction, you only decide speed.
+@export var grind_accel: float = 16.0
+## Slide off the rail once drag has taken you below this and you are NOT holding
+## the accelerator, in m/s.
+##
+## Two jobs. It stops you balancing on a wire for ever having ground to a halt in
+## the middle of a flat rail, and it turns the accelerator into a rescue: get
+## slow and you can still save the grind by holding the button. Set it near zero
+## to only fall off at a dead stop.
+@export var grind_stall_speed: float = 1.2
+## Extra upward kick when you jump off a rail, on top of the ordinary jump.
+##
+## Deliberately small. The pay-off for a rail is the HORIZONTAL speed you leave
+## with; a big vertical kick on top would make every rail end the same way
+## whether you took it fast or slow.
+@export var grind_jump_boost: float = 1.0
+## How long after leaving a rail before you can catch one again, in seconds.
+##
+## Without it, jumping off re-attaches you on the very next frame, because you
+## are still well inside `grind_snap_distance` — and the jump then looks like it
+## did nothing at all. Exactly the same shape of bug as `ledge_cooldown` and the
+## spin's `regrab_delay`, which makes it three for three on this trap.
+@export var grind_relatch_delay: float = 0.35
+## How heavy the character is on a rail. The weight knob, and worth reading
+## before you change it, because the obvious version of it does nothing at all.
+##
+## Gravity accelerates every mass at the same rate — there is no mass term in
+## g*sin(angle) — so simply "being heavier" cannot make a descent faster. Weight
+## has to act on the things that genuinely do depend on it, and here that is two:
+##
+##   - DRAG is divided by it, so a heavier grind holds its speed better. That
+##     means a higher speed downhill and a longer coast along the flat.
+##   - THE ACCELERATOR is divided by it, so a heavier grind takes longer to get
+##     going under its own power, and recovers worse from an uphill stretch.
+##
+## So weight buys top speed and costs response, which is the trade the rest of
+## this character already makes everywhere else.
+##
+## This is the OPPOSITE sign from "heavy things grind slower". If that is the
+## feel you want, MULTIPLY by weight in _do_grind() instead of dividing — two
+## characters, and everything else about the mechanic stays exactly as it is.
+@export var grind_weight: float = 1.6
+## Puff colour for a rail jump. Sits in the widest gap left in the hue circle by
+## the other five — see `double_jump_colour` for why that matters.
+@export var grind_jump_colour: Color = Color(0.35, 1.0, 0.8)
+
 @export_group("Combat")
 ## Punch and carry tuning lives on the PlayerAbilities child node instead.
 @export var stomp_bounce: float = 11.0
@@ -404,6 +480,20 @@ var _pre_move_flat: Vector3 = Vector3.ZERO
 ## Highest point reached since last touching the ground. The slam measures its
 ## power against this, so a fall counts from wherever you actually came down from.
 var _air_peak_y: float = 0.0
+## The rail being ground right now, or null. See _do_grind().
+var _rail: GrindRail = null
+## How far along `_rail` we have travelled, in metres from its start. This single
+## number is our whole position while grinding; the rail converts it to a point.
+var _rail_offset: float = 0.0
+## Speed along the rail, SIGNED: positive runs towards the rail's far end,
+## negative back towards its start. Kept signed rather than as a magnitude so one
+## line of slope maths handles both directions correctly.
+var _rail_speed: float = 0.0
+## Which way we are going, as +1 or -1, remembered separately so a momentary zero
+## speed does not lose the direction and leave the accelerator nothing to push.
+var _rail_dir: float = 1.0
+## Blind spell after leaving a rail. See grind_relatch_delay.
+var _grind_lock: float = 0.0
 
 
 
@@ -444,9 +534,21 @@ func _physics_process(delta: float) -> void:
 		State.LEDGE_HANG: _do_ledge_hang(delta)
 		State.FLAMING: _do_flaming(delta)
 		State.PUFFY: _do_puffy(delta)
+		State.GRIND: _do_grind(delta)
 		State.SLAM: _do_slam(delta)
 		State.HURT: _do_hurt(delta)
 		State.DEAD: _do_dead(delta)
+
+	# GRIND does not use move_and_slide() AT ALL, so it returns before it.
+	#
+	# The rail owns our position in that state: _do_grind() sets global_position
+	# to a point on the rail's curve, and letting the physics body also move us
+	# would drag us straight back off the line. Same reasoning as ThrownFlight,
+	# which moves its parent itself for the same reason — see that file. If a
+	# grind ever stutters or sags off the rail, something re-enabled this.
+	if state == State.GRIND:
+		_update_visual(delta)
+		return
 
 	# Remember how fast we were falling BEFORE the collision is resolved, because
 	# move_and_slide() is about to zero it if we land on something. Enemies read
@@ -489,6 +591,7 @@ func _tick_timers(delta: float) -> void:
 	_wall_lock -= delta
 	_ledge_lock -= delta
 	_slam_recover -= delta
+	_grind_lock -= delta
 
 	# The jump chain only decays on the ground. Let the window lapse without
 	# jumping again and the chain is lost, which is what stops the triple jump
@@ -837,6 +940,180 @@ func _do_air(delta: float) -> void:
 
 	if _ledge_lock <= 0.0 and velocity.y <= 0.5 and _find_ledge():
 		_set_state(State.LEDGE_HANG)
+		return
+
+	# Rails are caught in mid-air, as in Sonic Adventure 2: you run off the end
+	# of something and land on the line. Checked AFTER the ledge grab so a ledge
+	# still wins — a rail stealing you off a wall you were reaching for is the
+	# more annoying of the two possible mistakes.
+	if _grind_lock <= 0.0:
+		var rail := _find_rail()
+		if rail != null:
+			_attach_to_rail(rail)
+
+
+# ---------------------------------------------------------------- rail grinding
+
+## Grinding a rail, Sonic Adventure 2 style.
+##
+## The rail decides where we are, not `move_and_slide()`. We keep exactly one
+## number — `_rail_offset`, how far along the rail we have got — push it along by
+## `_rail_speed` every tick, and ask the rail where that lands. Note that
+## `_physics_process` skips `move_and_slide()` for this state entirely.
+##
+## Three things change the speed, and between them they are the whole mechanic:
+##
+##   - THE SLOPE, read off the rail's own tangent and pulled by `slope_gravity`
+##     from the Weight group, because a rail is a slope and should behave like
+##     one. Downhill is free speed; uphill is a real cost.
+##   - DRAG, divided by `grind_weight`. This is what makes a flat rail something
+##     you have to work at rather than a free ride.
+##   - THE ACCELERATOR, `attack`, also divided by `grind_weight`.
+func _do_grind(delta: float) -> void:
+	if _rail == null:
+		_leave_rail(false)
+		return
+
+	var tangent := _rail.tangent_at(_rail_offset)
+
+	# Gravity along the rail, and the one line here worth reading twice.
+	#
+	# `tangent` always points towards the rail's far end, so `tangent.y` IS the
+	# grade in that direction: negative means heading for the end runs downhill,
+	# which makes this pull positive and speeds up travel towards it. Because the
+	# speed is signed, the same line correctly SLOWS you when you are running the
+	# other way along the same rail. Write it with absolute values instead and an
+	# uphill grind accelerates, which reads as the rail's data being backwards.
+	_rail_speed += -tangent.y * slope_gravity * delta
+
+	var weight := maxf(grind_weight, 0.01)
+
+	# The accelerator pushes along the way we are already going, never backwards.
+	if Input.is_action_pressed(&"attack"):
+		_rail_speed += _rail_dir * (grind_accel / weight) * delta
+
+	# Drag always opposes travel, and is clamped rather than simply subtracted:
+	# without the clamp the frame that takes your last 0.1 m/s would carry on and
+	# push you gently backwards up the rail you just stopped on.
+	var shed := (grind_friction * _rail.friction_scale / weight) * delta
+	if absf(_rail_speed) <= shed:
+		_rail_speed = 0.0
+	else:
+		_rail_speed -= signf(_rail_speed) * shed
+
+	if absf(_rail_speed) > 0.01:
+		_rail_dir = signf(_rail_speed)
+
+	_rail_offset += _rail_speed * delta
+
+	# `velocity` is kept honest even though nothing moves us with it here, because
+	# it is what every exit from this state launches with, and what
+	# `approach_velocity()` hands to a breakable block. Leave it stale and you
+	# would fly off the end of a rail at whatever speed you first arrived with.
+	velocity = tangent * _rail_speed
+
+	# Ran out of rail. The speed is KEPT: flying off the end fast is the whole
+	# pay-off for taking the rail fast, and it is what makes a rail traversal
+	# rather than decoration.
+	if _rail_offset <= 0.0 or _rail_offset >= _rail.length():
+		# Clamped BEFORE leaving. GrindRail.tangent_at() clamps as well now, so the
+		# launch direction is right either way, but leaving the overshoot sitting in
+		# the member variable makes the F3 readout claim you got further along the
+		# rail than the rail is long.
+		_rail_offset = clampf(_rail_offset, 0.0, _rail.length())
+		_leave_rail(false)
+		return
+
+	# Jumping off. Read from the jump BUFFER rather than the raw button so a press
+	# a frame or two early still counts, as everywhere else, and eaten so it
+	# cannot fire a second time the moment we land.
+	if _jump_buffered > 0.0:
+		_jump_buffered = 0.0
+		_leave_rail(true)
+		return
+
+	# Ground to a halt without trying to recover, so fall off.
+	if absf(_rail_speed) < grind_stall_speed and not Input.is_action_pressed(&"attack"):
+		_leave_rail(false)
+		return
+
+	global_position = _rail.point_at(_rail_offset)
+	facing = _flatten(tangent * _rail_dir)
+
+
+## The nearest rail within `grind_snap_distance`, or null if there is none.
+##
+## Walks the `grindable` group by distance rather than using an `Area3D`, for the
+## usual reason in this project — an area added and queried in the same frame
+## reports nothing — plus one specific to rails: a rail is a thin line tens of
+## metres long, so an area shaped like it would have to be a chain of little
+## boxes, and the question "how far along it are you" would still need the curve.
+func _find_rail() -> GrindRail:
+	var best: GrindRail = null
+	var best_distance := grind_snap_distance
+	for node in get_tree().get_nodes_in_group(GrindRail.GROUP):
+		var rail := node as GrindRail
+		if rail == null or rail.curve == null:
+			continue
+		var distance := rail.distance_to_rail(global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = rail
+	return best
+
+
+## Locks on to `rail`, carrying in the speed we arrived with.
+##
+## The entry speed is our velocity PROJECTED on to the rail — a dot product —
+## not our total speed. So crossing a rail at right angles gives you almost
+## nothing, and running along its line gives you everything. That projection is
+## what makes a ramp leading into a rail worth building: the slope earns the
+## speed and the rail keeps it.
+func _attach_to_rail(rail: GrindRail) -> void:
+	_rail = rail
+	_rail_offset = rail.closest_offset(global_position)
+	var tangent := rail.tangent_at(_rail_offset)
+	_rail_speed = velocity.dot(tangent)
+	if absf(_rail_speed) > 0.01:
+		_rail_dir = signf(_rail_speed)
+	else:
+		# Landed on the rail with no speed ALONG it, which is what dropping on to a
+		# flat rail out of a fall looks like: the velocity is nearly all vertical,
+		# so the projection comes out about zero.
+		#
+		# `_rail_dir` survives between grinds, so without this branch it still holds
+		# the direction of the LAST rail — and the accelerator would push you
+		# whichever way that happened to be, which reads as the rail sending you
+		# backwards for no reason at all. Take it from where we are looking instead.
+		_rail_dir = 1.0 if facing.dot(tangent) >= 0.0 else -1.0
+	global_position = rail.point_at(_rail_offset)
+	_set_state(State.GRIND)
+
+
+## Lets go of the rail. `jumped` says whether this was a deliberate jump off it,
+## rather than running out of rail or stalling on it.
+##
+## Either way you keep the speed you had, pointed along the rail. That one rule
+## is what makes rails traversal instead of scenery: what you leave with is what
+## you earned on the way down.
+func _leave_rail(jumped: bool) -> void:
+	var launch := Vector3.ZERO
+	if _rail != null:
+		launch = _rail.tangent_at(_rail_offset) * _rail_speed
+	velocity = launch
+	if jumped:
+		# SET rather than added, like every other jump in the moveset. Note this
+		# throws away the vertical part of `launch`, which is the point: jumping
+		# off a steep downhill rail should send you UP, not slightly less down.
+		velocity.y = _jump_velocity() + grind_jump_boost
+		_jumping = true
+		_jump_released = false
+		play_sfx(sfx_jump)
+		spawn_jump_fx(grind_jump_colour, jump_fx_amount, 5.0, -_flatten(launch))
+	_rail = null
+	_rail_speed = 0.0
+	_grind_lock = grind_relatch_delay
+	_set_state(State.AIR)
 
 
 ## On fire, and running. Wario Land's Flaming Wario.
@@ -1335,6 +1612,10 @@ func _enter_state(which: State) -> void:
 			_chain_window = jump_chain_window
 		State.LEDGE_HANG:
 			_snap_to_ledge()
+		State.GRIND:
+			# Reusing the landing thud rather than adding a sound slot that would
+			# ship empty. Catching a rail is a landing, so it is not a bad fit.
+			play_sfx(sfx_land)
 		State.DEAD:
 			velocity = Vector3.ZERO
 		_:
@@ -1345,6 +1626,13 @@ func _exit_state(which: State) -> void:
 	match which:
 		State.LEDGE_HANG:
 			_ledge_lock = maxf(_ledge_lock, ledge_cooldown)
+		State.GRIND:
+			# Dropped HERE and not only in _leave_rail(), because plenty of things
+			# can knock us out of this state without going through it: a hit, a
+			# death, a respawn. Leave `_rail` set through one of those and the next
+			# _do_grind() would drive us along a rail we are no longer anywhere near.
+			_rail = null
+			_grind_lock = maxf(_grind_lock, grind_relatch_delay)
 		_:
 			pass
 
@@ -1375,4 +1663,6 @@ func debug_info() -> Dictionary:
 		"magnet": abilities.magnetised.name if abilities.magnetised != null else "-",
 		"form": ("%s %.2fs" % [state_name(), maxf(_transform_left, 0.0)]
 			if is_transformed() else "-"),
+		"rail": ("%s at %.1fm, %.1f m/s" % [_rail.name, _rail_offset, _rail_speed]
+			if _rail != null else "-"),
 	}

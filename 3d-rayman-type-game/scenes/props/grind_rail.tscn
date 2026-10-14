@@ -1,0 +1,48 @@
+[gd_scene format=3 uid="uid://fxaq75wjpd27"]
+
+[ext_resource type="Script" uid="uid://i0lfg0vbhcph" path="res://scripts/props/grind_rail.gd" id="1"]
+
+[sub_resource type="Curve3D" id="Curve_default"]
+; A straight 10 m rail, so the scene does something sensible on its own. Levels
+; override this with their own curve.
+;
+; Curve3D stores THREE Vector3s per point, in this order: the in-handle, the
+; out-handle, then the position. Handles are relative to the position, and
+; leaving both at zero gives straight segments between points — which is what
+; every rail in this project uses, because a straight segment is something a
+; probe can check and a bezier handle is not.
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10),
+"tilts": PackedFloat32Array(0, 0)
+}
+point_count = 2
+
+[sub_resource type="StandardMaterial3D" id="Mat_rail"]
+; Kept in the scene rather than built in code — see shockwave.gd for why that
+; matters for frame times.
+albedo_color = Color(0.72, 0.74, 0.8, 1)
+metallic = 0.8
+roughness = 0.25
+
+[node name="GrindRail" type="Path3D"]
+curve = SubResource("Curve_default")
+script = ExtResource("1")
+
+; `path_local = true` is NOT optional here, and leaving it false is a bug you
+; cannot see without measuring.
+;
+; A CSGPolygon3D in Path mode bakes the path it follows into its own vertices.
+; With path_local false it bakes the path WORLD positions — and then, because
+; this node is a CHILD of the Path3D, it inherits the parent transform on top.
+; The offset is applied twice, so the model ends up at double the distance from
+; the origin while the line you actually grind stays where it belongs. Measured
+; at 44 m apart in the rail yard, which is what "the model is nowhere near the
+; collision" turned out to be. tests/rail_probe.gd checks this now.
+[node name="Visual" type="CSGPolygon3D" parent="."]
+material = SubResource("Mat_rail")
+polygon = PackedVector2Array(-0.07, -0.07, 0.07, -0.07, 0.07, 0.07, -0.07, 0.07)
+mode = 2
+path_node = NodePath("..")
+path_interval = 0.5
+path_joined = true
+path_local = true
