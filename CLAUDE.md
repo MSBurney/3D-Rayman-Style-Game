@@ -69,7 +69,7 @@ file to be read.
   scripts/
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
-    components/      health, thrown_flight (drop-in Nodes, no matching scene)
+    components/      health, thrown_flight, coin_thief (drop-in Nodes, no matching scene)
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
@@ -77,7 +77,8 @@ file to be read.
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase), playground.tscn (momentum),
-                     tree_fort_main.tscn and rail_yard_main.tscn (experiments)
+                     tree_fort_main.tscn, rail_yard_main.tscn and
+                     thief_arena_main.tscn (experiments)
   tests/             moveset smoke test, plus throwaway level probes (fort, rail)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
@@ -207,6 +208,80 @@ Not built yet, on purpose: animation (the character is primitives moved by code)
 menus, saving. Ask before starting any of these.
 
 
+
+## Enemies that steal your money (experiment, 2026-10-15)
+
+**The user's idea, and it answers the no-death question better than anything previously proposed
+here.** `scripts/components/coin_thief.gd` — a drop-in Node you add to any enemy, which goes after
+the money the player dropped and hands every coin of it back when killed.
+
+Two reasons it is worth keeping:
+
+- **It supplies the half of money-as-stakes that was missing.** This file already diagnosed why
+  Sonic's version works: *"Sonic's rings work because they scatter and you have ~2 seconds to grab
+  them back. That recovery scramble **is** the mechanic."* Coins already scattered, but nothing
+  competed with the player for them, so the stakes came to a short walk back. A thief makes it a
+  race. The walker's `chase_speed` (4.4) being well under the player's `max_speed` is what keeps
+  that race winnable, and it must stay that way.
+- **It gives a boss something to be ABOUT.** The exit charges you to leave, so an enemy holding your
+  money stands between you and the win condition *mechanically*. Not beating it means not leaving —
+  **a fail state that does not need you to die**, which is precisely what Wario Land's no-death
+  design could never produce.
+
+### A thief is a container, not a sink
+
+The load-bearing rule, and everything in the component serves it. Money a thief takes **never leaves
+the world**: it drops the lot when killed, it never despawns while carrying, and it cannot walk out
+of the level. Break any of those and you re-arm the spiral this file has warned about since the
+money loop went in — hit, poorer, cannot afford the exit, forced to stay in the dangerous level, hit
+again. As a container there is no permanent loss, only a deposit you have to fight for, which is the
+same Hollow Knight answer the project already chose once.
+
+**It is also conserved by construction:** takes N, drops N. So deliberately feeding an enemy and
+then killing it is worth exactly zero and cannot be farmed. `take_silently()` on the coin exists for
+this — going through the normal pickup path would credit the player for money just stolen from them.
+
+**The level-design half of the same rule:** price an exit so the level is still finishable even if a
+thief keeps everything it took. The thief arena has 120 in coins against a 90 exit for that reason.
+
+### Three details that are not polish
+
+- **The tint is the mechanic.** A thief drifts towards gold as it fills up, because an enemy that
+  silently walks off with your coins is indistinguishable from the money having vanished. Same
+  reason `exit_refused` prints a shortfall instead of the exit quietly doing nothing, and the same
+  reason the jump puffs exist. `Events.money_stolen` carries who took it and how much, and the HUD
+  names them.
+- **Loot outranks chasing you**, in `enemy_walker.gd`. A thief that ignores the player while it goes
+  for the coins is what gives you the chance to get there first.
+- **`coin.pickup_delay` is the player's head start**, and a thief respects it too. Without that, a
+  thief standing nearby takes the coins on the frame they appear and the scramble is impossible.
+
+### Where the movement lives, and why it is not in the component
+
+The component only answers **where to go** — `target()` returns a coin or null, and
+`enemy_walker.gd` steers there in preference to patrolling or chasing. The component never writes
+`velocity`. That is on purpose: exactly one script per enemy owning its movement is worth more here
+than the component being completely self-contained, and it is the opposite choice from
+`ThrownFlight`, which does take the body over. The difference is that a thrown object stops being an
+enemy for the duration, while a thief is still just a walker that wants to be somewhere else.
+
+### The two honest limits
+
+- **The stakes evaporate at zero.** A broke player has nothing to steal, so a boss has no leverage
+  over exactly the player who is already struggling — the mirror of the "a good player is always
+  rich, so they can never die" problem noted under the money loop. `steal_placed_coins` is the dial
+  for that: a boss that eats the level's own coins and chests has leverage over anybody. Left false
+  on ordinary enemies, because one that hoovered up placed coins would change how every level is
+  built.
+- **It is economic tension, not survival tension.** A boss that cannot kill you still cannot
+  threaten you moment to moment. This makes no-death *viable* for bosses rather than equal to
+  death, and `contact_coin_cost` is what decides how much a hit stings.
+
+**Health and death were KEPT, deliberately and again.** Staged the same way money-as-stakes was, and
+for the same reason: the grapple was rewritten four times because the ambitious version went in
+before anyone knew whether the core felt good. If this carries the fail state in play, removing
+hearts afterwards is easy and the number ranges will already be known. `scenes/thief_arena_main.tscn`
+is where to judge it: 24 coins, three thieves, and an exit that wants 90 of the 120 on the floor.
 ## Rail grinding (experiment, 2026-10-13)
 
 **The first experiment after the project stopped aiming at a particular game.** Sonic Adventure 2's

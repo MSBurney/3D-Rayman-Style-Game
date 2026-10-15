@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://c750xarncoc8g"]
+
+[ext_resource type="PackedScene" uid="uid://3htouak7kni1" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
+[ext_resource type="Script" uid="uid://dxbwuigdldv2l" path="res://scripts/components/coin_thief.gd" id="thief"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
+
+; An ordinary walker with a CoinThief child bolted on. Kept as its own scene
+; rather than adding the component to enemy_walker.tscn, so every walker already
+; placed in every other level carries on behaving exactly as it did.
+[node name="EnemyThief" instance=ExtResource("walker")]
+contact_coin_cost = 15
+
+[node name="Thief" type="Node" parent="."]
+script = ExtResource("thief")
+coin_scene = ExtResource("coin")

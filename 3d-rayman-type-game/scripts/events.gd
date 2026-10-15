@@ -40,6 +40,14 @@ signal level_cleared(exit: Node3D, taken: int)
 ## from an exit that is broken. The HUD listens and shows the shortfall.
 signal exit_refused(exit: Node3D, short: int)
 
+## An enemy picked up money the player dropped. Carries who took it and how
+## much, so the HUD can say so.
+##
+## Emitted because an enemy quietly walking off with your coins is
+## indistinguishable from the money having vanished — the same reason
+## `exit_refused` exists rather than the exit just doing nothing.
+signal money_stolen(thief: Node3D, worth: int)
+
 ## A spin attack tripped a switch. Wire a door to this and the door and the
 ## switch never have to know about each other.
 ##

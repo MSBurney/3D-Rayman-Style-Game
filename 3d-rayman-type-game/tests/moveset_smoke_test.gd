@@ -32,11 +32,15 @@ const SHOCKWAVE := preload("res://scenes/fx/shockwave.tscn")
 ## Spawned by the rail grinding checks. Each one builds its own curve — see
 ## _make_rail().
 const RAIL := preload("res://scenes/props/grind_rail.tscn")
+## Spawned by the thief checks. COIN is used directly so a check can mark a coin
+## as spilled without having to get hit for it.
+const COIN := preload("res://scenes/props/coin.tscn")
+const THIEF := preload("res://scenes/enemies/enemy_thief.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 81
+const EXPECTED_CHECKS := 86
 
 var player: Player
 var level: Node3D
@@ -1499,6 +1503,94 @@ func _run() -> void:
 	player.grind_stall_speed = stall_was
 	rail_drop.queue_free()
 	await _step(3)
+
+	# ------------------------------------------------------- enemies that steal
+	#
+	# CoinThief. Getting hit already dropped money on the floor; this is about an
+	# enemy going and taking it, and handing it back when killed.
+	#
+	# The contract being checked is "a thief is a container, not a sink": money it
+	# takes never leaves the world, so there is no way to be locked out of
+	# affording the exit. Everything below is some face of that.
+	var game := get_node("Main")
+	
+	# Clear every coin earlier checks left lying about. The money-spill check puts
+	# real spilled coins on the plaza, and a thief would quite correctly go and
+	# take one of those instead of the coin this section is about.
+	for node in get_tree().get_nodes_in_group(&"coin"):
+		node.queue_free()
+	await _step(3)
+
+	# Parked far away, so the player cannot collect any of this themselves.
+	_place(PAD_TOP + Vector3(0, 1, 0))
+	var robber := _make_thief(Vector3(8, 0.9, 8))
+	await _step(30)
+	var purse: CoinThief = robber.thief
+
+	# --- it leaves the level's OWN coins alone. A thief that hoovered up placed
+	# coins would change how every level has to be built, and could empty a room
+	# the player had not even walked into yet.
+	var placed := COIN.instantiate() as Coin
+	level.add_child(placed)
+	placed.global_position = Vector3(8, 0.7, 9.5)
+	placed.value = 7
+	await _step(50)
+	_check("a thief ignores coins placed in the level",
+		purse != null and purse.carried == 0 and is_instance_valid(placed),
+		"carried %d, placed coin still there=%s"
+			% [purse.carried if purse != null else -1, is_instance_valid(placed)])
+	placed.queue_free()
+	await _step(3)
+
+	# --- but it does take money the player dropped, and NOT during the pickup
+	# delay. That delay is the player's head start: a thief standing nearby that
+	# snatches the coins on the frame they appear makes the scramble impossible,
+	# and the scramble is the entire point of the mechanic.
+	var total_before: int = game.money
+	var loot := COIN.instantiate() as Coin
+	level.add_child(loot)
+	loot.global_position = Vector3(8, 0.7, 10.5)
+	loot.spill(Vector3.ZERO, 12)
+	await _step(12)
+	var during_delay: int = purse.carried
+	await _step(120)
+	_check("a thief takes dropped money, but not during its pickup delay",
+		during_delay == 0 and purse.carried == 12,
+		"carried %d inside the delay, %d after" % [during_delay, purse.carried])
+
+	# --- and taking it must NOT move the player's running total. The money left
+	# that total when the player was hit; it comes back only when a coin is
+	# actually collected. A thief that credited or debited anyone here would
+	# quietly create or destroy money.
+	_check("stealing does not move the player's total", game.money == total_before,
+		"total %d -> %d while %d was stolen" % [total_before, game.money, purse.carried])
+
+	# --- killing it gives every coin back. Recorded from the `dropped` signal as
+	# it fires, rather than counted off the floor afterwards: the walker drops a
+	# coin of its own on death too, so a count would be measuring both.
+	var given_back: Array[int] = []
+	purse.dropped.connect(func(worth: int) -> void: given_back.append(worth))
+	var loose_before := _loose_coin_worth()
+	robber.health.damage(999)
+	await _step(40)
+	var loose_after := _loose_coin_worth()
+	_check("killing a thief puts every coin of it back",
+		given_back.size() == 1 and given_back[0] == 12 and loose_after >= loose_before + 12,
+		"gave back %s, loose money on the floor %d -> %d"
+			% [str(given_back), loose_before, loose_after])
+
+	# --- a thief killed while empty drops nothing at all. Cheap, and it guards
+	# against the division in drop_all() being handed a zero.
+	var pauper := _make_thief(Vector3(-8, 0.9, 8))
+	await _step(20)
+	var empty_drops: Array[int] = []
+	pauper.thief.dropped.connect(func(worth: int) -> void: empty_drops.append(worth))
+	var before_empty := _loose_coin_worth()
+	pauper.health.damage(999)
+	await _step(30)
+	_check("a thief killed empty drops nothing",
+		empty_drops.is_empty(),
+		"drops %s, loose money %d -> %d" % [str(empty_drops), before_empty, _loose_coin_worth()])
 ## Builds a straight rail starting at `at` and running `run` metres from there,
 ## as a world-space offset, and returns it.
 ##
@@ -1517,3 +1609,25 @@ func _make_rail(at: Vector3, run: Vector3) -> GrindRail:
 	# line later than it enters the tree.
 	rail.global_position = at
 	return rail
+
+
+## Spawns a walker that has a CoinThief on it, and returns it.
+func _make_thief(at: Vector3) -> Node3D:
+	var enemy := THIEF.instantiate() as Node3D
+	level.add_child(enemy)
+	enemy.global_position = at
+	return enemy
+
+
+## Everything in the `coin` group that still exists, totalled by value.
+##
+## Counts coins inside their pickup delay as well, because money lying on the
+## floor waiting to become collectable is still money in the world, and that is
+## what "a thief is a container, not a sink" is a claim about.
+func _loose_coin_worth() -> int:
+	var total := 0
+	for node in get_tree().get_nodes_in_group(&"coin"):
+		var coin := node as Coin
+		if coin != null and not coin.is_queued_for_deletion():
+			total += coin.value
+	return total

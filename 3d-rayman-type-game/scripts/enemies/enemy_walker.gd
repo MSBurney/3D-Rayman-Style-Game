@@ -55,6 +55,10 @@ var _carrier: Player = null
 @onready var _sfx: AudioStreamPlayer3D = $Sfx
 ## Drives us while we are in the air after a throw. See thrown_flight.gd.
 @onready var flight: ThrownFlight = $Flight
+## Optional. Present only on walkers that have had a CoinThief child added, so
+## an ordinary walker is completely unaffected. `get_node_or_null` rather than
+## `$Thief` because `$Thief` errors when it is absent.
+@onready var thief: CoinThief = get_node_or_null(^"Thief") as CoinThief
 
 func _ready() -> void:
 	_origin = global_position
@@ -94,7 +98,20 @@ func _physics_process(delta: float) -> void:
 	_update_awareness()
 
 	var wanted := Vector3.ZERO
-	if _chasing and _player != null:
+	# Loose money the player dropped outranks BOTH patrolling and chasing. The
+	# optional CoinThief child decides whether there is any and which piece to go
+	# for; all this does is steer towards it.
+	#
+	# Loot winning over the chase is deliberate: a thief that ignores you while it
+	# goes for your coins is what gives you the chance to get there first, and
+	# that race is the whole point of the mechanic.
+	var loot: Node3D = thief.target() if thief != null else null
+	if loot != null:
+		var to_loot := loot.global_position - global_position
+		to_loot.y = 0.0
+		if to_loot.length_squared() > 0.04:
+			wanted = to_loot.normalized() * chase_speed
+	elif _chasing and _player != null:
 		var to_player := _player.global_position - global_position
 		to_player.y = 0.0
 		if to_player.length_squared() > 0.04:

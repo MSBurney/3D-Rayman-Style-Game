@@ -1,3 +1,4 @@
+class_name Coin
 extends Area3D
 
 ## A coin, or a clove of garlic.
@@ -36,6 +37,13 @@ enum Kind { COIN, GARLIC }
 var _base_y: float = 0.0
 var _t: float = 0.0
 var _taken: bool = false
+## True once this coin was knocked out of the player rather than placed in the
+## level by hand.
+##
+## `CoinThief` only chases money the PLAYER dropped. An enemy that also hoovered
+## up a level's own coins would change how every level has to be built, and it
+## would quietly empty a level the player had not even reached yet.
+var spilled: bool = false
 ## Set while a dropped coin is still in the air. See spill().
 var _spilling: bool = false
 var _spill_velocity: Vector3 = Vector3.ZERO
@@ -85,8 +93,34 @@ func _apply_tint() -> void:
 func spill(impulse: Vector3, worth: int) -> void:
 	value = worth
 	_spilling = true
+	spilled = true
 	_spill_velocity = impulse
 	_no_pickup = pickup_delay
+
+
+## Still here to be picked up by anybody: not already collected, and past its
+## pickup delay.
+##
+## The delay matters to a thief as much as to the player. Without it an enemy
+## standing nearby snatches the coins on the frame they appear, before the player
+## has had any chance at all to go for them — and the scramble that is the whole
+## point of dropping them never happens.
+func is_available() -> bool:
+	return not _taken and _no_pickup <= 0.0
+
+
+## Taken by something that is NOT the player, and returns what it was worth.
+##
+## Pays nobody: the money is now inside whatever took it, and comes back out as
+## fresh coins when that thing dies. See scripts/components/coin_thief.gd. Going
+## through the normal pickup path instead would credit the player for money an
+## enemy just stole from them.
+func take_silently() -> int:
+	if not is_available():
+		return 0
+	_taken = true
+	queue_free()
+	return value
 
 func _process(delta: float) -> void:
 	_no_pickup -= delta
