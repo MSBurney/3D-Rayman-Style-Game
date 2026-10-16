@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://cp671xmb2bsr2"]
+
+[ext_resource type="PackedScene" uid="uid://3htouak7kni1" path="res://scenes/enemies/enemy_walker.tscn" id="walker"]
+[ext_resource type="Script" uid="uid://cdeeoi8dqqb1j" path="res://scripts/components/item_thief.gd" id="snatcher"]
+
+; A walker that steals the object a level depends on. Its own scene rather than
+; a component added to enemy_walker.tscn, so every walker already placed in
+; every other level carries on behaving exactly as before.
+;
+; Note it has NO CoinThief. One destination can be walked towards at a time, and
+; mixing the two on one enemy means the money sometimes wins — which makes the
+; hostage mechanic look unreliable. enemy_thief.tscn is the money one.
+[node name="EnemySnatcher" instance=ExtResource("walker")]
+
+[node name="Snatcher" type="Node" parent="."]
+script = ExtResource("snatcher")

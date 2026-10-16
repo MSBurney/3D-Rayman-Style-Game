@@ -1,0 +1,123 @@
+[gd_scene format=3 uid="uid://d2u36ywlt1v1u"]
+
+[ext_resource type="PackedScene" uid="uid://dfc8q7e2eq77g" path="res://scenes/props/platform_seed.tscn" id="seed"]
+[ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="plat"]
+[ext_resource type="PackedScene" uid="uid://gd4nqmfjlvu3" path="res://scenes/props/seed_socket.tscn" id="socket"]
+[ext_resource type="PackedScene" uid="uid://cp671xmb2bsr2" path="res://scenes/enemies/enemy_snatcher.tscn" id="snatch"]
+[ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
+[ext_resource type="PackedScene" uid="uid://c2ocooorlwkcr" path="res://scenes/props/treasure.tscn" id="chest"]
+[ext_resource type="Script" uid="uid://dcuauasxv0kmy" path="res://scripts/props/hazard.gd" id="haz"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+sky_top_color = Color(0.2, 0.24, 0.4, 1)
+sky_horizon_color = Color(0.74, 0.72, 0.68, 1)
+ground_bottom_color = Color(0.16, 0.15, 0.17, 1)
+ground_horizon_color = Color(0.74, 0.72, 0.68, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMat")
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_energy = 0.4
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="MatFloor"]
+albedo_color = Color(0.4, 0.39, 0.42, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatPit"]
+albedo_color = Color(0.22, 0.2, 0.24, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatDeck"]
+albedo_color = Color(0.5, 0.46, 0.4, 1)
+
+[sub_resource type="BoxShape3D" id="Shape_pit"]
+size = Vector3(120, 1, 10)
+
+; ─── THE HOSTAGE PIT ─────────────────────────────────────────────────────────
+;
+; One question: does an enemy holding the way UP create more stakes than an
+; enemy holding some coins?
+;
+; So the level is arranged so the platform is the ONLY route to the exit. The
+; upper deck sits at y=12 over a floor at y=0, with a 10 m trench between the
+; two halves of the ground, and nothing to climb. Throw the seed in the trench,
+; a platform manifests, ride it up. Let a snatcher take the seed and the exit is
+; simply not available until you kill it.
+;
+; The trench is lethal rather than just deep — the hazard at the bottom is why
+; you throw the seed in instead of climbing down after it. Note the hazard only
+; ever touches the player, so neither the seed nor a snatcher is destroyed down
+; there; the socket covers the whole trench floor for exactly that reason, so
+; anything that ends up in the pit still counts as delivered.
+[node name="HostagePit" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.86, 0.35, -0.37, 0, 0.73, 0.68, 0.51, -0.59, 0.63, 0, 40, 0)
+shadow_enabled = true
+
+[node name="FloorSouth" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -5, -32.5)
+use_collision = true
+size = Vector3(120, 10, 55)
+material = SubResource("MatFloor")
+
+[node name="FloorNorth" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -5, 32.5)
+use_collision = true
+size = Vector3(120, 10, 55)
+material = SubResource("MatFloor")
+
+[node name="PitFloor" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -6, 0)
+use_collision = true
+size = Vector3(120, 2, 10)
+material = SubResource("MatPit")
+
+[node name="PitHazard" type="Area3D" parent="."]
+; Mask 2 is the player layer, and it has to be on its own line: in the node
+; header it is ignored, the area keeps the default mask of 1, and it never
+; notices the player at all — a pit that looks lethal and is not.
+collision_mask = 2
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -4.4, 0)
+script = ExtResource("haz")
+instant_kill = true
+
+[node name="Shape" type="CollisionShape3D" parent="PitHazard"]
+shape = SubResource("Shape_pit")
+
+[node name="UpperDeck" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 11.5, 15)
+use_collision = true
+size = Vector3(20, 1, 20)
+material = SubResource("MatDeck")
+
+[node name="Platform" parent="." instance=ExtResource("plat")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+travel = Vector3(0, 11.4, 0)
+
+[node name="Socket" parent="." instance=ExtResource("socket")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -3, 0)
+platform_path = NodePath("../Platform")
+size = Vector3(120, 8, 10)
+
+[node name="Seed" parent="." instance=ExtResource("seed")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0.6, -16)
+
+[node name="SnatcherA" parent="." instance=ExtResource("snatch")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0.9, -16)
+
+[node name="SnatcherB" parent="." instance=ExtResource("snatch")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 0.9, -28)
+
+[node name="Exit" parent="." instance=ExtResource("exit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12, 18)
+
+[node name="Chest" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 12, 13)
+worth = 80

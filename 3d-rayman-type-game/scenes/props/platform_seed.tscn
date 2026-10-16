@@ -1,0 +1,54 @@
+[gd_scene format=3 uid="uid://dfc8q7e2eq77g"]
+
+[ext_resource type="Script" uid="uid://djds6dwsaewod" path="res://scripts/props/platform_seed.gd" id="1"]
+
+[sub_resource type="SphereShape3D" id="Shape_seed"]
+radius = 0.42
+
+[sub_resource type="StandardMaterial3D" id="Mat_seed"]
+; Bright cyan, and deliberately not near any other pickup's colour: gold is
+; money, red is garlic, so the one object a level actually depends on gets a hue
+; of its own. Emission set in the SCENE, because it is a shader feature flag —
+; see priced_gate.tscn.
+albedo_color = Color(0.35, 0.92, 0.95, 1)
+emission_enabled = true
+emission = Color(0.3, 0.85, 1, 1)
+emission_energy_multiplier = 1.6
+
+[sub_resource type="SphereMesh" id="Mesh_core"]
+material = SubResource("Mat_seed")
+radius = 0.42
+height = 0.84
+radial_segments = 14
+rings = 7
+
+[sub_resource type="PrismMesh" id="Mesh_fin"]
+material = SubResource("Mat_seed")
+size = Vector3(0.5, 0.5, 0.12)
+
+; Layer 64 is `throwable` and mask 5 is world + enemy, copied from the keg so it
+; behaves the same way when loose on the floor.
+[node name="PlatformSeed" type="RigidBody3D"]
+; Layer 64 is `throwable`, mask 5 is world + enemy, copied from the keg.
+;
+; NOTE these are their own lines. A collision property written INSIDE the
+; [node ...] header is silently ignored — the node keeps the engine default and
+; nothing warns you. Only name, type, parent, instance, groups and unique_id
+; belong in the header.
+collision_layer = 64
+collision_mask = 5
+script = ExtResource("1")
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+shape = SubResource("Shape_seed")
+
+[node name="Core" type="MeshInstance3D" parent="."]
+mesh = SubResource("Mesh_core")
+
+[node name="FinA" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+mesh = SubResource("Mesh_fin")
+
+[node name="FinB" type="MeshInstance3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, -0.5, 0)
+mesh = SubResource("Mesh_fin")

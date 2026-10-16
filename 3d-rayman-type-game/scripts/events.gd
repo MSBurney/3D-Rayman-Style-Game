@@ -53,6 +53,11 @@ signal money_stolen(thief: Node3D, worth: int)
 ## you actually have — the same reason the hit spill lives there. A till emits
 ## this rather than reaching into Game itself.
 signal money_spent(amount: int)
+## An enemy took the object a level's progression depends on — see
+## `item_thief.gd`. Carries who has it so the HUD can name them, because an
+## enemy wandering off with the way up has to be identifiable or the level just
+## appears to be broken.
+signal item_stolen(thief: Node3D, item: Node3D)
 ## A purchase went through. Carries what sold it and what it cost.
 signal purchase_made(what: Node3D, cost: int)
 ## A purchase was refused, and by how much you were short.

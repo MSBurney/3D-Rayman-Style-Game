@@ -69,18 +69,22 @@ file to be read.
   scripts/
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
-    components/      health, thrown_flight, coin_thief (drop-in Nodes, no matching scene)
+    components/      health, thrown_flight, coin_thief, item_thief (drop-in Nodes,
+                     no matching scene)
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
                      breakable block, treasure, level exit, transformer, grind rail,
-                     priced gate, vending machine
+                     priced gate, vending machine, platform seed, seed socket,
+                     moving platform
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase), playground.tscn (momentum),
                      tree_fort_main.tscn, rail_yard_main.tscn and
-                     thief_arena_main.tscn and market_yard_main.tscn (experiments)
-  tests/             moveset smoke test, plus throwaway level probes (fort, rail, market)
+                     thief_arena_main.tscn, market_yard_main.tscn and
+                     hostage_pit_main.tscn (experiments)
+  tests/             moveset smoke test, plus throwaway level probes (fort, rail,
+                     market, pit)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
 
@@ -155,6 +159,24 @@ site, but they are worth knowing up front:
   see 44 m from the rail you could grind, and it reads as the collision being broken rather than
   the mesh being misplaced. `tests/rail_probe.gd` measures the mesh AABB against the curve now,
   because there is no way to notice this without measuring.
+- **A collision property written INSIDE a `[node ...]` header is silently ignored.** Only `name`,
+  `type`, `parent`, `instance`, `groups` and `unique_id` belong in the header; everything else is a
+  property and goes on its own line underneath. Write
+  `[node name="X" type="RigidBody3D" collision_layer=64]` and the node keeps the engine default
+  instead — no warning, clean import, and the value you can read back in the Inspector looks
+  nothing like the file. It cost two bugs at once here: a seed on the wrong layer, and a pit hazard
+  whose mask stayed at 1 so it never noticed the player at all — a lethal pit that was not lethal.
+  If a hand-written scene behaves as though a collision setting was not applied, check this first,
+  and print the property at runtime rather than reading the file.
+- **`AnimatableBody3D.sync_to_physics` defaults to TRUE, and its own documentation says "do not use
+  together with `_physics_process()`".** Both halves matter. A moving platform driven by assigning
+  `global_position` in `_physics_process` needs it explicitly set to **false** — leaving the line
+  out does not disable it. With it on, the collision shape lags behind the node, so the platform
+  draws in one place and collides in another and **the player falls straight through a platform
+  they are standing on**, with `is_on_floor()` false the whole way down. Set it false and set
+  `constant_linear_velocity` instead: that is what a `CharacterBody3D` reads to know its floor is
+  moving, and without it a sideways platform slides out from under the player even though a
+  vertical one appears to work (floor snapping keeps catching up with it).
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
 - **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
@@ -211,6 +233,74 @@ menus, saving. Ask before starting any of these.
 
 
 
+
+## Enemies that hold the level hostage (experiment, 2026-10-16)
+
+**The user's idea, and it is the first version of "enemies steal things" with real stakes in it.**
+Framing the theft as money was not enough, because money is a number you can go and earn again. So
+the thing an enemy takes is now **the way up**.
+
+Four pieces:
+
+| | |
+| --- | --- |
+| **`platform_seed.gd`** | a carryable object, picked up by the existing spin-carry system |
+| **`seed_socket.gd`** | sits at the bottom of a pit; a seed delivered to it raises a platform |
+| **`moving_platform.gd`** | an `AnimatableBody3D` that slides between two points and carries you |
+| **`item_thief.gd`** | takes the seed and carries it **over its head**, visibly |
+
+The loop: carry the seed, throw it in the pit, ride the platform it manifests to somewhere you
+otherwise cannot reach. Let a snatcher take it first and **the exit is simply not available** until
+you kill that enemy. `scenes/hostage_pit_main.tscn` is arranged so the platform is the only route
+to the exit, which is the whole claim — `tests/pit_probe.gd` checks that the deck really is 12 m
+above a floor with nothing in between, and that the platform's travel arrives at exactly deck
+height rather than near it.
+
+### The guarantee, which is stronger than the money one and has to be
+
+The money thief had a rule: a thief is a container, not a sink. This needs more, because the
+failure is worse. Lose money and you are poorer; **lose this and the level is unfinishable.** So
+the seed rescues ITSELF, two ways:
+
+- **`respawn_below_y`** — falls off the world, goes back where it started.
+- **"not held but still frozen" is always wrong.** `pick_up()` freezes the seed and takes it off
+  every collision layer. So if nothing is holding it and it is still in that state, a carrier went
+  away without going through `drop()`, and the seed drops itself. Written as an invariant rather
+  than as a reaction to one known cause, which turned out to matter: the first version only checked
+  `is_instance_valid(carrier)`, and there is more than one way to lose a carrier.
+
+**The safety is in the OBJECT, not in `item_thief.gd`, on purpose.** A component cannot be trusted
+to tidy up after its own host, because an enemy can stop existing more than one way — killed,
+thrown into a wall and burst, freed with the level — and those do not all run the same code. The
+smoke test kills a carrier with `queue_free()` specifically to skip the `died` signal and prove the
+seed does not need it.
+
+### The socket polls by position, and refuses rather than eats
+
+**It does not use `body_entered`.** A carried seed is on collision layer 0, so an enemy that
+wandered into the pit holding it would never trigger an area — it would just stand there with the
+level in its hands and nothing the player did could fix it. Checking the whole pit volume by
+position every frame covers the carried case, and has the nice side effect that carrying the seed
+down there yourself works exactly as well as throwing it.
+
+**And a socket with no platform refuses the seed instead of consuming it.** That is the important
+half rather than a tidy-up: the first version consumed the seed and then did nothing, because
+`@export var platform: MovingPlatform` does not survive a `NodePath` written into a `.tscn` by
+hand — a typed NODE export is converted by the editor, and a hand-written path arrives as a
+NodePath that never becomes a node. The seed was gone, the platform never appeared, and the level
+was unwinnable with nothing to explain why. **Any till, socket or receptacle that consumes
+something irreplaceable should refuse when it cannot deliver.**
+
+### What to watch for in play
+
+- **A snatcher carrying the seed goes back to behaving like an ordinary enemy**, which means it
+  comes after you with the level in its hands. That reads well, but a snatcher that *fled* would be
+  more interesting and is not built.
+- **Two snatchers escalate**, because killing the one holding the seed drops it and the other can
+  pick it up. That was not designed, it fell out, and it is the best thing about the level.
+- **The pit hazard only ever touches the player**, so neither the seed nor a snatcher is destroyed
+  down there. The socket covers the whole pit floor for that reason — anything that ends up in the
+  pit counts as delivered.
 ## Money to spend mid-level (experiment, 2026-10-15)
 
 **Built because collectibles did not feel like they meant anything**, and the diagnosis matters more

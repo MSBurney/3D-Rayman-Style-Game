@@ -39,11 +39,16 @@ const THIEF := preload("res://scenes/enemies/enemy_thief.tscn")
 ## Spawned by the mid-level sink checks.
 const GATE := preload("res://scenes/props/priced_gate.tscn")
 const VEND := preload("res://scenes/props/vending_machine.tscn")
+## Spawned by the hostage-seed checks.
+const SEED := preload("res://scenes/props/platform_seed.tscn")
+const SOCKET := preload("res://scenes/props/seed_socket.tscn")
+const PLATFORM := preload("res://scenes/props/moving_platform.tscn")
+const SNATCHER := preload("res://scenes/enemies/enemy_snatcher.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 93
+const EXPECTED_CHECKS := 101
 
 var player: Player
 var level: Node3D
@@ -1740,6 +1745,198 @@ func _run() -> void:
 	await _step(3)
 	_check("a spend cannot push your money negative", game.money == 0,
 		"had 5, spent 500, left with %d" % game.money)
+
+	# ------------------------------------------------- the seed, and holding a
+	# level hostage
+	#
+	# PlatformSeed / SeedSocket / MovingPlatform / ItemThief. The stake here is
+	# ACCESS rather than money: a snatcher holding the seed is holding the only
+	# route up, so most of these checks are about the seed being impossible to
+	# lose rather than about it working.
+	#
+	# Everything lives out at x=500. A MovingPlatform with no travel doubles as
+	# the floor, since a snatcher that falls cannot walk anywhere.
+	# `seed_pad` rather than `pad`, which is already taken further up this
+	# function. _run() is one scope from top to bottom, so every local in it has
+	# to be unique against every other — and a collision is a parse error that
+	# stops the script loading, which makes the scene run with a null script and
+	# never quit. It presents as the suite hanging, not as a typo.
+	var seed_pad := PLATFORM.instantiate() as MovingPlatform
+	seed_pad.hide_until_active = false
+	seed_pad.travel = Vector3.ZERO
+	level.add_child(seed_pad)
+	seed_pad.global_position = Vector3(500, 0, 0)
+	await _step(6)
+
+	# --- the existing spin-carry system picks it up on touch, and throws it.
+	var carried_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(carried_seed)
+	carried_seed.global_position = Vector3(500, 1.0, 0)
+	await _step(6)
+	_place(Vector3(500, 0.5, -0.8))
+	await _step(12)
+	var picked_up := player.abilities.carried == carried_seed and carried_seed.is_held()
+	player.abilities.throw_carried()
+	await _step(10)
+	_check("the player can carry and throw the seed",
+		picked_up and not carried_seed.is_held()
+			and carried_seed.linear_velocity.length() > 2.0,
+		"picked up=%s, still held=%s, speed after throw %.1f"
+			% [picked_up, carried_seed.is_held(), carried_seed.linear_velocity.length()])
+	carried_seed.queue_free()
+	await _step(4)
+
+	# --- a seed reaching a socket raises its platform.
+	var lift := PLATFORM.instantiate() as MovingPlatform
+	lift.travel = Vector3(0, 6, 0)
+	level.add_child(lift)
+	lift.global_position = Vector3(520, 0.3, 0)
+	var socket := SOCKET.instantiate() as SeedSocket
+	level.add_child(socket)
+	socket.global_position = Vector3(520, -3, 0)
+	socket.size = Vector3(14, 10, 14)
+	# Assigned directly rather than through `platform_path`, which is only
+	# resolved in _ready() and so has to be set before the node enters the tree.
+	socket.platform = lift
+	var raised: Array[bool] = []
+	lift.activated.connect(func() -> void: raised.append(true))
+	var socket_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(socket_seed)
+	socket_seed.global_position = Vector3(520, -3, 0)
+	await _step(20)
+	_check("a seed delivered to a socket raises its platform",
+		raised.size() == 1 and lift.active,
+		"activated %d time(s), active=%s" % [raised.size(), lift.active])
+
+	# --- a snatcher takes a loose seed and carries it OVER ITS HEAD. The height
+	# is the tell: you have to be able to see which enemy has the level.
+	_place(PAD_TOP + Vector3(0, 1, 0))
+	var snatcher_a := SNATCHER.instantiate() as Node3D
+	level.add_child(snatcher_a)
+	snatcher_a.global_position = Vector3(500, 1.0, 3.0)
+	var loose_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(loose_seed)
+	loose_seed.global_position = Vector3(500, 1.0, 3.8)
+	await _step(30)
+	var snatch: ItemThief = snatcher_a.snatcher
+	var carried_high := loose_seed.global_position.y - snatcher_a.global_position.y
+	_check("a snatcher carries the seed over its head",
+		snatch != null and snatch.held == loose_seed and carried_high > 1.0,
+		"held=%s, seed sits %.2f m above it" % [snatch.held != null, carried_high])
+
+	# --- and will NOT take it out of the player's hands. Tested with a snatcher
+	# given an absurd reach rather than one standing next to you, so the check
+	# cannot pass just because it never got close: with grab_distance at 60 it
+	# would take the seed instantly if `is_held()` did not filter it out.
+	var guard_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(guard_seed)
+	guard_seed.global_position = Vector3(500, 1.0, 0)
+	await _step(6)
+	_place(Vector3(500, 0.5, -0.8))
+	await _step(12)
+	var in_hand := player.abilities.carried == guard_seed
+	var watcher := SNATCHER.instantiate() as Node3D
+	level.add_child(watcher)
+	watcher.global_position = Vector3(500, 1.0, 8.0)
+	await _step(4)
+	watcher.snatcher.greed_radius = 60.0
+	watcher.snatcher.grab_distance = 60.0
+	await _step(24)
+	_check("a snatcher cannot take the seed out of your hands",
+		in_hand and watcher.snatcher.held == null and player.abilities.carried == guard_seed,
+		"in hand=%s, snatcher holds=%s" % [in_hand, watcher.snatcher.held != null])
+	watcher.queue_free()
+	player.abilities.drop_everything()
+	guard_seed.queue_free()
+	await _step(5)
+
+	# --- killing a snatcher gives the seed back.
+	var handed_back: Array[bool] = []
+	snatch.dropped.connect(func(_item: PlatformSeed) -> void: handed_back.append(true))
+	snatcher_a.health.damage(999)
+	await _step(25)
+	_check("killing a snatcher drops the seed",
+		handed_back.size() == 1 and is_instance_valid(loose_seed)
+			and not loose_seed.is_held(),
+		"dropped %d time(s), seed alive=%s, still held=%s"
+			% [handed_back.size(), is_instance_valid(loose_seed), loose_seed.is_held()])
+	loose_seed.queue_free()
+	await _step(4)
+
+	# --- THE IMPORTANT ONE: a carrier that is freed outright does not take the
+	# seed with it.
+	#
+	# `queue_free()` rather than killing it, deliberately — no `died` signal, so
+	# ItemThief never gets the chance to tidy up. That is the path an enemy takes
+	# when it is thrown into a wall and bursts, or when a level is unloaded, and
+	# it is the one that would otherwise leave the seed frozen in mid-air on
+	# collision layer 0: invisible to every query, impossible to pick up, and the
+	# level quietly unwinnable. platform_seed.gd rescues itself for this reason,
+	# rather than trusting whatever is holding it.
+	var doomed := SNATCHER.instantiate() as Node3D
+	level.add_child(doomed)
+	doomed.global_position = Vector3(500, 1.0, -3.0)
+	var orphan_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(orphan_seed)
+	orphan_seed.global_position = Vector3(500, 1.0, -3.8)
+	await _step(30)
+	var was_taken := orphan_seed.is_held()
+	doomed.queue_free()
+	await _step(12)
+	_check("a freed carrier does not take the seed with it",
+		was_taken and is_instance_valid(orphan_seed) and not orphan_seed.is_held()
+			and not orphan_seed.freeze and orphan_seed.collision_layer != 0,
+		"was taken=%s, held now=%s, frozen=%s, layer %d"
+			% [was_taken, orphan_seed.is_held(), orphan_seed.freeze,
+				orphan_seed.collision_layer])
+	orphan_seed.queue_free()
+	await _step(4)
+
+	# --- and it comes home if it falls off the world at all. The other half of
+	# the same guarantee.
+	var lost_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(lost_seed)
+	lost_seed.global_position = Vector3(500, 1.0, -2.0)
+	await _step(12)
+	var seed_home := lost_seed.global_position
+	lost_seed.global_position = Vector3(500, -80, -2.0)
+	await _step(8)
+	_check("the seed comes home if it falls off the world",
+		lost_seed.global_position.distance_to(seed_home) < 1.0,
+		"home was (%.0f, %.1f, %.0f), ended (%.0f, %.1f, %.0f)"
+			% [seed_home.x, seed_home.y, seed_home.z, lost_seed.global_position.x,
+				lost_seed.global_position.y, lost_seed.global_position.z])
+	lost_seed.queue_free()
+	await _step(4)
+
+	# --- a moving platform actually CARRIES you. This is what `sync_to_physics`
+	# buys: without it the platform slides out from under the player, who looks
+	# like they are skating on the spot, and the whole ride-it-up idea fails in a
+	# way that is obvious in play and invisible in the code.
+	var lifter := PLATFORM.instantiate() as MovingPlatform
+	lifter.hide_until_active = false
+	lifter.active = true
+	lifter.travel = Vector3(0, 8, 0)
+	lifter.hold_time = 0.0
+	lifter.speed = 4.0
+	level.add_child(lifter)
+	lifter.global_position = Vector3(540, 0.3, 0)
+	await _step(6)
+	_place(Vector3(540, 1.2, 0))
+	await _step(30)
+	var rider_from := player.global_position.y
+	var lifter_from := lifter.global_position.y
+	await _step(50)
+	var rider_rose := player.global_position.y - rider_from
+	var lifter_rose := lifter.global_position.y - lifter_from
+	_check("a moving platform carries the player with it",
+		lifter_rose > 1.5 and rider_rose > lifter_rose - 0.7,
+		"platform rose %.2f m, player rose %.2f m" % [lifter_rose, rider_rose])
+	lifter.queue_free()
+	lift.queue_free()
+	socket.queue_free()
+	seed_pad.queue_free()
+	await _step(5)
 ## Builds a straight rail starting at `at` and running `run` metres from there,
 ## as a world-space offset, and returns it.
 ##

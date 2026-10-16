@@ -59,6 +59,9 @@ var _carrier: Player = null
 ## an ordinary walker is completely unaffected. `get_node_or_null` rather than
 ## `$Thief` because `$Thief` errors when it is absent.
 @onready var thief: CoinThief = get_node_or_null(^"Thief") as CoinThief
+## Optional, exactly like `thief` above. Present only on walkers that have had
+## an ItemThief child added, so an ordinary walker is untouched.
+@onready var snatcher: ItemThief = get_node_or_null(^"Snatcher") as ItemThief
 
 func _ready() -> void:
 	_origin = global_position
@@ -105,7 +108,12 @@ func _physics_process(delta: float) -> void:
 	# Loot winning over the chase is deliberate: a thief that ignores you while it
 	# goes for your coins is what gives you the chance to get there first, and
 	# that race is the whole point of the mechanic.
-	var loot: Node3D = thief.target() if thief != null else null
+	# The SNATCHER outranks the coin thief, because only one destination can be
+	# walked towards and the object a level's progression depends on is worth more
+	# than any amount of money. See item_thief.gd.
+	var loot: Node3D = snatcher.target() if snatcher != null else null
+	if loot == null and thief != null:
+		loot = thief.target()
 	if loot != null:
 		var to_loot := loot.global_position - global_position
 		to_loot.y = 0.0

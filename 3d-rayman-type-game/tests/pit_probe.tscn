@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://dvba8qtcvax3s"]
+
+[ext_resource type="Script" path="res://tests/pit_probe.gd" id="1"]
+
+[node name="PitProbe" type="Node"]
+script = ExtResource("1")

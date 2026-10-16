@@ -18,7 +18,8 @@ emission_energy_multiplier = 0.25
 material = SubResource("Mat_box")
 size = Vector3(1.4, 2.2, 1)
 
-[node name="VendingMachine" type="StaticBody3D" collision_layer=1]
+[node name="VendingMachine" type="StaticBody3D"]
+collision_layer = 1
 script = ExtResource("1")
 item_scene = ExtResource("coin")
 
