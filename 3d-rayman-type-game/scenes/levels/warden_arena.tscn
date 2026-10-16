@@ -1,12 +1,12 @@
 [gd_scene format=3 uid="uid://cintqwi5ivrkd"]
 
 [ext_resource type="PackedScene" uid="uid://cqq8rvrab4ley" path="res://scenes/enemies/boss_warden.tscn" id="boss"]
-[ext_resource type="PackedScene" uid="uid://dfc8q7e2eq77g" path="res://scenes/props/platform_seed.tscn" id="seed"]
-[ext_resource type="PackedScene" uid="uid://gd4nqmfjlvu3" path="res://scenes/props/seed_socket.tscn" id="socket"]
-[ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="plat"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
 [ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
 [ext_resource type="PackedScene" uid="uid://b31dptaeqyaxd" path="res://scenes/props/throwable_keg.tscn" id="keg"]
-[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
+[ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="plat"]
+[ext_resource type="PackedScene" uid="uid://dfc8q7e2eq77g" path="res://scenes/props/platform_seed.tscn" id="seed"]
+[ext_resource type="PackedScene" uid="uid://gd4nqmfjlvu3" path="res://scenes/props/seed_socket.tscn" id="socket"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_top_color = Color(0.18, 0.16, 0.26, 1)
@@ -27,208 +27,261 @@ tonemap_mode = 2
 [sub_resource type="StandardMaterial3D" id="MatFloor"]
 albedo_color = Color(0.36, 0.34, 0.38, 1)
 
+[sub_resource type="StandardMaterial3D" id="MatDeck"]
+albedo_color = Color(0.5, 0.52, 0.46, 1)
+
 [sub_resource type="StandardMaterial3D" id="MatWall"]
 albedo_color = Color(0.26, 0.24, 0.28, 1)
 
 [sub_resource type="StandardMaterial3D" id="MatPillar"]
 albedo_color = Color(0.55, 0.48, 0.42, 1)
 
-[sub_resource type="StandardMaterial3D" id="MatDeck"]
-albedo_color = Color(0.5, 0.52, 0.46, 1)
+[node name="WardenArena" type="Node3D" unique_id=1615690083]
 
-; ─── THE WARDEN'S ARENA ──────────────────────────────────────────────────────
-;
-; Built so each of the boss's three phases has the thing it needs, and nothing
-; here is decoration:
-;
-;   PILLARS      five, plus the outer walls. Phase one is dodging so the boss
-;                charges into one, so the arena IS the weapon.
-;   POUND DECK   at y=8, with stairs. slam_power() is fall/12, so a drop from
-;                the deck is 0.67 against a `crack_power` of 0.5, while a
-;                standing hop is 0.21. The deck is the accessible route into
-;                phase two; a clean triple jump is the show-off route.
-;   A PILLAR AT  x=-18, hard against the deck's edge. Luring the boss to crash
-;   THE DECK     there is what lets you already be high up when it stuns.
-;   KEGS         phase three is a race for the seed, and a thrown keg is how
-;                you buy a head start.
-;   SOCKET       at the far end, with the platform and exit above it. The boss
-;                is beaten by DELIVERY, so the trip to the socket is the last
-;                phase of the fight rather than a victory lap.
-[node name="WardenArena" type="Node3D"]
-
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1611640731]
 environment = SubResource("Env")
 
-[node name="Sun" type="DirectionalLight3D" parent="."]
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=869105656]
 transform = Transform3D(0.86, 0.35, -0.37, 0, 0.73, 0.68, 0.51, -0.59, 0.63, 0, 40, 0)
 shadow_enabled = true
 
-[node name="Floor" type="CSGBox3D" parent="."]
+[node name="Floor" type="CSGBox3D" parent="." unique_id=1134798119]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0)
 use_collision = true
 size = Vector3(90, 2, 90)
 material = SubResource("MatFloor")
 
-[node name="PoundDeck" type="CSGBox3D" parent="."]
+[node name="PoundDeck" type="CSGBox3D" parent="." unique_id=1025046834]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 7.5, 0)
 use_collision = true
 size = Vector3(16, 1, 40)
 material = SubResource("MatDeck")
 
-[node name="Wall0" type="CSGBox3D" parent="."]
+[node name="Wall0" type="CSGBox3D" parent="." unique_id=814754876]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 44.5)
 use_collision = true
 size = Vector3(90, 8, 1)
 material = SubResource("MatWall")
 
-[node name="Wall1" type="CSGBox3D" parent="."]
+[node name="Wall1" type="CSGBox3D" parent="." unique_id=326214226]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -44.5)
 use_collision = true
 size = Vector3(90, 8, 1)
 material = SubResource("MatWall")
 
-[node name="Wall2" type="CSGBox3D" parent="."]
+[node name="Wall2" type="CSGBox3D" parent="." unique_id=1496535677]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44.5, 4, 0)
 use_collision = true
 size = Vector3(1, 8, 90)
 material = SubResource("MatWall")
 
-[node name="Wall3" type="CSGBox3D" parent="."]
+[node name="Wall3" type="CSGBox3D" parent="." unique_id=716740877]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44.5, 4, 0)
 use_collision = true
 size = Vector3(1, 8, 90)
 material = SubResource("MatWall")
 
-[node name="Pillar0" type="CSGBox3D" parent="." groups=["pillar"]]
+[node name="Pillar0" type="CSGBox3D" parent="." unique_id=2073770981 groups=["pillar"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 3, 14)
 use_collision = true
 size = Vector3(3, 6, 3)
 material = SubResource("MatPillar")
 
-[node name="Pillar1" type="CSGBox3D" parent="." groups=["pillar"]]
+[node name="Pillar1" type="CSGBox3D" parent="." unique_id=1875643573 groups=["pillar"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 3, -14)
 use_collision = true
 size = Vector3(3, 6, 3)
 material = SubResource("MatPillar")
 
-[node name="Pillar2" type="CSGBox3D" parent="." groups=["pillar"]]
+[node name="Pillar2" type="CSGBox3D" parent="." unique_id=84844713 groups=["pillar"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 3, 14)
 use_collision = true
 size = Vector3(3, 6, 3)
 material = SubResource("MatPillar")
 
-[node name="Pillar3" type="CSGBox3D" parent="." groups=["pillar"]]
+[node name="Pillar3" type="CSGBox3D" parent="." unique_id=1031558114 groups=["pillar"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 3, -14)
 use_collision = true
 size = Vector3(3, 6, 3)
 material = SubResource("MatPillar")
 
-[node name="Pillar4" type="CSGBox3D" parent="." groups=["pillar"]]
+[node name="Pillar4" type="CSGBox3D" parent="." unique_id=1296849111 groups=["pillar"]]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 3, 0)
 use_collision = true
 size = Vector3(3, 6, 3)
 material = SubResource("MatPillar")
 
-[node name="Step0" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0.40, -31.4)
+[node name="Pillar5" type="CSGBox3D" parent="." unique_id=1232037594 groups=["pillar"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13.602686, 3, 0)
+use_collision = true
+size = Vector3(3, 6, 3)
+material = SubResource("MatPillar")
+
+[node name="Step0" type="CSGBox3D" parent="." unique_id=1090393927]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0.4, -31.4)
 use_collision = true
 size = Vector3(6, 0.8, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step1" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0.80, -30.2)
+[node name="Step1" type="CSGBox3D" parent="." unique_id=1052342074]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0.8, -30.2)
 use_collision = true
 size = Vector3(6, 1.6, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step2" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1.20, -29.0)
+[node name="Step2" type="CSGBox3D" parent="." unique_id=1397336966]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1.2, -29)
 use_collision = true
 size = Vector3(6, 2.4, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step3" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1.60, -27.8)
+[node name="Step3" type="CSGBox3D" parent="." unique_id=1623677980]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1.6, -27.8)
 use_collision = true
 size = Vector3(6, 3.2, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step4" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.00, -26.6)
+[node name="Step4" type="CSGBox3D" parent="." unique_id=734064071]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2, -26.6)
 use_collision = true
-size = Vector3(6, 4.0, 1.2)
+size = Vector3(6, 4, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step5" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.40, -25.4)
+[node name="Step5" type="CSGBox3D" parent="." unique_id=1356081848]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.4, -25.4)
 use_collision = true
 size = Vector3(6, 4.8, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step6" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.80, -24.2)
+[node name="Step6" type="CSGBox3D" parent="." unique_id=937142806]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.8, -24.2)
 use_collision = true
 size = Vector3(6, 5.6, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step7" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 3.20, -23.0)
+[node name="Step7" type="CSGBox3D" parent="." unique_id=2147128019]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 3.2, -23)
 use_collision = true
 size = Vector3(6, 6.4, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step8" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 3.60, -21.8)
+[node name="Step8" type="CSGBox3D" parent="." unique_id=282936181]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 3.6, -21.8)
 use_collision = true
 size = Vector3(6, 7.2, 1.2)
 material = SubResource("MatDeck")
 
-[node name="Step9" type="CSGBox3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 4.00, -20.6)
+[node name="Step9" type="CSGBox3D" parent="." unique_id=1850411152]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 4, -20.6)
 use_collision = true
-size = Vector3(6, 8.0, 1.2)
+size = Vector3(6, 8, 1.2)
 material = SubResource("MatDeck")
 
-[node name="ExitDeck" type="CSGBox3D" parent="."]
+[node name="PoundDeck2" type="CSGBox3D" parent="." unique_id=2032102220]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 7.5, 0)
+use_collision = true
+size = Vector3(16, 1, 40)
+material = SubResource("MatDeck")
+
+[node name="Step10" type="CSGBox3D" parent="." unique_id=1155317516]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 0.4, -31.4)
+use_collision = true
+size = Vector3(6, 0.8, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step11" type="CSGBox3D" parent="." unique_id=233321117]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 0.8, -30.2)
+use_collision = true
+size = Vector3(6, 1.6, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step12" type="CSGBox3D" parent="." unique_id=1680367734]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 1.2, -29)
+use_collision = true
+size = Vector3(6, 2.4, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step13" type="CSGBox3D" parent="." unique_id=1285588168]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 1.6, -27.8)
+use_collision = true
+size = Vector3(6, 3.2, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step14" type="CSGBox3D" parent="." unique_id=1838068716]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 2, -26.6)
+use_collision = true
+size = Vector3(6, 4, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step15" type="CSGBox3D" parent="." unique_id=512485372]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 2.4, -25.4)
+use_collision = true
+size = Vector3(6, 4.8, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step16" type="CSGBox3D" parent="." unique_id=960602315]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 2.8, -24.2)
+use_collision = true
+size = Vector3(6, 5.6, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step17" type="CSGBox3D" parent="." unique_id=2018793680]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 3.2, -23)
+use_collision = true
+size = Vector3(6, 6.4, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step18" type="CSGBox3D" parent="." unique_id=298083756]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 3.6, -21.8)
+use_collision = true
+size = Vector3(6, 7.2, 1.2)
+material = SubResource("MatDeck")
+
+[node name="Step19" type="CSGBox3D" parent="." unique_id=1957544609]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 4, -20.6)
+use_collision = true
+size = Vector3(6, 8, 1.2)
+material = SubResource("MatDeck")
+
+[node name="ExitDeck" type="CSGBox3D" parent="." unique_id=2132998980]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 11.5, 38)
 use_collision = true
 size = Vector3(16, 1, 10)
 material = SubResource("MatDeck")
 
-[node name="Platform" parent="." instance=ExtResource("plat")]
+[node name="Platform" parent="." unique_id=1094601714 instance=ExtResource("plat")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 30)
-travel = Vector3(0, 11.4, 0)
 
-[node name="Socket" parent="." instance=ExtResource("socket")]
+[node name="Socket" parent="." unique_id=1614234804 instance=ExtResource("socket")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 30)
 platform_path = NodePath("../Platform")
 size = Vector3(10, 4, 10)
 
-[node name="Exit" parent="." instance=ExtResource("exit")]
+[node name="Exit" parent="." unique_id=2078155719 instance=ExtResource("exit")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12, 40)
 
-[node name="Warden" parent="." instance=ExtResource("boss")]
+[node name="Warden" parent="." unique_id=493482645 instance=ExtResource("boss")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
 crack_power = 0.5
 seed_path = NodePath("../Seed")
 
-[node name="Seed" parent="." instance=ExtResource("seed")]
+[node name="Seed" parent="." unique_id=1372409959 instance=ExtResource("seed")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -6)
 
-[node name="KegA" parent="." instance=ExtResource("keg")]
+[node name="KegA" parent="." unique_id=310502220 instance=ExtResource("keg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1, -24)
 
-[node name="KegB" parent="." instance=ExtResource("keg")]
+[node name="KegB" parent="." unique_id=587173867 instance=ExtResource("keg")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1, -24)
 
-[node name="CoinA" parent="." instance=ExtResource("coin")]
+[node name="CoinA" parent="." unique_id=1499648629 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.7, -28)
 value = 10
 
-[node name="CoinB" parent="." instance=ExtResource("coin")]
+[node name="CoinB" parent="." unique_id=1218340016 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.7, -28)
 value = 10
 
-[node name="CoinC" parent="." instance=ExtResource("coin")]
+[node name="CoinC" parent="." unique_id=1095226627 instance=ExtResource("coin")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 8.7, -10)
 value = 10
