@@ -73,13 +73,14 @@ file to be read.
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
     enemies/         walker, turret, bullet
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
-                     breakable block, treasure, level exit, transformer, grind rail
+                     breakable block, treasure, level exit, transformer, grind rail,
+                     priced gate, vending machine
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase), playground.tscn (momentum),
                      tree_fort_main.tscn, rail_yard_main.tscn and
-                     thief_arena_main.tscn (experiments)
-  tests/             moveset smoke test, plus throwaway level probes (fort, rail)
+                     thief_arena_main.tscn and market_yard_main.tscn (experiments)
+  tests/             moveset smoke test, plus throwaway level probes (fort, rail, market)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
 
@@ -209,6 +210,92 @@ menus, saving. Ask before starting any of these.
 
 
 
+
+## Money to spend mid-level (experiment, 2026-10-15)
+
+**Built because collectibles did not feel like they meant anything**, and the diagnosis matters more
+than the props do. Two structural reasons, neither of them a tuning problem:
+
+1. **The container rule guarantees recovery, and that is why there were no stakes.** Money a thief
+   takes never leaves the world, on purpose, so you cannot be locked out of affording the exit. But
+   that is the same rule that turns a loss into a detour. **Lockout-safety and stakes trade directly
+   against each other whenever the stake is the money itself.** So the answer is not to make money
+   riskier — it is to make money more *useful*, so losing it costs an opportunity rather than a
+   number.
+2. **The exit was the only sink, so its price was a binary gate.** Below the line nothing you
+   collected mattered until you crossed it; above the line nothing you collected mattered at all. In
+   a game about hoarding, **the next coin has to be worth something.** This was the bigger flaw, and
+   it had nothing to do with the thieves.
+
+So: two tills, and they are two deliberately different *kinds* of sink.
+
+| | |
+| --- | --- |
+| **`priced_gate.gd`** | a one-off. Converts money into access and then stops being a choice |
+| **`vending_machine.gd`** | repeatable. Keeps asking, so you decide again every time you walk past |
+
+That difference is the point of having both. A decision you make repeatedly is worth more than one
+you make once, and a gate alone is just a toll.
+
+### Both are opened by the SPIN, not by walking into them
+
+Two reasons, and the first is not negotiable: **a sink you can trigger by accident is a terrible
+sink.** Being charged 30 for brushing against a door would be infuriating. The second is that
+`spinnable` was already the documented extension point for exactly this — `spin_switch.gd` names "a
+gate" in its own list of things that should answer to a spin. So both props do the same two things
+anything spinnable does, and `player_abilities.gd` needed no change at all.
+
+**`retrigger_delay` is load-bearing on a till in a way it is not on a switch.** A spin chain is
+three spins, so without it one chain would pay three times or empty a machine — a quiet way of
+robbing the player. There is a check for it.
+
+### Game does the deducting, never the till
+
+Tills emit `Events.money_spent` and `game.gd` applies it, clamped at zero. Same reason the hit spill
+lives there: Game owns the running total, so it is the only place that can see whether a spend is
+affordable, and with money as the win condition a negative total is a lockout waiting to happen.
+
+**Worth knowing: the level exit does NOT go through this.** It only ever gated on the total and never
+actually deducted, which makes no observable difference because the level ends on the frame it opens
+— but it does mean "the exit charges you" is a threshold rather than a payment. That matters the
+moment anything happens *after* an exit.
+
+### The pricing rule, which is the actual level-design lever
+
+**Put something behind a gate worth clearly more than the gate costs, and price the exit so that
+paying up dips you below what the exit wants.** The scary part is not the 30 you handed over, it is
+walking around at 100 with an exit that wants 110.
+
+And **a gate must guard something optional, never the critical path.** A gate on the only route is a
+toll, not a decision.
+
+`scenes/market_yard_main.tscn` is the worked example, and its arithmetic is the content:
+
+```
+  safe plaza coins      16 x 5  =  80
+  coins among thieves   10 x 5  =  50
+  total on the floor            = 130
+  exit                          = 110
+  priced gate                   =  30, with a 70 chest behind it
+  garlic                        =  10 each, five in stock
+```
+
+Which gives three real plays instead of one: **hoard** (130 covers the 110 with 20 spare — tight
+enough that two thief hits you fail to recover means you cannot leave), **invest** (pay 30, be
+underfunded at 100 for a while, then the chest pays 70), or **survive** (garlic competes directly
+with both).
+
+### Two things found building it
+
+- **Set `emission_enabled` in the `.tscn`, not in code.** Both tills tint a *duplicate* of the
+  scene's material, and emission is a feature flag — part of what Godot keys a shader on. Switch it
+  on in code and the duplicate needs its own shader compiled, which is the stall documented under
+  **Things that will bite you**. Setting it in the scene keeps every duplicate on one shader.
+- **`_run()` in the smoke test is a single enormous scope**, so every local in it must be unique
+  against every other one in the whole function. A collision is a parse error, the script then fails
+  to load, and the scene runs with a null script and **never quits** — so it presents as the suite
+  hanging rather than as a typo. The suite is now 93 checks and about 110 seconds; if it keeps
+  growing, splitting `_run()` into per-experiment functions would fix both problems at once.
 ## Enemies that steal your money (experiment, 2026-10-15)
 
 **The user's idea, and it answers the no-death question better than anything previously proposed

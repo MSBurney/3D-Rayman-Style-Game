@@ -1,0 +1,218 @@
+[gd_scene format=3 uid="uid://dp4wk5jhhpwsy"]
+
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
+[ext_resource type="PackedScene" uid="uid://c750xarncoc8g" path="res://scenes/enemies/enemy_thief.tscn" id="thief"]
+[ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
+[ext_resource type="PackedScene" uid="uid://cyksqosrqlu4a" path="res://scenes/props/priced_gate.tscn" id="gate"]
+[ext_resource type="PackedScene" uid="uid://d24x0hrfuqs4w" path="res://scenes/props/vending_machine.tscn" id="vend"]
+[ext_resource type="PackedScene" uid="uid://c2ocooorlwkcr" path="res://scenes/props/treasure.tscn" id="chest"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+sky_top_color = Color(0.22, 0.26, 0.44, 1)
+sky_horizon_color = Color(0.8, 0.76, 0.68, 1)
+ground_bottom_color = Color(0.18, 0.17, 0.19, 1)
+ground_horizon_color = Color(0.8, 0.76, 0.68, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMat")
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_energy = 0.4
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="MatFloor"]
+albedo_color = Color(0.38, 0.37, 0.4, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatWall"]
+albedo_color = Color(0.3, 0.29, 0.33, 1)
+
+; ─── THE MARKET YARD ─────────────────────────────────────────────────────────
+;
+; Built to test ONE thing: does money mean more when there is somewhere to spend
+; it before the exit? So the arithmetic is the content, and it is deliberate.
+;
+;   safe plaza coins     16 x 5  =  80
+;   coins among thieves  10 x 5  =  50
+;   TOTAL ON THE FLOOR           = 130
+;   exit                         = 110
+;   priced gate                  =  30, and a 70 chest behind it
+;   garlic                       =  10 each, five in stock
+;
+; Which makes three real plays rather than one:
+;
+;   HOARD      130 covers the 110 exit with 20 to spare. Tight: lose two hits
+;              worth of money to a thief you fail to catch and you cannot leave
+;              until you kill it.
+;   INVEST     pay 30 for the gate and you are down to 100 with an exit that
+;              wants 110 — the scary part is not the 30, it is walking around
+;              underfunded — then the chest pays 70 and you leave with 60 spare.
+;   SURVIVE    garlic at 10 competes directly with both of the above.
+;
+; The gate guards an OPTIONAL chest, never the exit. A gate on the critical path
+; is a toll, not a decision.
+[node name="MarketYard" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.86, 0.35, -0.37, 0, 0.73, 0.68, 0.51, -0.59, 0.63, 0, 40, 0)
+shadow_enabled = true
+
+[node name="Floor" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0)
+use_collision = true
+size = Vector3(160, 2, 160)
+material = SubResource("MatFloor")
+
+[node name="Vendor" parent="." instance=ExtResource("vend")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, -32)
+price = 10
+stock = 5
+item_value = 1
+
+[node name="Exit" parent="." instance=ExtResource("exit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 34)
+price = 110
+
+[node name="Gate" parent="." instance=ExtResource("gate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, 24)
+price = 30
+
+[node name="Chest" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, 28)
+worth = 70
+
+[node name="AlcoveWest" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15.7, 4, 28)
+use_collision = true
+size = Vector3(0.6, 8, 8)
+material = SubResource("MatWall")
+
+[node name="AlcoveEast" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24.3, 4, 28)
+use_collision = true
+size = Vector3(0.6, 8, 8)
+material = SubResource("MatWall")
+
+[node name="AlcoveNorth" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 4, 32.3)
+use_collision = true
+size = Vector3(9.2, 8, 0.6)
+material = SubResource("MatWall")
+
+[node name="ThiefA" parent="." instance=ExtResource("thief")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.9, 0)
+
+[node name="ThiefB" parent="." instance=ExtResource("thief")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 6)
+
+[node name="ThiefC" parent="." instance=ExtResource("thief")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0.9, -4)
+
+[node name="PlazaCoin00" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.0, 0.7, -38.0)
+value = 5
+
+[node name="PlazaCoin01" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.0, 0.7, -33.3)
+value = 5
+
+[node name="PlazaCoin02" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.0, 0.7, -28.7)
+value = 5
+
+[node name="PlazaCoin03" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12.0, 0.7, -24.0)
+value = 5
+
+[node name="PlazaCoin04" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.0, 0.7, -38.0)
+value = 5
+
+[node name="PlazaCoin05" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.0, 0.7, -33.3)
+value = 5
+
+[node name="PlazaCoin06" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.0, 0.7, -28.7)
+value = 5
+
+[node name="PlazaCoin07" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.0, 0.7, -24.0)
+value = 5
+
+[node name="PlazaCoin08" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.0, 0.7, -38.0)
+value = 5
+
+[node name="PlazaCoin09" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.0, 0.7, -33.3)
+value = 5
+
+[node name="PlazaCoin10" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.0, 0.7, -28.7)
+value = 5
+
+[node name="PlazaCoin11" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.0, 0.7, -24.0)
+value = 5
+
+[node name="PlazaCoin12" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12.0, 0.7, -38.0)
+value = 5
+
+[node name="PlazaCoin13" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12.0, 0.7, -33.3)
+value = 5
+
+[node name="PlazaCoin14" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12.0, 0.7, -28.7)
+value = 5
+
+[node name="PlazaCoin15" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12.0, 0.7, -24.0)
+value = 5
+
+[node name="RiskCoin00" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14.0, 0.7, -8.0)
+value = 5
+
+[node name="RiskCoin01" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10.9, 0.7, 8.0)
+value = 5
+
+[node name="RiskCoin02" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7.8, 0.7, -8.0)
+value = 5
+
+[node name="RiskCoin03" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.7, 0.7, 8.0)
+value = 5
+
+[node name="RiskCoin04" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 0.7, -8.0)
+value = 5
+
+[node name="RiskCoin05" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0.7, 8.0)
+value = 5
+
+[node name="RiskCoin06" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.6, 0.7, -8.0)
+value = 5
+
+[node name="RiskCoin07" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.7, 0.7, 8.0)
+value = 5
+
+[node name="RiskCoin08" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10.8, 0.7, -8.0)
+value = 5
+
+[node name="RiskCoin09" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13.9, 0.7, 8.0)
+value = 5

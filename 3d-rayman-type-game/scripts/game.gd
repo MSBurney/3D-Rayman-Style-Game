@@ -60,6 +60,7 @@ func _ready() -> void:
 	Events.checkpoint_reached.connect(_on_checkpoint_reached)
 	Events.player_died.connect(_on_player_died)
 	Events.player_hurt.connect(_on_player_hurt)
+	Events.money_spent.connect(_on_money_spent)
 	Events.money_changed.emit(money)
 	_prewarm_effects()
 
@@ -105,6 +106,25 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_money_collected(value: int) -> void:
 	money += value
+	Events.money_changed.emit(money)
+
+
+## Something charged the player — a priced gate, a vending machine.
+##
+## Clamped HERE rather than at the till, for the same reason the hit spill is
+## here: Game owns the running total, so it is the only place that can see
+## whether the spend is affordable. A till that deducted for itself could push
+## the total negative and, with money as the win condition, that is a lockout.
+##
+## Note the level exit does NOT come through here. It only ever gated on the
+## total and never actually deducted, which makes no observable difference
+## because the level ends on the frame it opens — but it does mean "the exit
+## charges you" is a threshold rather than a payment. Worth knowing before
+## building anything that happens after an exit.
+func _on_money_spent(amount: int) -> void:
+	if amount <= 0:
+		return
+	money = maxi(money - amount, 0)
 	Events.money_changed.emit(money)
 
 ## A threat landed a hit. Knock money out of the player and scatter it on the

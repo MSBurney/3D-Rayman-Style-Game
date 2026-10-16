@@ -48,6 +48,19 @@ signal exit_refused(exit: Node3D, short: int)
 ## `exit_refused` exists rather than the exit just doing nothing.
 signal money_stolen(thief: Node3D, worth: int)
 
+## Something charged the player. `Game` is the only listener, because it owns the
+## running total and is therefore the only place that can clamp a spend to what
+## you actually have — the same reason the hit spill lives there. A till emits
+## this rather than reaching into Game itself.
+signal money_spent(amount: int)
+## A purchase went through. Carries what sold it and what it cost.
+signal purchase_made(what: Node3D, cost: int)
+## A purchase was refused, and by how much you were short.
+##
+## Exists for the same reason `exit_refused` does: a till that silently does
+## nothing when you cannot afford it is indistinguishable from a broken one.
+signal purchase_refused(what: Node3D, short: int)
+
 ## A spin attack tripped a switch. Wire a door to this and the door and the
 ## switch never have to know about each other.
 ##

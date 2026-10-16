@@ -30,6 +30,8 @@ func _ready() -> void:
 	Events.money_changed.connect(_on_money_changed)
 	Events.exit_refused.connect(_on_exit_refused)
 	Events.money_stolen.connect(_on_money_stolen)
+	Events.purchase_made.connect(_on_purchase_made)
+	Events.purchase_refused.connect(_on_purchase_refused)
 	Events.level_cleared.connect(_on_level_cleared)
 	Events.debug_toggled.connect(_on_debug_toggled)
 	debug_label.visible = false
@@ -113,6 +115,16 @@ func _on_exit_refused(_exit: Node3D, short: int) -> void:
 
 ## Says WHO took your money, because the coins going quiet on their own would
 ## read as a bug. Kill the thing named here and it drops the lot.
+func _on_purchase_made(what: Node3D, cost: int) -> void:
+	_message = "Paid %d at %s" % [cost, what.name]
+	_message_left = 1.8
+
+
+func _on_purchase_refused(_what: Node3D, short: int) -> void:
+	_message = "Not enough — %d short" % short
+	_message_left = 2.0
+
+
 func _on_money_stolen(thief: Node3D, worth: int) -> void:
 	_message = "%s took %d — kill it to get it back" % [thief.name, worth]
 	_message_left = 2.4

@@ -36,11 +36,14 @@ const RAIL := preload("res://scenes/props/grind_rail.tscn")
 ## as spilled without having to get hit for it.
 const COIN := preload("res://scenes/props/coin.tscn")
 const THIEF := preload("res://scenes/enemies/enemy_thief.tscn")
+## Spawned by the mid-level sink checks.
+const GATE := preload("res://scenes/props/priced_gate.tscn")
+const VEND := preload("res://scenes/props/vending_machine.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 86
+const EXPECTED_CHECKS := 93
 
 var player: Player
 var level: Node3D
@@ -1591,6 +1594,152 @@ func _run() -> void:
 	_check("a thief killed empty drops nothing",
 		empty_drops.is_empty(),
 		"drops %s, loose money %d -> %d" % [str(empty_drops), before_empty, _loose_coin_worth()])
+
+	# --------------------------------------------------- money to spend mid-level
+	#
+	# PricedGate and VendingMachine. Before these, the exit was the only sink in
+	# the game, which made its price a binary gate — below the line nothing you
+	# collected mattered until you crossed it, above the line nothing mattered at
+	# all. A till in the middle of a level gives the next coin a marginal use.
+	#
+	# Both are opened with the SPIN rather than by walking into them, so these
+	# checks drive a real spin. That matters: it is the only thing proving the
+	# props are actually reachable through `_trip_switches`, and a direct call to
+	# spin_hit() would pass with the group membership broken.
+	var gate := GATE.instantiate() as PricedGate
+	level.add_child(gate)
+	gate.global_position = Vector3(400, 0, -20)
+	await _step(3)
+
+	# --- short of the price: refused, loudly, and charged nothing.
+	_set_money(game, 10)
+	# Named for the gate, because `refusals` is already taken further up this
+	# function. _run() is one very long scope, so every local in it has to be
+	# unique against every other.
+	var gate_refusals: Array[int] = []
+	var on_refused := func(_what: Node3D, short: int) -> void: gate_refusals.append(short)
+	Events.purchase_refused.connect(on_refused)
+	_place(Vector3(400, 0.1, -22.0))
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(4)
+	_check("a priced gate refuses you when you are short",
+		not gate.paid and gate_refusals.size() == 1 and gate_refusals[0] == 20
+			and game.money == 10,
+		"paid=%s, refusals %s, money %d" % [gate.paid, str(gate_refusals), game.money])
+	Events.purchase_refused.disconnect(on_refused)
+	_release_all()
+	await _step(10)
+
+	# --- afford it and the money really leaves the total. Game does the
+	# deducting, not the gate — see Events.money_spent.
+	_set_money(game, 100)
+	# The gate's own retrigger lock is cleared by hand. It is 0.4s, set by the
+	# refusal above, and leaving it running makes this second spin do nothing at
+	# all — which reads as the payment being broken rather than as the press
+	# having been swallowed. Exactly the reason _place() resets the player's
+	# timers; props need the same treatment and _place cannot reach them.
+	gate._locked = 0.0
+	_place(Vector3(400, 0.1, -22.0))
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(6)
+	_check("paying a gate takes the money off your total",
+		gate.paid and game.money == 70,
+		"paid=%s, money 100 -> %d (price %d)" % [gate.paid, game.money, gate.price])
+
+	# --- and it stops being a wall. Checked on the collision rather than the
+	# visual: a gate that sinks out of sight but still blocks you is the worst
+	# possible outcome and would look completely fine.
+	await _step(40)
+	_check("a paid gate stops blocking the way",
+		gate.shape.disabled and gate.collision_layer == 0,
+		"shape disabled=%s, layer %d" % [gate.shape.disabled, gate.collision_layer])
+	gate.queue_free()
+	_release_all()
+	await _step(5)
+
+	# --- the machine: charges, and puts a real item on the floor. It dispenses an
+	# ordinary Coin set to garlic, so the healing path is the existing one.
+	var vendor := VEND.instantiate() as VendingMachine
+	level.add_child(vendor)
+	vendor.global_position = Vector3(400, 0, 20)
+	vendor.price = 10
+	vendor.stock = 1
+	await _step(3)
+	_set_money(game, 50)
+	var garlic_before := _garlic_count()
+	_place(Vector3(400, 0.1, 18.0))
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(6)
+	_check("a vending machine charges you and dispenses",
+		game.money == 40 and _garlic_count() == garlic_before + 1 and vendor.stock == 0,
+		"money 50 -> %d, garlic %d -> %d, stock left %d"
+			% [game.money, garlic_before, _garlic_count(), vendor.stock])
+	_release_all()
+	await _step(10)
+
+	# --- sold out: refuses, and charges nothing. The stock is already 0 from the
+	# purchase above, so this is the real follow-on state rather than a set-up.
+	var sold_out_refusals: Array[int] = []
+	var on_sold_out := func(_what: Node3D, short: int) -> void: sold_out_refusals.append(short)
+	Events.purchase_refused.connect(on_sold_out)
+	var money_before_empty: int = game.money
+	var garlic_before_empty := _garlic_count()
+	# Same as the gate: clear the 0.5s lock the purchase above left behind.
+	vendor._locked = 0.0
+	_place(Vector3(400, 0.1, 18.0))
+	Input.action_press("attack")
+	await _step(3)
+	Input.action_release("attack")
+	await _step(6)
+	_check("a machine with no stock refuses and charges nothing",
+		sold_out_refusals.size() == 1 and game.money == money_before_empty
+			and _garlic_count() == garlic_before_empty,
+		"refusals %s, money %d -> %d, garlic %d -> %d"
+			% [str(sold_out_refusals), money_before_empty, game.money,
+				garlic_before_empty, _garlic_count()])
+	Events.purchase_refused.disconnect(on_sold_out)
+	vendor.queue_free()
+	_release_all()
+	await _step(5)
+
+
+	# --- one spin buys ONE item, even though a chain is three spins. Without the
+	# machine's retrigger lock, a single chain would empty it and drain three
+	# times the money, which is a quiet way to rob the player.
+	var till := VEND.instantiate() as VendingMachine
+	level.add_child(till)
+	till.global_position = Vector3(400, 0, 40)
+	till.price = 10
+	till.stock = 3
+	await _step(3)
+	_set_money(game, 100)
+	_place(Vector3(400, 0.1, 38.0))
+	for i in 3:
+		Input.action_press("attack")
+		await _step(2)
+		Input.action_release("attack")
+		await _step(3)
+	await _step(6)
+	_check("a chain of three spins buys one item, not three",
+		till.stock == 2 and game.money == 90,
+		"stock 3 -> %d, money 100 -> %d" % [till.stock, game.money])
+	till.queue_free()
+	_release_all()
+	await _step(5)
+	# --- a spend can never push you negative. With money as the win condition a
+	# negative total is a lockout waiting to happen, which is why Game clamps it
+	# rather than the till.
+	_set_money(game, 5)
+	Events.money_spent.emit(500)
+	await _step(3)
+	_check("a spend cannot push your money negative", game.money == 0,
+		"had 5, spent 500, left with %d" % game.money)
 ## Builds a straight rail starting at `at` and running `run` metres from there,
 ## as a world-space offset, and returns it.
 ##
@@ -1631,3 +1780,26 @@ func _loose_coin_worth() -> int:
 		if coin != null and not coin.is_queued_for_deletion():
 			total += coin.value
 	return total
+
+
+## Sets the running total and tells everything that cares.
+##
+## The emit is not optional. Every till caches the total from `money_changed`
+## rather than asking Game for it each frame — see level_exit.gd on why — so a
+## check that only assigns `game.money` leaves the gate still believing you are
+## broke, and then refuses a purchase you can clearly afford.
+func _set_money(game: Node, amount: int) -> void:
+	game.money = amount
+	Events.money_changed.emit(amount)
+
+
+## How many garlic pickups are lying around. Garlic rather than coins because a
+## vending machine sells healing, and because the suite spills real coins all
+## over the place and they would drown the signal.
+func _garlic_count() -> int:
+	var found := 0
+	for node in get_tree().get_nodes_in_group(&"coin"):
+		var coin := node as Coin
+		if coin != null and not coin.is_queued_for_deletion() and coin.kind == Coin.Kind.GARLIC:
+			found += 1
+	return found
