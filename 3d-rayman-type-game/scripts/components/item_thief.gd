@@ -40,6 +40,17 @@ signal dropped(item: PlatformSeed)
 @export var greed_radius: float = 20.0
 ## How close it has to get to pick the object up.
 @export var grab_distance: float = 1.5
+## How long after letting go before it can take anything again.
+##
+## Not optional, and this project's FOURTH encounter with the same trap after
+## `ledge_cooldown`, the spin's `regrab_delay` and `grind_relatch_delay`. Drop
+## something and you are standing right next to it, so without a blind spell the
+## very next frame picks it straight back up. On a boss that is fatal to the
+## whole fight: cracking it open dropped the seed and it re-swallowed it
+## instantly, so the phase change was real and completely invisible.
+##
+## Assume anything that can let go of a thing needs one of these.
+@export var relatch_delay: float = 1.5
 @export var sfx_steal: AudioStream
 
 ## What it is carrying, or null.
@@ -48,6 +59,7 @@ var held: PlatformSeed = null
 var _host: Node3D = null
 var _health: HealthComponent = null
 var _target: PlatformSeed = null
+var _relatch: float = 0.0
 
 
 func _ready() -> void:
@@ -63,7 +75,8 @@ func _ready() -> void:
 		_health.died.connect(_on_died)
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
+	_relatch -= delta
 	if _host == null or not _can_act():
 		return
 
@@ -76,11 +89,15 @@ func _physics_process(_delta: float) -> void:
 			held = null
 		return
 
+	# Blind for a moment after letting go. See relatch_delay.
+	if _relatch > 0.0:
+		_target = null
+		return
 	_target = _nearest_loose()
 	if _target == null:
 		return
 	if _host.global_position.distance_to(_target.global_position) <= grab_distance:
-		_take(_target)
+		take(_target)
 		_target = null
 
 
@@ -118,7 +135,11 @@ func _nearest_loose() -> PlatformSeed:
 	return best
 
 
-func _take(item: PlatformSeed) -> void:
+## Takes `item` whether or not this thief went looking for it.
+##
+## Public because a boss takes the seed back off the player on contact rather
+## than by walking over to it — see boss_warden.gd.
+func take(item: PlatformSeed) -> void:
 	item.pick_up(_host)
 	held = item
 	_play_steal()
@@ -133,6 +154,7 @@ func drop_held() -> void:
 		return
 	var item := held
 	held = null
+	_relatch = relatch_delay
 	item.drop()
 	dropped.emit(item)
 

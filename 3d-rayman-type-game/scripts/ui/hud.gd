@@ -31,6 +31,8 @@ func _ready() -> void:
 	Events.exit_refused.connect(_on_exit_refused)
 	Events.money_stolen.connect(_on_money_stolen)
 	Events.item_stolen.connect(_on_item_stolen)
+	Events.boss_refused.connect(_on_boss_refused)
+	Events.boss_phase.connect(_on_boss_phase)
 	Events.purchase_made.connect(_on_purchase_made)
 	Events.purchase_refused.connect(_on_purchase_refused)
 	Events.level_cleared.connect(_on_level_cleared)
@@ -116,6 +118,23 @@ func _on_exit_refused(_exit: Node3D, short: int) -> void:
 
 ## Says WHO took your money, because the coins going quiet on their own would
 ## read as a bug. Kill the thing named here and it drops the lot.
+## A refused attack on a boss, and what would have worked.
+##
+## Printed rather than left to the clang, because "wrong tool" and "broken
+## boss" look identical otherwise. Short cooldown so a spin chain does not
+## stack three copies of the same line.
+func _on_boss_refused(_boss: Node3D, hint: String) -> void:
+	if _message == hint and _message_left > 1.2:
+		return
+	_message = hint
+	_message_left = 2.0
+
+
+func _on_boss_phase(_boss: Node3D, phase: String, hint: String) -> void:
+	_message = "%s — %s" % [phase, hint]
+	_message_left = 3.0
+
+
 func _on_item_stolen(thief: Node3D, item: Node3D) -> void:
 	_message = "%s has the %s — kill it to get it back" % [thief.name, item.name]
 	_message_left = 3.0

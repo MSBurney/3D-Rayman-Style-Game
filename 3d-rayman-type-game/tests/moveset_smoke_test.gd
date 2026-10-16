@@ -44,11 +44,12 @@ const SEED := preload("res://scenes/props/platform_seed.tscn")
 const SOCKET := preload("res://scenes/props/seed_socket.tscn")
 const PLATFORM := preload("res://scenes/props/moving_platform.tscn")
 const SNATCHER := preload("res://scenes/enemies/enemy_snatcher.tscn")
+const BOSS := preload("res://scenes/enemies/boss_warden.tscn")
 
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 101
+const EXPECTED_CHECKS := 107
 
 var player: Player
 var level: Node3D
@@ -1936,6 +1937,131 @@ func _run() -> void:
 	lift.queue_free()
 	socket.queue_free()
 	seed_pad.queue_free()
+	await _step(5)
+
+	# --------------------------------------------------------------- the boss
+	#
+	# BossWarden. It has NO health: you beat it by taking the seed and delivering
+	# it, so the hostage system is its health bar. tests/warden_probe.gd drives
+	# the whole fight in the real arena; these are the rules that could break
+	# silently without the sequence visibly failing.
+	var warden_pad := PLATFORM.instantiate() as MovingPlatform
+	warden_pad.hide_until_active = false
+	warden_pad.travel = Vector3.ZERO
+	level.add_child(warden_pad)
+	warden_pad.global_position = Vector3(600, 0, 0)
+	var warden_seed := SEED.instantiate() as PlatformSeed
+	level.add_child(warden_seed)
+	warden_seed.global_position = Vector3(600, 1.0, 0)
+	var warden := BOSS.instantiate() as BossWarden
+	level.add_child(warden)
+	warden.global_position = Vector3(600, 0.4, 0)
+	# Assigned directly: `seed_path` is resolved in _ready() and so would have to
+	# be set before the node entered the tree.
+	warden._seed = warden_seed
+	warden._grab_seed()
+	# Contact damage off for the duration. Not to make it easier — with it on the
+	# player is knocked into HURT, `handle_input` stops being called, and the
+	# auto-carry check below would pass without ever having run.
+	warden.hurtbox.monitoring = false
+	await _step(8)
+
+	# --- you cannot simply walk up and take the seed off it. This guards a change
+	# to PlayerAbilities._nearest_carryable that affects every carryable: without
+	# it the boss fight ends before it starts, and so does every snatcher.
+	var boss_has_it := warden.snatcher.held == warden_seed
+	_place(Vector3(600, 0.6, -0.5))
+	await _step(16)
+	_check("the player cannot take the seed off a boss",
+		boss_has_it and player.abilities.carried == null
+			and warden.snatcher.held == warden_seed,
+		"boss had it=%s, player carrying=%s, boss still has it=%s"
+			% [boss_has_it, player.abilities.carried != null,
+				warden.snatcher.held == warden_seed])
+
+	# --- the spin is refused in EVERY phase, and says what to do instead. The
+	# player's default attack being useless is the point; the hint is what keeps
+	# that fair rather than opaque.
+	var warden_hints: Array[String] = []
+	var on_boss_refused := func(_b: Node3D, h: String) -> void: warden_hints.append(h)
+	Events.boss_refused.connect(on_boss_refused)
+	for p in [BossWarden.Phase.ARMOURED, BossWarden.Phase.STUNNED, BossWarden.Phase.CRACKED]:
+		warden._set_phase(p)
+		warden.spin_hit(player)
+		await _step(3)
+	Events.boss_refused.disconnect(on_boss_refused)
+	_check("the spin is refused in every phase, with a hint",
+		warden_hints.size() == 3 and not warden_hints.has(""),
+		"%d hints: %s" % [warden_hints.size(), str(warden_hints.size())])
+
+	# --- only a hard pound, and only on a stunned boss. Three outcomes from one
+	# move, which is what makes the pound a skill here rather than a button.
+	warden._set_phase(BossWarden.Phase.ARMOURED)
+	Events.slam_landed.emit(warden.global_position, 1.0)
+	await _step(3)
+	var armour_held := warden.phase == BossWarden.Phase.ARMOURED
+	warden._set_phase(BossWarden.Phase.STUNNED)
+	Events.slam_landed.emit(warden.global_position, warden.crack_power * 0.5)
+	await _step(3)
+	var weak_refused := warden.phase == BossWarden.Phase.STUNNED
+	Events.slam_landed.emit(warden.global_position, 1.0)
+	await _step(4)
+	_check("only a hard pound on a stunned boss cracks it",
+		armour_held and weak_refused and warden.phase == BossWarden.Phase.CRACKED,
+		"armoured survived=%s, weak refused=%s, hard cracked=%s"
+			% [armour_held, weak_refused, warden.phase == BossWarden.Phase.CRACKED])
+
+	# --- a thief cannot re-take what it just let go of. The fourth appearance of
+	# this trap, and the one where it mattered most: cracking the boss open drops
+	# the seed at its own feet, so without the delay it re-swallowed it on the
+	# next frame and the phase change was real but completely invisible.
+	warden.snatcher.relatch_delay = 0.5
+	warden._set_phase(BossWarden.Phase.ARMOURED)
+	warden.snatcher._relatch = 0.0
+	warden._grab_seed()
+	await _step(4)
+	warden._set_phase(BossWarden.Phase.CRACKED)
+	await _step(5)
+	var blind_after_drop := warden.snatcher.held == null
+	await _step(60)
+	var retaken_later := warden.snatcher.held == warden_seed
+	_check("a thief cannot re-take what it just dropped",
+		blind_after_drop and retaken_later,
+		"blind right after=%s, took it back once the delay passed=%s"
+			% [blind_after_drop, retaken_later])
+
+	# --- the stun window closes on its own. That is the pressure in phase two:
+	# no clock on the fight, only on each opening you make.
+	warden._set_phase(BossWarden.Phase.STUNNED)
+	warden._stun_left = 0.2
+	await _step(25)
+	_check("the stun window closes on its own",
+		warden.phase == BossWarden.Phase.ARMOURED,
+		"phase=%s" % BossWarden.Phase.keys()[warden.phase])
+
+	# --- THE FAIL STATE: caught carrying the seed and it goes straight back,
+	# costing a phase rather than a life.
+	warden.snatcher.drop_held()
+	warden.snatcher._relatch = 99.0
+	warden_seed.global_position = Vector3(600, 1.0, 0)
+	await _step(6)
+	_place(Vector3(600, 0.6, -0.5))
+	await _step(16)
+	var player_had := player.abilities.carried == warden_seed
+	warden._set_phase(BossWarden.Phase.CRACKED)
+	warden.snatcher._relatch = 0.0
+	warden._hit_cooldown = 0.0
+	warden._on_hurtbox_entered(player)
+	await _step(5)
+	_check("caught with the seed, the boss takes it back and re-armours",
+		player_had and warden.snatcher.held == warden_seed
+			and warden.phase == BossWarden.Phase.ARMOURED,
+		"player had it=%s, boss has it now=%s, phase=%s"
+			% [player_had, warden.snatcher.held == warden_seed,
+				BossWarden.Phase.keys()[warden.phase]])
+	warden.queue_free()
+	warden_seed.queue_free()
+	warden_pad.queue_free()
 	await _step(5)
 ## Builds a straight rail starting at `at` and running `run` metres from there,
 ## as a world-space offset, and returns it.

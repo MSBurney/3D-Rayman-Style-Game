@@ -78,6 +78,9 @@ func _physics_process(_delta: float) -> void:
 	if platform != null:
 		platform.activate()
 	filled.emit(seed)
+	# Announced on the bus as well as locally, so a boss can learn it has lost
+	# without either of them holding a reference to the other.
+	Events.seed_delivered.emit(self, seed)
 
 
 func used() -> bool:

@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://d0f8nksx444gh"]
+
+[ext_resource type="Script" path="res://tests/warden_probe.gd" id="1"]
+
+[node name="WardenProbe" type="Node"]
+script = ExtResource("1")

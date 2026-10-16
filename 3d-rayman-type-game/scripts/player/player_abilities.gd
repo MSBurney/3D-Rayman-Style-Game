@@ -304,6 +304,15 @@ func _nearest_carryable(radius: float) -> Node3D:
 		var body := node as Node3D
 		if body == null or not body.has_method(&"pick_up"):
 			continue
+		# Something already in SOMEBODY ELSE'S hands is not available.
+		#
+		# Without this you can walk up to a boss holding the seed and simply take
+		# it off it, and the magnet on a spin can yank it across the arena — which
+		# ends a boss fight before it starts. The `has_method` guard is what keeps
+		# the keg working: it has no idea whether it is held, and nothing ever
+		# holds a keg but the player anyway.
+		if body.has_method(&"is_held") and body.call(&"is_held"):
+			continue
 		var d := origin.distance_squared_to(body.global_position)
 		if d < best_distance:
 			best_distance = d

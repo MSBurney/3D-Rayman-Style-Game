@@ -72,7 +72,7 @@ file to be read.
     components/      health, thrown_flight, coin_thief, item_thief (drop-in Nodes,
                      no matching scene)
     player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
-    enemies/         walker, turret, bullet
+    enemies/         walker, turret, bullet, boss_warden
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
                      breakable block, treasure, level exit, transformer, grind rail,
                      priced gate, vending machine, platform seed, seed socket,
@@ -82,9 +82,9 @@ file to be read.
                      main.tscn (moveset showcase), playground.tscn (momentum),
                      tree_fort_main.tscn, rail_yard_main.tscn and
                      thief_arena_main.tscn, market_yard_main.tscn and
-                     hostage_pit_main.tscn (experiments)
+                     hostage_pit_main.tscn and warden_arena_main.tscn (experiments)
   tests/             moveset smoke test, plus throwaway level probes (fort, rail,
-                     market, pit)
+                     market, pit, warden)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
 
@@ -177,6 +177,14 @@ site, but they are worth knowing up front:
   `constant_linear_velocity` instead: that is what a `CharacterBody3D` reads to know its floor is
   moving, and without it a sideways platform slides out from under the player even though a
   vertical one appears to work (floor snapping keeps catching up with it).
+- **Anything that can LET GO of a thing needs a blind spell before it can take that thing again.**
+  Four for four in this codebase now: `ledge_cooldown`, the spin's `regrab_delay`,
+  `grind_relatch_delay`, and `ItemThief.relatch_delay`. The shape is always the same — you let go
+  while standing right next to the thing, so the very next frame picks it straight back up, and the
+  release looks like it did nothing at all. The boss was the worst case: cracking it open dropped
+  the seed at its own feet and it re-swallowed it on the following frame, so the phase change was
+  genuinely happening and completely invisible. Assume the next one needs a delay too, and give it
+  one before testing rather than after.
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
 - **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
@@ -234,6 +242,85 @@ menus, saving. Ask before starting any of these.
 
 
 
+
+## The first boss (experiment, 2026-10-16)
+
+**The thing every system so far was pointing at, and the historical sore point of the Wario Land
+games.** `scripts/enemies/boss_warden.gd`, in `scenes/warden_arena_main.tscn`.
+
+### Two claims, and the second one is the useful half
+
+**It has NO health, and you do not kill it.** You beat it by taking the seed off it and delivering
+that seed to the socket — so **the hostage system is its health bar**, and the fight ends on a
+specific act rather than on an accumulation of hits. A boss is a gate; this one is a gate
+mechanically rather than narratively, because the exit is up there and the platform is the only way
+up and the seed is in its hands.
+
+**And no-death was only half of why those bosses failed.** The deeper problem is that they never
+told you what they wanted, so you flailed until something worked. So every refusal here goes out on
+`Events.boss_refused` with a line saying what WOULD work, and the HUD prints it:
+
+> *"Not hard enough — pound it from higher up"*
+
+That near miss is the most valuable string in the fight: the move was right and only the height was
+wrong, and a player told that goes looking for somewhere to fall from. **A refused attack has to
+read as "wrong tool", never as "no effect"** — the same rule that makes a refused `BreakableBlock`
+shake instead of sitting there. Treat the hints as mechanics, not flavour. A phase without one is a
+phase the player has to brute-force.
+
+### Three phases, three different verbs, and the spin never works
+
+| phase | the lock | what opens it |
+| --- | --- | --- |
+| **ARMOURED** | charges in locked straight lines, refuses everything | dodge so it crashes into a **pillar** |
+| **STUNNED** | a closing window | a **ground pound** with `slam_power` over `crack_power` |
+| **CRACKED** | it drops the seed and races you for it | **carry it to the socket**, with a thrown keg to buy time |
+
+**The spin is refused in all three**, deliberately. The player's default attack being useless is
+what forces the other verbs to be learned, and it is only fair because every refusal announces the
+alternative.
+
+**The charge direction is LOCKED when the charge starts and never corrected.** A charge that steers
+cannot be dodged, so the arena would stop being part of the fight — and the arena is the whole of
+phase one.
+
+**It only stuns on pillars, not on the outer walls.** It stunned on any wall in the first version,
+which meant it did phase one for the player: it wandered into a wall on its own and nobody ever had
+to dodge anything. A level marks what counts by putting it in the `pillar` group — and note the
+collider is the internal `StaticBody3D` a `CSGBox3D` makes for its collision, so the group is
+checked on the parent too.
+
+### The fail state, and there is no timer anywhere in it
+
+Hit you and it takes money (`contact_coin_cost` 25). Hit you **while you are carrying the seed** and
+it takes the seed back and re-armours: **you lose a phase, not a life.** WL4 bolted a timer onto its
+bosses as a patch and this file has said so since the transformations went in, so there is no clock
+on the fight — only on each opening you make, because the stun window closes on its own.
+
+### The arena is tuned, not decorated
+
+`slam_power()` is `fall / 12`, so the measured numbers are:
+
+| | |
+| --- | --- |
+| a standing hop | 0.21 |
+| `crack_power` | **0.50** |
+| a drop from the pound deck at y=8 | **0.70** |
+
+The deck is the accessible route into phase two and a clean triple jump is the show-off route,
+which is the shape to keep: **beatable by a player who has not mastered everything, faster by one
+who has.** The pillar at `x=-18` sits hard against the deck's edge on purpose — luring the boss to
+crash *there* is what lets you already be up high at the moment it stuns.
+
+### What to watch for in play
+
+- **Phase three is the one most likely to be wrong.** It is a straight race for the seed, and the
+  boss moves at `charge_speed * 0.72`. If it always wins, the dial is that multiplier or
+  `ItemThief.relatch_delay` (2.5 on the boss, 1.5 by default) rather than making it weaker.
+- **Nothing yet uses the kegs**, so whether throwing one is actually worth the detour is unproven.
+  If it is not, phase three is a footrace rather than a decision.
+- **It cannot be killed at all**, which means a player who gives up has no way to clear the arena.
+  That is deliberate, but it does mean the only exit from a bad attempt is to walk away or restart.
 ## Enemies that hold the level hostage (experiment, 2026-10-16)
 
 **The user's idea, and it is the first version of "enemies steal things" with real stakes in it.**

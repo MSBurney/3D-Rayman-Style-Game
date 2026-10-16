@@ -58,6 +58,19 @@ signal money_spent(amount: int)
 ## enemy wandering off with the way up has to be identifiable or the level just
 ## appears to be broken.
 signal item_stolen(thief: Node3D, item: Node3D)
+## A seed reached a socket and raised its platform. Carries both, so a boss can
+## know it has lost without holding a reference to the socket.
+signal seed_delivered(socket: Node3D, seed: Node3D)
+## A boss refused an attack, with a line saying what WOULD work.
+##
+## The hint is the mechanic, not flavour. Wario Land's bosses are criticised for
+## no-death, but the deeper problem is that they never told you what they
+## wanted, so you flailed until something worked. A refused hit has to read as
+## "wrong tool", never as "no effect" — the same rule that makes a refused
+## breakable block shake.
+signal boss_refused(boss: Node3D, hint: String)
+## A boss changed phase. `hint` says what to try next.
+signal boss_phase(boss: Node3D, phase: String, hint: String)
 ## A purchase went through. Carries what sold it and what it cost.
 signal purchase_made(what: Node3D, cost: int)
 ## A purchase was refused, and by how much you were short.
