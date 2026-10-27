@@ -1,0 +1,191 @@
+[gd_scene format=3 uid="uid://bbodgg77e8myd"]
+
+[ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
+[ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="wall"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+sky_top_color = Color(0.32, 0.52, 0.78, 1)
+sky_horizon_color = Color(0.86, 0.84, 0.76, 1)
+ground_bottom_color = Color(0.24, 0.22, 0.2, 1)
+ground_horizon_color = Color(0.86, 0.84, 0.76, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMat")
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_energy = 0.42
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="MatGround"]
+albedo_color = Color(0.46, 0.46, 0.44, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatRamp"]
+albedo_color = Color(0.58, 0.5, 0.38, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatTower"]
+albedo_color = Color(0.4, 0.42, 0.5, 1)
+
+[node name="GreyboxRoom" type="Node3D" unique_id=2077389015]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=940844345]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1409995719]
+transform = Transform3D(0.86, 0.35, -0.37, 0, 0.73, 0.68, 0.51, -0.59, 0.63, 0, 40, 0)
+shadow_enabled = true
+
+[node name="GroundSouth" type="CSGBox3D" parent="." unique_id=1948847050]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, -25)
+use_collision = true
+size = Vector3(1000, 2, 1000)
+material = SubResource("MatGround")
+
+[node name="Ramp" type="CSGBox3D" parent="." unique_id=1190217802]
+transform = Transform3D(1, 0, 0, 0, 0.9659, -0.2588, 0, 0.2588, 0.9659, 0, 3.276, -15.194)
+use_collision = true
+size = Vector3(14, 1.5, 31)
+material = SubResource("MatRamp")
+
+[node name="SlamTower" type="CSGBox3D" parent="." unique_id=2086730353]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 7, -4)
+use_collision = true
+size = Vector3(8, 14, 8)
+material = SubResource("MatTower")
+
+[node name="BreakWall" parent="." unique_id=1305332187 instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 4)
+break_speed = 22.0
+require_spin_step = -1
+require_slam_power = -1.0
+
+[node name="CrumbleSlab" parent="." unique_id=981438592 instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 32)
+
+[node name="TowerStep0" type="CSGBox3D" parent="." unique_id=880199996]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 0.7, -19.4)
+use_collision = true
+size = Vector3(6, 1.4, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep1" type="CSGBox3D" parent="." unique_id=1127730460]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.4, -18.2)
+use_collision = true
+size = Vector3(6, 2.8, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep2" type="CSGBox3D" parent="." unique_id=1143360849]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 2.1, -17)
+use_collision = true
+size = Vector3(6, 4.2, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep3" type="CSGBox3D" parent="." unique_id=1886588578]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 2.8, -15.8)
+use_collision = true
+size = Vector3(6, 5.6, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep4" type="CSGBox3D" parent="." unique_id=247830660]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 3.5, -14.6)
+use_collision = true
+size = Vector3(6, 7, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep5" type="CSGBox3D" parent="." unique_id=1981708017]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 4.2, -13.4)
+use_collision = true
+size = Vector3(6, 8.4, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep6" type="CSGBox3D" parent="." unique_id=144746606]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 4.9, -12.2)
+use_collision = true
+size = Vector3(6, 9.8, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep7" type="CSGBox3D" parent="." unique_id=822865220]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 5.6, -11)
+use_collision = true
+size = Vector3(6, 11.2, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep8" type="CSGBox3D" parent="." unique_id=1192807149]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 6.3, -9.8)
+use_collision = true
+size = Vector3(6, 12.6, 1.2)
+material = SubResource("MatTower")
+
+[node name="TowerStep9" type="CSGBox3D" parent="." unique_id=1267398889]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 7, -8.6)
+use_collision = true
+size = Vector3(6, 14, 1.2)
+material = SubResource("MatTower")
+
+[node name="BackStep0" type="CSGBox3D" parent="." unique_id=196147146]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0.4, -41.4)
+use_collision = true
+size = Vector3(6, 0.8, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep1" type="CSGBox3D" parent="." unique_id=1753857220]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0.8, -40.2)
+use_collision = true
+size = Vector3(6, 1.6, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep2" type="CSGBox3D" parent="." unique_id=825130683]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.2, -39)
+use_collision = true
+size = Vector3(6, 2.4, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep3" type="CSGBox3D" parent="." unique_id=48788463]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1.6, -37.8)
+use_collision = true
+size = Vector3(6, 3.2, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep4" type="CSGBox3D" parent="." unique_id=1449968498]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 2, -36.6)
+use_collision = true
+size = Vector3(6, 4, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep5" type="CSGBox3D" parent="." unique_id=1760098361]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 2.4, -35.4)
+use_collision = true
+size = Vector3(6, 4.8, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep6" type="CSGBox3D" parent="." unique_id=1455397866]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 2.8, -34.2)
+use_collision = true
+size = Vector3(6, 5.6, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep7" type="CSGBox3D" parent="." unique_id=439339552]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 3.2, -33)
+use_collision = true
+size = Vector3(6, 6.4, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep8" type="CSGBox3D" parent="." unique_id=2037083481]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 3.6, -31.8)
+use_collision = true
+size = Vector3(6, 7.2, 1.2)
+material = SubResource("MatGround")
+
+[node name="BackStep9" type="CSGBox3D" parent="." unique_id=1810395023]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 4, -30.6)
+use_collision = true
+size = Vector3(6, 8, 1.2)
+material = SubResource("MatGround")
+
+[node name="RampLanding" type="CSGBox3D" parent="." unique_id=1517027428]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 7.6, -30)
+use_collision = true
+size = Vector3(26, 0.8, 4)
+material = SubResource("MatGround")

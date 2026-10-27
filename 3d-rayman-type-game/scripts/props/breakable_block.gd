@@ -102,8 +102,12 @@ func _physics_process(delta: float) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if broken_open:
 		return
-	var player := body as Player
-	if player == null:
+	# Duck-typed rather than `body as Player`, so the whole prop library works
+	# with BOTH controllers while the modal rewrite (heavy_player.gd) is proven
+	# alongside the old one. What a block needs is the pre-collision accessors,
+	# not a particular class.
+	var player := body as CharacterBody3D
+	if player == null or not player.has_method(&"approach_speed"):
 		return
 	# approach_speed(), NOT player.velocity. Running into the block means
 	# move_and_slide() has already zeroed the horizontal velocity by the time this
@@ -114,7 +118,7 @@ func _on_body_entered(body: Node3D) -> void:
 	#
 	# Horizontal only, deliberately: a block in a wall should not care that you
 	# were also falling, or a plain drop would open a wall you barely touched.
-	var speed := player.approach_speed()
+	var speed: float = player.call(&"approach_speed")
 	if speed < break_speed:
 		_refuse()
 		return
@@ -150,7 +154,7 @@ func _on_slam_landed(at: Vector3, force: float) -> void:
 
 
 ## Opens up. `through` is whoever did it, so their momentum can be preserved.
-func _break(through: Player) -> void:
+func _break(through: CharacterBody3D) -> void:
 	broken_open = true
 	_reset_left = reset_delay
 	shape.set_deferred(&"disabled", true)
@@ -162,7 +166,7 @@ func _break(through: Player) -> void:
 		# already stopped the player dead against the block, so `velocity` is zero
 		# and scaling it keeps nothing. The whole reason for arriving fast is that
 		# you get to keep going, so the speed has to be put back explicitly.
-		var kept := through.approach_velocity() * speed_kept
+		var kept: Vector3 = through.call(&"approach_velocity") * speed_kept
 		through.velocity.x = kept.x
 		through.velocity.z = kept.z
 

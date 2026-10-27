@@ -26,6 +26,15 @@ extends Node3D
 @export var speed_fov_reference: float = 14.0
 @export var base_fov: float = 75.0
 
+@export_subgroup("Shake")
+## Screenshake, driven by impacts. Part of the weight-feedback layer rather
+## than decoration: "sluggish" and "weighty" are the same numbers with
+## different presentation, so this ships with the greybox, not with the polish.
+@export var shake_strength: float = 0.22
+@export var shake_decay: float = 8.0
+
+var _shake: float = 0.0
+
 var yaw: float = 0.0
 var pitch: float = -0.15
 
@@ -77,6 +86,19 @@ func _process(delta: float) -> void:
 		camera.fov = lerpf(camera.fov, base_fov + speed_fov_bonus * t, 1.0 - exp(-6.0 * delta))
 
 	rotation = Vector3(pitch, yaw, 0.0)
+
+	# Applied through the camera's OWN offsets rather than its position, because
+	# a SpringArm3D owns its child's transform and would fight any position set
+	# here — the shake would be silently cancelled every frame.
+	_shake = lerpf(_shake, 0.0, 1.0 - exp(-shake_decay * delta))
+	var kick := _shake * shake_strength
+	camera.h_offset = randf_range(-kick, kick)
+	camera.v_offset = randf_range(-kick, kick)
+
+
+## Knock the camera about. Impacts call this; bigger `amount` is a bigger hit.
+func shake(amount: float) -> void:
+	_shake = maxf(_shake, amount)
 
 ## Yaw-only basis. The player uses this so stick directions mean what they look
 ## like on screen, which is the whole reason a 3D platformer camera exists.

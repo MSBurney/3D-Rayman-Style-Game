@@ -3,9 +3,55 @@
 A 3D platformer in Godot **4.7.2**, GL Compatibility renderer. The Godot project lives in
 `3d-rayman-type-game/` — one level down from the repo root.
 
+
+## The design document governs (set 2026-10-26)
+
+**There is now a design doc — *Project Heavyweight — Vision & Movement Design*, 2026-10-24 — and it
+is the authority.** The experiment-sandbox phase described in the next section is over; read that
+section, and everything dated before it, as the history that produced this one.
+
+Its own closing line on its standing rules is the instruction to take most literally:
+
+> *"These rules are standing: a proposal that violates one needs this document amended first, not
+> an exception granted quietly."*
+
+The short version of what it commits to:
+
+- **Wario Land in 3D, as a deliberate PUZZLE-platformer**, not an action game. Spectacle is the
+  payoff for thinking, never the loop. **Tiebreak: when two ideas conflict, the deliberate/puzzle
+  reading wins over the action/spectacle one.**
+- **Four pillars**, and a feature serving none of them is cut: committed movement · weight is a
+  reasoning tool · destruction is legible and consequential · joyful, not dour.
+- **Movement is modal** — Walk / Charge / Air / Slam — with **steering authority as a falling curve
+  of speed**, and the cardinal rule *instant inputs, heavy body: never add delay to feel heavy.*
+- **Six universal weight rules with zero per-room exceptions**, built as **one physics layer early,
+  never as per-level scripts**.
+- **There is no death.** Every penalty is live and in-arena, never travel time. A boss hit regresses
+  your setup rather than hurting you, and ejection from an arena is banned.
+- **Kinematic hero, always.** *"Fake the mass, never rigid-body-drive the hero."* Rigid bodies are
+  for the garnish — debris, thrown objects — because unpredictable physics kills mastery.
+- **Author the physics, simulate the garnish**, and **weight is 50% feedback** — juice ships with
+  the greybox because it is the mechanic, not polish.
+
+### What that means for what is already on disk
+
+The doc is explicit: **"Scrap the ported Mario 64 verb set — an agility moveset made heavier can
+only produce a worse Mario. Build the modal controller from scratch instead."** So `player.gd`'s
+double/triple jump, side flip, backflip, long jump and wall kick are superseded, as is its
+eleven-state machine, the spin (the **charge** is the traversal verb and the **boost** is the
+steering verb at speed), and the open no-death question, which the doc closes.
+
+**Nothing has been deleted.** `heavy_player.gd` is the from-scratch replacement and it lives
+alongside the old one until Milestone 1 is judged — see below. What survives essentially unchanged:
+slopes-as-momentum, breakable blocks, crumbling floors, impact force scaling with fall height, the
+thief/scramble systems (the doc's field-damage model almost exactly), and the warden boss, whose
+"a hit regresses the setup, no ejection, the boss stole something so the fight is a retrieval"
+doctrine matches the doc line for line.
 ## What this is for, right now
 
-**Set 2026-10-11, and it governs the dated direction sections further down.** This is **not** a game
+**Set 2026-10-11, and SUPERSEDED 2026-10-26 by the design document above.** Kept because the
+working habits in it still apply to anything not covered by the doc, and because the experiment
+records further down were written under it. This is **not** a game
 in development. Nobody has settled on what the game is yet, and rather than commit to a design
 before anyone is confident in one, the project is deliberately being used as **a series of
 experiments in 3D platformer mechanics**.
@@ -30,6 +76,99 @@ That changes a few things about working here:
 
 Read the older direction statements below as history. They are all dated.
 
+
+## Milestone 1: the heavy controller (built 2026-10-26)
+
+`scripts/player/heavy_player.gd` + `scenes/greybox_main.tscn`. The doc's own framing: **"the
+greybox that proves or kills this"**, with a one-sentence pass/fail — *is charging down the slope
+into the wall grin-inducing within a day of tuning?*
+
+**It is built ALONGSIDE `player.gd`, not instead of it**, and that is deliberate rather than
+timid. Scrapping the old controller in place breaks nine scenes, Ian's level and about eighty of
+107 checks before anything has been proven — which is precisely the mistake that cost this project
+four grapple rewrites. The greybox has its own scene, its own player and its own room. Retiring
+`player.gd` is a separate, deliberate step once the milestone is judged.
+
+### All sixteen tuning parameters are exposed
+
+The doc lists them and says *"the design lives in these curves; expect most of prototype week to be
+spent here"*, so every one is an `@export`: walk speed · charge wind-up · charge acceleration ·
+charge top speed · turn rate vs speed · slide friction · jump speed-scaling · air-steer authority ·
+slam drop acceleration · impact force scalar · crash-stun · slope accel/decel multipliers · the
+steering-authority curve · boost impulse · boost cooldown and tap count · brake impact scalar.
+
+### Measured in the greybox
+
+| | |
+| --- | --- |
+| charge on the flat | **20.0 m/s** |
+| charge down the 15° slope | **26.6 m/s** |
+| the wall's `break_speed` | **22.0** — short on the flat, through off the slope |
+| jump at walking pace | 4.1 m |
+| charge-jump | **22.1 m** (the gap is 14 m) |
+| authority at walk speed / at top speed | 1.00 / 0.12 |
+
+**That middle row is the whole room.** The wall is deliberately out of reach of a charge on flat
+ground, so the slope is not a shortcut to it — it is the only way through it. If the wall ever
+becomes breakable without the ramp, the room has stopped asking the doc's question.
+
+### Three bugs the probe found, all of them design bugs rather than typos
+
+- **The charge capped total speed.** Written as a plain `move_toward(facing * charge_top_speed)`,
+  the charge quietly dragged you back DOWN to 20 all the way down the ramp, so the slope was worth
+  nothing and the flat and slope runs measured 20.0 and 20.1. `charge_top_speed` is what the engine
+  reaches on the flat, **not a limit on how fast you can be going** — weight gates speed, it never
+  caps it, and charge velocity obeys the same conservation as everything else. Above that speed the
+  charge now only steers.
+- **The charge cancelled whenever you left the ground.** The first version dropped to AIR the
+  instant `is_on_floor()` went false, so charging over the lip of the ramp ended the charge — on
+  exactly the terrain the game is made of. Per the state diagram the only way out of a charge into
+  the air is a **charge-jump**, which is a decision; falling off a bump is not. A charge now keeps
+  its heading and speed while briefly airborne, taking neither power nor friction.
+- **A charge press made a frame before landing was silently thrown away**, because a wind-up can
+  only start from the floor. That breaks the cardinal rule — every input gets a response — and an
+  input that sometimes evaporates is read as bad controls, which is the one thing a heavy character
+  cannot afford. Hence `charge_buffer`, the twin of `jump_buffer`.
+
+### Choices worth knowing before you tune
+
+- **Walk acceleration is 46, not the old controller's 14.** The weight in this design lives in the
+  charge, not in the walk. Walk mode is the precision anchor — *"a player stuck on a puzzle must
+  never be able to blame the controls"* — so making it sluggish would break the one promise the
+  authority curve is built on. `authority()` returns exactly 1.0 at or below `walk_speed` and
+  nothing is allowed to erode that.
+- **One button, two verbs.** `attack` HELD from walk winds up a charge; TAPPED while already
+  charging or airborne it boosts. That is one of the two options the doc leaves open for the boost
+  input, it adds no binding, and it is unambiguous because the two are reachable from different
+  states. The other option — its own button — is still open.
+- **The boost ADDS, never assigns.** A boost that rewrote the velocity would be free steering and
+  would hand back all the authority the speed just took away. Adding is what makes correcting your
+  course leave you faster and more committed.
+- **The slam's impact has two halves**: how far you fell, plus how much horizontal speed you
+  delivered into the floor (`brake_impact_scalar`). That second half is what makes the slam double
+  as the brake — a flat-out charge cancelled into a slam hits hard with no drop at all, so braking
+  on fragile footing breaks it.
+- **An ordinary landing deliberately does NOT emit `Events.slam_landed`.** That signal means "a
+  slam happened"; firing it on every touchdown would collapse crumbling floors under a hop. A heavy
+  landing still breaks fragile ground through the floor's own `descent_speed()` check.
+- **`breakable_block.gd` and `crumbling_floor.gd` are now duck-typed** rather than checking
+  `body as Player`, so the whole prop library works with both controllers. What a prop needs is the
+  pre-collision accessors, not a particular class.
+- **`floor_snap_length` is 0.8 on the heavy player**, above the 0.6 the old one uses, because a
+  charge tops 26 m/s on a slope and the surface falls away faster than a straight-line step follows.
+
+### Not built yet, and both are named in the doc's build list
+
+**The see-saw and the pressure plate.** Both need new props rather than new geometry — the see-saw
+is universal weight rule 3 (*the heavier side of a pivot wins*) and is a real system, and the plate
+is a walk-mode precision input. They feed the doc's *secondary* read — "everyone looping the
+slope-and-wall means B-primary; everyone fiddling with the see-saw and plate means C-primary" — so
+leaving them out does not block the pass/fail judgement, but it does mean that secondary read
+cannot be taken yet.
+
+`tests/greybox_probe.gd` is the measurement harness; it is also currently the only test the new
+controller has, so do not delete it until either the controller is adopted and gets a suite, or
+Milestone 1 kills it.
 ## Who this is for
 
 This is a **learning project**. The people working on it can program but are **new to Godot**.
@@ -71,7 +210,8 @@ file to be read.
     events.gd        autoloaded signal bus, referred to in code as `Events`
     components/      health, thrown_flight, coin_thief, item_thief (drop-in Nodes,
                      no matching scene)
-    player/          player.gd (movement), abilities (spin + carry), camera, visuals, ledge sensor
+    player/          heavy_player.gd (the modal controller, Milestone 1),
+                     player.gd (the old moveset), abilities, camera, visuals, ledge sensor
     enemies/         walker, turret, bullet, boss_warden
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
                      breakable block, treasure, level exit, transformer, grind rail,
@@ -82,9 +222,10 @@ file to be read.
                      main.tscn (moveset showcase), playground.tscn (momentum),
                      tree_fort_main.tscn, rail_yard_main.tscn and
                      thief_arena_main.tscn, market_yard_main.tscn and
-                     hostage_pit_main.tscn and warden_arena_main.tscn (experiments)
+                     hostage_pit_main.tscn and warden_arena_main.tscn (experiments),
+                     greybox_main.tscn (Milestone 1 — the heavy controller)
   tests/             moveset smoke test, plus throwaway level probes (fort, rail,
-                     market, pit, warden)
+                     market, pit, warden, greybox)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
 

@@ -138,8 +138,8 @@ func _physics_process(delta: float) -> void:
 ## The player touched down on us. Whether that matters depends on how fast they
 ## were falling.
 func _on_landing(body: Node3D) -> void:
-	var player := body as Player
-	if player == null:
+	# Duck-typed, like breakable_block.gd, so either controller can break it.
+	if not body.has_method(&"descent_speed"):
 		return
 	# Just being on it is enough, if this plank is the fragile kind.
 	if break_on_stand:
@@ -150,7 +150,8 @@ func _on_landing(body: Node3D) -> void:
 	# overlap, so reading velocity.y here sees a stationary player and no landing
 	# is ever heavy enough. descent_speed() exists to give the speed from before
 	# the collision was resolved — its comment in player.gd explains the trap.
-	if player.descent_speed() > -break_fall_speed:
+	var falling: float = body.call(&"descent_speed")
+	if falling > -break_fall_speed:
 		return
 	_crack()
 

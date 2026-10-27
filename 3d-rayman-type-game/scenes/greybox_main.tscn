@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://bdti40vhpi74y"]
+
+[ext_resource type="PackedScene" uid="uid://bbodgg77e8myd" path="res://scenes/levels/greybox_room.tscn" id="1"]
+[ext_resource type="PackedScene" uid="uid://bfwegh8phsmfe" path="res://scenes/player/heavy_player.tscn" id="2"]
+
+[node name="Greybox" type="Node" unique_id=58334026]
+
+[node name="GreyboxRoom" parent="." unique_id=23409877 instance=ExtResource("1")]
+
+[node name="Player" parent="." unique_id=2040875541 instance=ExtResource("2")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8.6, -29)
+walk_speed = 15.0
+walk_accel = 10.0
+walk_decel = 7.5
+face_turn_speed = 7.5
+charge_accel = 15.0
+charge_turn_rate = 5.0
+slide_friction = 5.0
+crash_stun = 0.5
+crash_bounce = 12.0
+min_authority = 0.2
+authority_zero_speed = 20.0
+air_authority = 0.5
+boost_taps = 1
