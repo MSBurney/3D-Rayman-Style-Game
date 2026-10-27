@@ -96,20 +96,26 @@ spent here"*, so every one is an `@export`: walk speed · charge wind-up · char
 charge top speed · turn rate vs speed · slide friction · jump speed-scaling · air-steer authority ·
 slam drop acceleration · impact force scalar · crash-stun · slope accel/decel multipliers · the
 steering-authority curve · boost impulse · boost cooldown and tap count · brake impact scalar.
+One more exists that the doc does not list — `boost_fade_speed`, which the boost turned out to
+need the moment it met a real player (see the tuning pass below).
 
 ### Measured in the greybox
 
+Current, against the tuning pass below.
+
 | | |
 | --- | --- |
+| walking | 15.0 m/s |
 | charge on the flat | **20.0 m/s** |
-| charge down the 15° slope | **26.6 m/s** |
+| charge down the 15° slope | **26.0 m/s** |
 | the wall's `break_speed` | **22.0** — short on the flat, through off the slope |
-| jump at walking pace | 4.1 m |
-| charge-jump | **22.1 m** (the gap is 14 m) |
-| authority at walk speed / at top speed | 1.00 / 0.12 |
+| jump at walking pace | 15.5 m |
+| charge-jump | **21.2 m** |
+| authority at walk speed / at top speed | 1.00 / 0.20 |
+| a chain of ten jump-boosts | **28.0 m/s** (a flat +7 each would give 85) |
 
-**That middle row is the whole room.** The wall is deliberately out of reach of a charge on flat
-ground, so the slope is not a shortcut to it — it is the only way through it. If the wall ever
+**That `break_speed` row is the whole room.** The wall is deliberately out of reach of a charge on
+flat ground, so the slope is not a shortcut to it — it is the only way through it. If the wall ever
 becomes breakable without the ramp, the room has stopped asking the doc's question.
 
 ### Three bugs the probe found, all of them design bugs rather than typos
@@ -132,11 +138,11 @@ becomes breakable without the ramp, the room has stopped asking the doc's questi
 
 ### Choices worth knowing before you tune
 
-- **Walk acceleration is 46, not the old controller's 14.** The weight in this design lives in the
-  charge, not in the walk. Walk mode is the precision anchor — *"a player stuck on a puzzle must
-  never be able to blame the controls"* — so making it sluggish would break the one promise the
-  authority curve is built on. `authority()` returns exactly 1.0 at or below `walk_speed` and
-  nothing is allowed to erode that.
+- **`authority()` returns exactly 1.0 at or below `walk_speed`, and nothing is allowed to erode
+  that.** It is the one promise the whole curve is built on: *"a player stuck on a puzzle must never
+  be able to blame the controls"*. Note that it is `walk_speed` that sets how wide that window of
+  full authority is, so raising `walk_speed` raises the speed at which you still have perfect
+  steering — see the tuning pass below, where that turned out to matter more than it looks.
 - **One button, two verbs.** `attack` HELD from walk winds up a charge; TAPPED while already
   charging or airborne it boosts. That is one of the two options the doc leaves open for the boost
   input, it adds no binding, and it is unambiguous because the two are reachable from different
@@ -144,6 +150,30 @@ becomes breakable without the ramp, the room has stopped asking the doc's questi
 - **The boost ADDS, never assigns.** A boost that rewrote the velocity would be free steering and
   would hand back all the authority the speed just took away. Adding is what makes correcting your
   course leave you faster and more committed.
+- **But an addition compounds, so the boost FADES** — full value up to `charge_top_speed`, nothing
+  at all by `boost_fade_speed` (28). This is the same exploit the long jump had and it was found the
+  same way, in play: *"after multiple jump boosts I can travel at ludicrously high speeds"*. Jump,
+  tap, land, repeat was +7 m/s every single time, and the probe measures ten taps reaching **28.0
+  where a flat addition would give 85.0** — a chain now converges instead of diverging. **It caps
+  the BONUS, not your speed:** nothing about it touches what a slope can give you, and the charge
+  still keeps every bit of that. If the boost needs to be stronger, raise the fade speed rather than
+  the impulse, exactly as with `long_jump_fade_speed`.
+  **And a faded-out boost is refused OUTRIGHT rather than applied at zero length**, which is the
+  half that is easy to miss: the boost snaps your `facing` onto the stick, so a zero-strength one
+  would still hand you a free instant turn at top speed — worth more than the speed it replaced,
+  and precisely the authority the design just took away. It still answers the press with a small
+  puff, because a refused input must never look like a dropped one.
+- **A JUMP DOES NOT END A CHARGE.** Hold `attack` through a charge-jump and you land straight back
+  into the same charge with no second wind-up; the wind-up is the price of *starting* a charge and
+  you pay it once. Reported from play as *"the charge is killed and I'm back to moving normally"* —
+  jumping is how a charge crosses anything, so being dumped into WALK on the far side turned the
+  move the room is built around into a punishment for using it. Three things keep it honest:
+  letting go in mid-air ends it (so holding really is the whole condition), a **slam** ends it even
+  if you never let go (the slam *is* the brake, and a brake you roll straight out of is not one),
+  and a merely-held button does **not** start a charge on landing — it has to be a charge you were
+  already in, or a crash would wind you back up while you were still mashing the button and fire
+  you into the same wall. Carried in `_charge_through_air` rather than in `_charging`, because
+  `_charging` means "on the ground adding power" and that is exactly what you are not doing.
 - **The slam's impact has two halves**: how far you fell, plus how much horizontal speed you
   delivered into the floor (`brake_impact_scalar`). That second half is what makes the slam double
   as the brake — a flat-out charge cancelled into a slam hits hard with no drop at all, so braking
@@ -165,6 +195,38 @@ is a walk-mode precision input. They feed the doc's *secondary* read — "everyo
 slope-and-wall means B-primary; everyone fiddling with the see-saw and plate means C-primary" — so
 leaving them out does not block the pass/fail judgement, but it does mean that secondary read
 cannot be taken yet.
+
+### The first tuning pass (2026-10-27), and the two things it contradicts
+
+**The user played it and brought back their own numbers, and those are now the script defaults** —
+`walk_speed` 15, `walk_accel` 10, `walk_decel` 7.5, `face_turn_speed` 7.5, `charge_accel` 15,
+`charge_turn_rate` 5.0, `slide_friction` 5.0, `crash_stun` 0.5, `crash_bounce` 12, `min_authority`
+0.2, `authority_zero_speed` 20, `air_authority` 0.5, `boost_taps` 1. They were overrides on the
+Player node in `greybox_main.tscn`; they were moved into the script and **removed from the scene**,
+so there is one place to read a default from and the scene cannot quietly shadow it.
+
+Two of them pull against what this file says above, and neither is a bug — they are the tuning
+telling us something, and they are written down rather than reconciled:
+
+- **Walking is now 75% of charging** (15 against `charge_top_speed` 20), where it used to be 30%.
+  So the charge barely buys speed any more; what it buys is the wall, the jump distance and the
+  slam. And because `authority()` is a flat 1.0 at or below `walk_speed`, **full steering authority
+  now reaches 15 m/s and the entire authority curve operates in the 5 m/s band between 15 and 20**.
+  The "mass in flight" feel the doc describes only exists inside that window. If the modal split is
+  meant to read clearly, the lever is the GAP between these two numbers, not either one alone.
+- **Walk mode is no longer instant** (`walk_accel` 46 → 10). The doc calls walk mode the precision
+  anchor, and the cardinal rule is that mass may take time but *input* must not. Worth watching for
+  whether it now reads as weight or as lag. One knock-on: `_tick_windup` brakes at `walk_decel * 2`,
+  which is 15 m/s² against a 15 m/s walk, so **the plant takes about a second — twice
+  `charge_windup`**, and the telegraph is a slow lean rather than the hard stop the comment there
+  describes.
+
+**And the 14 m gap is no longer in the level.** `GroundSouth` in `greybox_room.tscn` is a single
+1000 x 1000 plane now, which makes the room a free-roam space to tune in but also removes the doc's
+*"a gap only a charge-jump crosses"* test — a walking jump covers 15.5 m on its own at these
+numbers. The probe's two gap checks had nothing left to measure; the "is there a gap" one is
+**inverted rather than deleted**, so if the gap ever comes back it says so instead of staying quiet
+about a check that had silently stopped meaning anything.
 
 `tests/greybox_probe.gd` is the measurement harness; it is also currently the only test the new
 controller has, so do not delete it until either the controller is adopted and gets a suite, or

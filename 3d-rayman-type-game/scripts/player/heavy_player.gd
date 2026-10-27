@@ -63,15 +63,15 @@ signal crashed(at: Vector3, force: float)
 @export_group("Walk")
 ## Top speed the stick alone reaches, and the threshold below which control is
 ## exact. NOT a speed limit: slopes, charges and charge-jumps all go far past it.
-@export var walk_speed: float = 6.0
+@export var walk_speed: float = 15.0
 ## Deliberately BRISK, unlike the old controller's committal 14.
 ##
 ## The weight in this design lives in the charge, not in the walk. Walk mode is
 ## the precision anchor, so making it sluggish would break the one promise that
 ## keeps puzzle execution blameless.
-@export var walk_accel: float = 46.0
-@export var walk_decel: float = 38.0
-@export var face_turn_speed: float = 14.0
+@export var walk_accel: float = 10.0
+@export var walk_decel: float = 7.5
+@export var face_turn_speed: float = 7.5
 
 @export_group("Charge")
 ## The plant-and-rear before launch. A wind-up, NOT a cast.
@@ -81,36 +81,36 @@ signal crashed(at: Vector3, force: float)
 ## is the skill — but you cannot move.
 @export var charge_windup: float = 0.5
 @export var charge_top_speed: float = 20.0
-@export var charge_accel: float = 26.0
+@export var charge_accel: float = 15.0
 ## Radians per second the heading can be bent while charging, BEFORE the
 ## authority curve scales it down further. Wide arcs, near-locked heading.
 ##
 ## Aiming before committing is the skill; losing the ability to steer afterwards
 ## is the mastery curve, not friction.
-@export var charge_turn_rate: float = 1.1
+@export var charge_turn_rate: float = 5.0
 ## How fast a charge bleeds once you stop feeding it. There are NO FREE BRAKES:
 ## letting go stops you adding power, it does not stop you.
-@export var slide_friction: float = 4.0
+@export var slide_friction: float = 5.0
 ## How long you are stunned after crashing into something at speed.
 ##
 ## Early crashes are meant to be cheap and funny — bounce, dust, get up — so
 ## this is the whole penalty. Stakes rise with world fragility, never with the
 ## controls getting meaner.
-@export var crash_stun: float = 0.55
-@export var crash_bounce: float = 6.0
+@export var crash_stun: float = 0.5
+@export var crash_bounce: float = 12.0
 
 @export_group("Steering authority")
 ## Authority at and above `authority_zero_speed`. Never 0: there is no regime
 ## where the player is a passenger, only regimes with their own grammar.
-@export var min_authority: float = 0.12
+@export var min_authority: float = 0.2
 ## Speed at which authority has fallen all the way to `min_authority`.
-@export var authority_zero_speed: float = 18.0
+@export var authority_zero_speed: float = 20.0
 ## Optional hand-drawn override, sampled across 0..`authority_zero_speed`. Left
 ## empty, the smoothstep in `authority()` is used instead.
 @export var steering_curve: Curve
 ## How much of the already-reduced authority survives in mid-air. "Arc locked at
 ## takeoff" is what makes this small.
-@export var air_authority: float = 0.3
+@export var air_authority: float = 0.5
 
 @export_group("Boost")
 ## The steering vocabulary at speed: a discrete impulse that ADDS momentum in
@@ -123,7 +123,25 @@ signal crashed(at: Vector3, force: float)
 @export var boost_cooldown: float = 0.75
 ## Taps before you have to touch the ground again. 0 means unlimited, and the
 ## cooldown is then the only limit.
-@export var boost_taps: int = 2
+@export var boost_taps: int = 1
+## The speed at which a boost pays NOTHING at all.
+##
+## A FLAT ADDITION COMPOUNDS, and this project has already been bitten by
+## exactly that once: the old long jump added a fixed push to whatever speed you
+## already had, so land-crouch-jump-repeat was worth +17 m/s every single time
+## and four in a row passed 60 m/s. The boost is the same shape - tap, land,
+## tap, land, and you are travelling faster than you can read the level.
+##
+## So the impulse FADES: full value up to `charge_top_speed`, nothing by here.
+## A chain of boosts then CONVERGES on this number instead of diverging.
+##
+## **It caps the BONUS, not your speed.** Nothing here touches what a slope can
+## give you - a hill can still take you past this and the charge will keep every
+## bit of it, because weight gates speed and never caps it. The boost only
+## declines to pay full price for the same button twice. If the boost needs to
+## be stronger, raise THIS rather than `boost_impulse`: raising the impulse
+## makes the chain worth farming all over again.
+@export var boost_fade_speed: float = 28.0
 
 @export_group("Jump")
 @export var jump_speed: float = 9.0
@@ -205,6 +223,8 @@ var _jump_buffered: float = 0.0
 var _boost_cool: float = 0.0
 var _charge_buffered: float = 0.0
 var _boosts_left: int = 0
+## True while a jump is carrying a charge through the air. See `_jump()`.
+var _charge_through_air: bool = false
 var _air_peak_y: float = 0.0
 ## Horizontal speed at the moment the slam began — the brake half of the impact.
 var _slam_entry_speed: float = 0.0
@@ -426,6 +446,13 @@ func _do_air(delta: float) -> void:
 	velocity.z = flat.z
 	_apply_gravity(delta)
 
+	# LETTING GO IN MID-AIR ends it, so holding really is the whole condition and
+	# the charge is never resumed by surprise. This is also why tapping for a
+	# boost up here gives up the charge: you cannot tap without releasing, so you
+	# chose one or the other, which is a decision rather than a trap.
+	if _charge_through_air and not Input.is_action_pressed(&"attack"):
+		_charge_through_air = false
+
 
 ## Aimed falling mass. The signature verb, and also the brake.
 func _do_slam(delta: float) -> void:
@@ -505,10 +532,39 @@ func _jump() -> void:
 	# a standing jump is a hop; planning your run-up is a constant decision.
 	var speed := flat_speed()
 	velocity.y = minf(jump_speed + speed * jump_speed_scaling, jump_speed_max)
+	# A JUMP DOES NOT END A CHARGE. Jumping is how a charge crosses a gap, so
+	# being dumped back into WALK on the far side - and made to plant and wind up
+	# all over again while still holding the button - turns the one move the room
+	# is built around into a punishment for using it.
+	#
+	# Noted here rather than left in `_charging`, because `_charging` means "I am
+	# on the ground adding power to a charge" and that is exactly what you are
+	# not doing in mid-air. `_set_state` clears it on the way out, so the intent
+	# has to be remembered separately. Resumed in `_land()`.
+	_charge_through_air = _charging
 	_set_state(State.AIR)
 	play_sfx(sfx_jump)
 	if speed > walk_speed:
 		_spawn_puff(charge_colour, 14, 5.0, Vector3.DOWN)
+
+
+## What a boost would be worth right now: the full `boost_impulse` up to
+## `charge_top_speed`, fading away to nothing by `boost_fade_speed`.
+##
+## The fade is deliberately ZERO through the charge's whole normal range, because
+## the boost is the steering vocabulary at speed and a weak boost is no steering
+## at all. It only starts buying itself out ABOVE the speed the charge engine
+## itself reaches - which is to say, once you are already going faster than the
+## game ever promised you.
+func boost_strength() -> float:
+	var speed := flat_speed()
+	var free_until := minf(charge_top_speed, boost_fade_speed)
+	if speed <= free_until:
+		return boost_impulse
+	if speed >= boost_fade_speed:
+		return 0.0
+	var into_fade := (speed - free_until) / maxf(boost_fade_speed - free_until, 0.01)
+	return boost_impulse * (1.0 - into_fade)
 
 
 func _try_boost() -> void:
@@ -516,19 +572,39 @@ func _try_boost() -> void:
 		return
 	if boost_taps > 0 and _boosts_left <= 0:
 		return
+	var power := boost_strength()
+	if power <= 0.0:
+		# Faded out entirely. Nothing is spent - no tap, no cooldown - so the
+		# boost comes back by itself as friction brings you under the fade speed,
+		# rather than being quietly eaten at the one moment it could not work.
+		#
+		# And refusing OUTRIGHT rather than applying a zero-length impulse is the
+		# load-bearing half: the `facing = dir` below would otherwise still snap
+		# your heading for free, which hands back the exact authority the speed
+		# just took away. A free turn at top speed is the hole the fade opens if
+		# you are not careful, and it is worth more than the speed was.
+		#
+		# Still answers the press, in the only language available. A refused input
+		# that looks identical to a DROPPED input is the thing to avoid - same rule
+		# as a refused breakable block shaking instead of sitting there.
+		_spawn_puff(boost_colour, 4, 2.0, Vector3.UP)
+		return
 	var dir := wish_dir if wish_dir != Vector3.ZERO else facing
 	# ADDED, never assigned. A boost that rewrote the velocity would be free
 	# steering, and would hand back all the authority the speed just took away.
 	# Adding means course-correcting leaves you FASTER and more committed, which
 	# is the point of the verb rather than a side effect of it.
-	velocity += dir * boost_impulse
+	velocity += dir * power
 	_boost_cool = boost_cooldown
 	if boost_taps > 0:
 		_boosts_left -= 1
 	if state == State.CHARGE:
 		facing = dir
-	_spawn_puff(boost_colour, 12, 5.0, -dir)
-	_shake(0.12)
+	# Sized by what the boost was actually WORTH, so a fading one looks like it
+	# is fading rather than looking broken.
+	var fraction := power / maxf(boost_impulse, 0.01)
+	_spawn_puff(boost_colour, int(round(4.0 + 8.0 * fraction)), 5.0, -dir)
+	_shake(0.12 * fraction)
 
 
 func _begin_slam() -> void:
@@ -536,6 +612,11 @@ func _begin_slam() -> void:
 	# owed that speed. This is the difference between a drop and a brake.
 	_slam_entry_speed = flat_speed()
 	velocity.y = minf(velocity.y, 0.0)
+	# A SLAM ENDS A CHARGE even if you never let go, because the slam IS the
+	# brake - that is the whole reason it exists as well as being the attack.
+	# Landing one and rolling straight back off into a charge would take the
+	# brake away and leave the move with nothing to stop you with.
+	_charge_through_air = false
 	_set_state(State.SLAM)
 
 
@@ -581,7 +662,20 @@ func _crash() -> void:
 
 func _land() -> void:
 	var fell := _pre_move_vy
-	_set_state(State.WALK)
+	# Still holding, and this jump came out of a charge? Then you are still in
+	# the SAME charge - straight back to CHARGE with no second wind-up. The
+	# wind-up is the price of STARTING a charge, and you only pay it once.
+	#
+	# Note what is NOT done here: a held button alone does not start a charge on
+	# landing. It has to be a charge you were already in. Otherwise a crash,
+	# which dumps you into WALK while you are very likely still mashing the
+	# button, would wind you straight back up and fire you into the same wall.
+	if _charge_through_air and Input.is_action_pressed(&"attack"):
+		_charging = true
+		_set_state(State.CHARGE)
+	else:
+		_set_state(State.WALK)
+	_charge_through_air = false
 	if fell > -5.0:
 		return
 	# An ordinary landing does juice only. It deliberately does NOT emit
@@ -713,7 +807,7 @@ func _update_visual(delta: float) -> void:
 	visual.rotation.y = lerp_angle(visual.rotation.y, wanted, face_turn_speed * delta)
 	# A visible lean into the charge. Presentation exaggerates; the numbers
 	# underneath stay honest.
-	var lean := 0.18 if state == State.CHARGE else 0.0
+	var lean := 0.18 if (state == State.CHARGE or _charge_through_air) else 0.0
 	if _windup_left > 0.0:
 		lean = -0.22
 	visual.rotation.x = lerp_angle(visual.rotation.x, lean, 8.0 * delta)
@@ -739,6 +833,8 @@ func debug_info() -> Dictionary:
 		"vy": velocity.y,
 		"floor": is_on_floor(),
 		"windup": "%.2f" % maxf(_windup_left, 0.0),
-		"boosts": "%d (cool %.2f)" % [_boosts_left, maxf(_boost_cool, 0.0)],
+		"boosts": "%d (cool %.2f, worth %.1f)" % [
+			_boosts_left, maxf(_boost_cool, 0.0), boost_strength()],
+		"charge held": _charge_through_air,
 		"slam": "power %.2f" % slam_power(),
 	}

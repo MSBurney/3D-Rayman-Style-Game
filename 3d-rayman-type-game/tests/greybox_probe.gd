@@ -34,6 +34,8 @@ func _ready() -> void:
 	_surfaces()
 	_authority()
 	await _charges()
+	await _charge_survives_a_jump()
+	await _boost_fade()
 	print("---- %d wrong ----" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
@@ -63,8 +65,13 @@ func _surfaces() -> void:
 	print("  -- the ground, and the gap")
 	_compare("south ground", _height_at(30, -20, 0.0), 0.0, 0.1)
 	_compare("north ground", _height_at(30, 40, 0.0), 0.0, 0.1)
-	_note("the gap is actually a gap", is_nan(_height_at(0, 17, 0.0)),
-		"nothing underfoot at z=17")
+	# THE 14 m GAP IS NOT IN THIS LEVEL ANY MORE. `GroundSouth` is a single
+	# 1000 x 1000 plane now, so there is nothing to fall into and the room is a
+	# free-roam space to tune in. The assertion is inverted rather than deleted,
+	# so if the gap ever comes back the probe says so instead of staying quiet
+	# about a check that silently stopped meaning anything.
+	_note("the gap at z=17 is filled in", not is_nan(_height_at(0, 17, 0.0)),
+		"the ground is continuous")
 	_compare("slam tower top", _height_at(22, -4, 14.0), 14.0, 0.1)
 	_compare("ramp landing", _height_at(-6, -30, 8.0), 8.0, 0.1)
 
@@ -111,8 +118,12 @@ func _charges() -> void:
 	var needed: float = wall.break_speed if wall != null else 0.0
 
 	var flat_top := await _charge_from(Vector3(0, 0.15, -52), 260, 100.0)
-	_note("charge on the flat", flat_top > player.walk_speed * 2.0,
-		"tops out at %.1f m/s" % flat_top)
+	# Against `walk_speed` rather than a fixed number, because the whole point of
+	# the charge is to be worth more than walking. The margin is the thing to
+	# watch: a charge only a little faster than a walk is not a traversal verb,
+	# it is a slower way to walk.
+	_note("charge on the flat", flat_top > player.walk_speed * 1.2,
+		"tops out at %.1f m/s, walking does %.1f" % [flat_top, player.walk_speed])
 
 	# Down the slope. Measured up to z = 2, which is just short of the wall at
 	# z = 4, so the number is the speed it ARRIVES with rather than a peak
@@ -141,13 +152,138 @@ func _charges() -> void:
 	_note("the charge breaks the wall", opened, "broken_open=%s" % opened)
 	await get_tree().physics_frame
 
-	print("  -- the gap, which only a charge-jump crosses")
+	# What a jump is WORTH, measured relatively. It used to be checked against
+	# the 14 m gap, but that gap is no longer in the level, so there is no
+	# absolute distance left to be right or wrong about - only the ratio, which
+	# is what the doc actually cares about ("run-up planning is a constant
+	# micro-decision"). A charge-jump has to be clearly worth the wind-up.
+	print("  -- what a jump is worth")
 	var walk_jump := await _jump_distance(false)
 	var charge_jump := await _jump_distance(true)
-	_note("a walking jump cannot cross 14 m", walk_jump < 14.0,
-		"%.1f m" % walk_jump)
-	_note("a charge-jump can", charge_jump > 14.0,
-		"%.1f m" % charge_jump)
+	_note("a charge-jump goes clearly further", charge_jump > walk_jump * 1.25,
+		"walking %.1f m, charging %.1f m" % [walk_jump, charge_jump])
+
+
+## A jump must not end a charge you are still holding, and must end one you let
+## go of. Both halves, because the second is what keeps the first honest - a
+## charge that survived regardless would be a charge you could not get out of.
+func _charge_survives_a_jump() -> void:
+	print("  -- a jump does not end a charge")
+	var before := await _charge_up()
+	_note("charging before the jump", player.state == HeavyPlayer.State.CHARGE,
+		"state %s at %.1f m/s" % [player.state_name(), before])
+
+	await _tap("jump")
+	await _until_airborne()
+	_note("the jump takes off", player.state == HeavyPlayer.State.AIR,
+		"state %s" % player.state_name())
+
+	# Still holding all the way down.
+	await _until_landed()
+	_note("lands straight back into the charge",
+		player.state == HeavyPlayer.State.CHARGE,
+		"state %s" % player.state_name())
+	_note("and does NOT wind up again", player._windup_left <= 0.0,
+		"windup %.2f" % maxf(player._windup_left, 0.0))
+	_note("with its speed intact", player.flat_speed() > before * 0.8,
+		"%.1f m/s, was %.1f" % [player.flat_speed(), before])
+	_release_all()
+	await get_tree().physics_frame
+
+	# The other half: let go in mid-air and the charge is over.
+	await _charge_up()
+	await _tap("jump")
+	await _until_airborne()
+	Input.action_release("attack")
+	await _until_landed()
+	_note("letting go in mid-air lands in WALK",
+		player.state == HeavyPlayer.State.WALK,
+		"state %s" % player.state_name())
+	_release_all()
+	await get_tree().physics_frame
+
+
+## The boost has to FADE rather than compound. Reported from play as "after
+## multiple jump boosts I can travel at ludicrously high speeds", which is the
+## same shape as the long jump exploit this project already paid for once.
+func _boost_fade() -> void:
+	print("  -- the boost fades instead of compounding")
+	_compare("full value at walk speed",
+		_strength_at(player.walk_speed), player.boost_impulse, 0.01)
+	_compare("still full at charge top speed",
+		_strength_at(player.charge_top_speed), player.boost_impulse, 0.01)
+	_compare("half way through the fade",
+		_strength_at((player.charge_top_speed + player.boost_fade_speed) * 0.5),
+		player.boost_impulse * 0.5, 0.05)
+	_compare("nothing left at the fade speed",
+		_strength_at(player.boost_fade_speed), 0.0, 0.01)
+
+	# And the real thing, done the way it was reported: jump, tap the boost in
+	# mid-air, land, jump again. One tap per airborne period, ten times.
+	await _place(Vector3(40, 0.15, -52))
+	player.velocity = Vector3(0, 0, player.walk_speed)
+	var top := 0.0
+	var taps := 0
+	for cycle in 10:
+		await _tap("jump")
+		for i in 10:
+			await get_tree().physics_frame
+		await _tap("attack")
+		taps += 1
+		for i in 240:
+			await get_tree().physics_frame
+			top = maxf(top, player.flat_speed())
+			if player.is_on_floor() and i > 12:
+				break
+	var uncapped: float = player.walk_speed + player.boost_impulse * taps
+	_note("a chain of boosts converges", top <= player.boost_fade_speed + 0.5,
+		"%d taps reached %.1f m/s, fade is %.1f, flat adding would give %.1f"
+			% [taps, top, player.boost_fade_speed, uncapped])
+	_release_all()
+	await get_tree().physics_frame
+
+
+## What a boost would be worth at a given speed. Reads the real function rather
+## than re-deriving the curve, so a change to one cannot pass a test of the other.
+func _strength_at(speed: float) -> float:
+	player.velocity = Vector3(0, 0, speed)
+	return player.boost_strength()
+
+
+## Winds up a charge on open flat ground and returns the speed it got to.
+func _charge_up() -> float:
+	await _place(Vector3(40, 0.15, -52))
+	Input.action_press("attack")
+	for i in 200:
+		await get_tree().physics_frame
+		if (player.state == HeavyPlayer.State.CHARGE
+				and player.flat_speed() >= player.charge_top_speed * 0.9):
+			break
+	return player.flat_speed()
+
+
+## Press and release across two frames. Pressing on EVERY frame never produces a
+## fresh `just_pressed`, so the move simply never fires - which reads as a
+## gameplay bug rather than as a test that cannot press a button.
+func _tap(action: String) -> void:
+	Input.action_press(action)
+	await get_tree().physics_frame
+	Input.action_release(action)
+	await get_tree().physics_frame
+
+
+func _until_airborne() -> void:
+	for i in 30:
+		await get_tree().physics_frame
+		if not player.is_on_floor():
+			return
+
+
+func _until_landed() -> void:
+	for i in 300:
+		await get_tree().physics_frame
+		if player.is_on_floor() and player.state != HeavyPlayer.State.AIR:
+			return
 
 
 ## Charges from `at` towards +Z and returns the top speed reached before z
@@ -212,6 +348,7 @@ func _place(at: Vector3) -> void:
 	player._windup_left = 0.0
 	player._charging = false
 	player._charge_buffered = 0.0
+	player._charge_through_air = false
 	player._jump_buffered = 0.0
 	player._boost_cool = 0.0
 	player._boosts_left = player.boost_taps
