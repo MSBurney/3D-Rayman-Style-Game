@@ -167,12 +167,12 @@ signal crashed(at: Vector3, force: float)
 @export_group("Slam")
 ## How hard it drives you at the ground. The signature verb and the build
 ## priority: the fall is tuned before anything else in this file.
-@export var slam_drop_accel: float = 95.0
-@export var slam_max_speed: float = 42.0
+@export var slam_drop_accel: float = 300.0
+@export var slam_max_speed: float = 130.0
 ## Drop height that counts as a full-power landing.
 @export var slam_power_height: float = 12.0
 ## Scales the whole impact number props read off `Events.slam_landed`.
-@export var impact_force_scalar: float = 1.0
+@export var impact_force_scalar: float = 2.0
 ## How much impact comes from HORIZONTAL speed killed rather than from the drop.
 ##
 ## This is the slam-brake. Stopping hard delivers your momentum into the floor,
@@ -183,6 +183,45 @@ signal crashed(at: Vector3, force: float)
 @export var slam_recover: float = 0.25
 
 @export_group("Weight")
+## How heavy this body is, for anything that resolves by mass: see-saws,
+## pressure plates, counterweights. **Universal weight rule 3** (the heavier
+## side of a pivot wins) and **rule 5** (enemies obey the same physics as the
+## player) both need the player's weight to be a number other things can read.
+##
+## A `RigidBody3D` already has a `mass` property, which is why a crate needs no
+## script at all to sit on a see-saw. A `CharacterBody3D` has none, so this
+## declares one with the same name — `weight_sensor.gd` asks for `mass` by name
+## and does not care what class answered.
+##
+## It is NOT used by the movement code and changing it will not make the hero
+## feel heavier: the weight in the handling is the authority curve and the
+## charge, exactly as the doc says (*"fake the mass"*). This number is what the
+## WORLD weighs you at.
+@export var mass: float = 10.0
+
+## ─── WEIGHT RULE 2: MOMENTUM TRANSFERS ON IMPACT ────────────────────────────
+##
+## How much of an ideal collision actually gets delivered, both ways. At 1.0 a
+## hit is perfectly inelastic — you and the thing you rammed end up travelling
+## at the same speed — which is the honest default. Lower it for mushier hits.
+##
+## **This is the whole vocabulary for moving an object.** The doc's verb set is
+## Walk, Charge, Jump, Slam, Boost, with no carry and no grab, so ramming and
+## stomping are the only ways the hero can put a thing somewhere. That makes
+## these numbers a VERB, not a detail.
+@export var push_transfer: float = 1.0
+## Below this closing speed nothing is exchanged, which is what stops a body
+## you are merely leaning against from being nudged every single frame.
+@export var push_min_speed: float = 1.5
+## How far a slam throws loose objects around it, at force 1.0. Scales with the
+## force, so a hop barely rattles them and a tower drop clears the area.
+@export var slam_scatter_radius: float = 5.0
+## Metres per second given to a loose object right next to a slam of force 1.0.
+@export var slam_scatter_power: float = 6.0
+## How much of an incoming object's momentum lands on YOU. Rule 2 cuts both
+## ways or it is not a rule — see `_on_hitbox_entered`.
+@export var impact_take: float = 0.8
+
 ## Gravity projected along the floor. Downhill is free acceleration, and
 ## converting height into speed is the game's currency.
 @export var slope_gravity: float = 30.0
@@ -236,11 +275,15 @@ var _pre_move_vy: float = 0.0
 @onready var rig: PlayerCamera = $CameraRig
 @onready var visual: Node3D = $Visual
 @onready var sfx: AudioStreamPlayer3D = $Sfx
+## Notices loose objects arriving under their own steam. See
+## `_on_hitbox_entered` for why this half cannot be done with slide collisions.
+@onready var hitbox: Area3D = $Hitbox
 
 
 func _ready() -> void:
 	facing = -global_transform.basis.z
 	_boosts_left = boost_taps
+	hitbox.body_entered.connect(_on_hitbox_entered)
 
 
 func _physics_process(delta: float) -> void:
@@ -464,6 +507,9 @@ func _do_slam(delta: float) -> void:
 
 
 func _after_move(_delta: float) -> void:
+	# Before the state machine, because a shove can take enough speed off a
+	# charge to turn the next line into a crash — and it should.
+	_shove_what_we_hit()
 	match state:
 		State.WALK:
 			if not is_on_floor() and _coyote <= 0.0:
@@ -481,6 +527,136 @@ func _after_move(_delta: float) -> void:
 		State.SLAM:
 			if is_on_floor():
 				_slam_impact()
+
+
+# ──────────────────────────────── weight rule 2: momentum transfers on impact
+
+## Pushes anything dynamic we just ran into, and takes the reaction ourselves.
+##
+## **A `CharacterBody3D` does not push a `RigidBody3D` in Godot. At all.** They
+## are solved in separate passes, so the character treats a crate as a wall and
+## the crate never hears about it. Walking the slide collisions and applying the
+## impulses by hand is the only way, and until this existed the greybox had
+## props that could measure weight and nothing that could deliver any — which is
+## exactly how it played.
+func _shove_what_we_hit() -> void:
+	# THE PRE-MOVE VELOCITY, never `velocity`. This is the trap this project has
+	# now paid for three times: `move_and_slide()` has already zeroed the speed
+	# by the time you can ask about the collision, so a shove computed from
+	# `velocity` is a shove of nothing at all for exactly the head-on hits that
+	# should be hardest. Same reason `approach_velocity()` exists for props.
+	var incoming := Vector3(_pre_move_flat.x, _pre_move_vy, _pre_move_flat.z)
+	if incoming.length() < push_min_speed:
+		return
+	# One body can be reported several times across move_and_slide's iterations,
+	# and shoving it twice in a frame is twice the momentum out of nowhere.
+	var done: Array[RigidBody3D] = []
+	for i in get_slide_collision_count():
+		var hit := get_slide_collision(i)
+		var body := hit.get_collider() as RigidBody3D
+		if body == null or done.has(body):
+			continue
+		done.append(body)
+		_shove(body, hit.get_normal(), hit.get_position(), incoming)
+
+
+## One impact, resolved as a perfectly inelastic collision: both bodies would
+## end up travelling at `m1 * v / (m1 + m2)`.
+##
+## **One formula, no special cases, and that is the point.** Ram a crate lighter
+## than you and it flies while you barely slow. Ram something much heavier and
+## you stop dead — and the crash-stun then follows on its own out of
+## `_was_stopped_dead()`, with no code anywhere that knows what "heavy" means.
+## A player can look at a thing and predict what ramming it will do, which is
+## the difference between mass as a reasoning tool and mass as a stat.
+func _shove(body: RigidBody3D, normal: Vector3, contact: Vector3, incoming: Vector3) -> void:
+	# Speed delivered INTO the surface. A graze delivers almost nothing, which is
+	# what the dot product buys: scraping past a crate must not fling it.
+	var closing := -incoming.dot(normal)
+	if closing < push_min_speed:
+		return
+
+	var share := mass / maxf(mass + body.mass, 0.01)
+	var given := closing * share * push_transfer
+	# Woken first: a settled crate is a SLEEPING RigidBody3D and ignores an
+	# impulse. Applied off-centre at the contact point so it tumbles instead of
+	# sliding like a hovercraft — the one place the doc's "simulate the garnish"
+	# gets to apply here.
+	body.sleeping = false
+	body.apply_impulse(-normal * given * body.mass, contact - body.global_position)
+
+	# ...and we keep exactly what the collision leaves us.
+	#
+	# SUBTRACTED from the post-slide velocity rather than rebuilt from
+	# `incoming`, which matters when a crate is pinned against a wall: rebuilding
+	# would throw away the wall slide that `move_and_slide()` just worked out and
+	# shove us into the wall instead. Subtracting composes with it — the solver
+	# already removed all of our speed into the surface, so this gives back only
+	# the part the crate did not absorb.
+	velocity -= normal * given
+
+
+## Rule 2 and rule 4 together: an impact that big has to move what is lying
+## around it, or the slam reads as a sound effect with a decal on it.
+##
+## Walked by GROUP and distance rather than with an `Area3D`, for the two
+## reasons the spin established: an area added and queried in the same frame
+## reports nothing, and a settled crate is a sleeping body that overlap queries
+## are unreliable about. `weight_sensor.gd` walks groups for the same reasons.
+func _scatter_loose_objects(force: float) -> void:
+	if force <= 0.0:
+		return
+	var reach := slam_scatter_radius * clampf(force, 0.25, 2.0)
+	var done: Array[RigidBody3D] = []
+	for group in [&"heavy", &"throwable"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var body := node as RigidBody3D
+			# A crate can be in both groups, and kicking it twice is free energy.
+			if body == null or done.has(body):
+				continue
+			var offset := body.global_position - global_position
+			var gap := offset.length()
+			if gap > reach or gap < 0.01:
+				continue
+			done.append(body)
+			# Mostly outward with a lift in it, so things leave the ground and
+			# the impact reads as a shockwave rather than as a floor sweep.
+			var away := (offset / gap + Vector3.UP * 0.9).normalized()
+			var speed := slam_scatter_power * force * (1.0 - gap / reach)
+			body.sleeping = false
+			body.apply_central_impulse(away * speed * body.mass)
+
+
+## Something loose hit US, under its own steam.
+##
+## This half cannot be done with slide collisions: `get_slide_collision()` only
+## reports what WE moved into, so a crate flying at a standing player is
+## invisible to it — and a `RigidBody3D` cannot push a `CharacterBody3D` either,
+## so without this a crate thrown by a see-saw passes straight through you.
+##
+## An `Area3D` is safe here where it would not be for the spin, because this one
+## lives in the scene and is never moved or re-added before being queried. It is
+## masked to the loose-object layer alone, so level geometry never reaches it.
+func _on_hitbox_entered(body: Node3D) -> void:
+	var rigid := body as RigidBody3D
+	if rigid == null:
+		return
+	var offset := global_position - rigid.global_position
+	if offset.length_squared() < 0.0001:
+		return
+	var toward := offset.normalized()
+	# Only what is actually coming AT us counts. A crate we are walking past, or
+	# one we just shoved away, delivers nothing.
+	var closing := rigid.linear_velocity.dot(toward)
+	if closing < push_min_speed:
+		return
+	# Their momentum, over our mass. Heavy and fast moves us; light and fast
+	# barely does, and it is the same arithmetic as `_shove` read backwards.
+	var delivered := rigid.mass * closing / maxf(mass, 0.01) * impact_take
+	velocity += toward * delivered
+	_spawn_puff(crash_colour, 10, 3.5, -toward)
+	_shake(clampf(delivered * 0.03, 0.0, crash_shake))
+	play_sfx(sfx_land)
 
 
 ## Did that wall actually STOP us, or did we go through it?
@@ -639,6 +815,9 @@ func _slam_impact() -> void:
 	# The bus is how every prop in this project hears about an impact; the
 	# player holds no reference to crumbling floors or breakable blocks.
 	Events.slam_landed.emit(global_position, force)
+	# Props hear about this through the bus; loose objects are not props and have
+	# no script to listen with, so they are kicked directly.
+	_scatter_loose_objects(force)
 	_spawn_ring(2.4 + 4.0 * clampf(force, 0.0, 1.5), force > 0.8)
 	_spawn_puff(crash_colour, 16, 4.0, Vector3.DOWN)
 	_shake(land_shake + force * 0.6)

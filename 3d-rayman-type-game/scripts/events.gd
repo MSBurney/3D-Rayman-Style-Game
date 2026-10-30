@@ -79,8 +79,9 @@ signal purchase_made(what: Node3D, cost: int)
 ## nothing when you cannot afford it is indistinguishable from a broken one.
 signal purchase_refused(what: Node3D, short: int)
 
-## A spin attack tripped a switch. Wire a door to this and the door and the
-## switch never have to know about each other.
+## A switch changed state — a spin attack tripped one, or a PressurePlate went
+## down under enough weight. Wire a door to this and the door and the switch
+## never have to know about each other.
 ##
 ## Note the switch is passed along, so a listener can tell *which* one it was —
 ## check `switch.name`, or give your door an `@export var opened_by: SpinSwitch`

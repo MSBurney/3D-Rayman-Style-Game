@@ -36,6 +36,9 @@ func _ready() -> void:
 	await _charges()
 	await _charge_survives_a_jump()
 	await _boost_fade()
+	await _see_saw()
+	await _momentum_transfer()
+	await _plate()
 	print("---- %d wrong ----" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
@@ -240,6 +243,246 @@ func _boost_fade() -> void:
 		"%d taps reached %.1f m/s, fade is %.1f, flat adding would give %.1f"
 			% [taps, top, player.boost_fade_speed, uncapped])
 	_release_all()
+	await get_tree().physics_frame
+
+
+## Universal weight rule 3, and the prop built to make it visible.
+##
+## Most of this measures `WeightSensor.moment` rather than waiting for the plank
+## to finish moving, and that is deliberate: standing still on a 14-degree slope
+## is a near-tie between `slope_gravity` and `walk_decel`, so a test that waited
+## for the tilt to settle would be measuring the player creeping downhill as
+## much as the rule. The moment is the rule; the tilt is its presentation.
+func _see_saw() -> void:
+	print("  -- weight rule 3: the heavier side of a pivot wins")
+	var see_saw := level.get_node_or_null("SeeSaw") as SeeSaw
+	var crate := level.get_node_or_null("SeeSawCrate") as RigidBody3D
+	if see_saw == null or crate == null:
+		_note("the see-saw is in the level", false, "SeeSaw / SeeSawCrate missing")
+		return
+
+	# Player parked well away, so only the crate is on the plank.
+	await _teleport(Vector3(0, 0.15, -52))
+	for i in 90:
+		await get_tree().physics_frame
+	_note("the crate alone tips its own end down", see_saw.leaning() == 1,
+		"leaning %d at %.1f degrees" % [see_saw.leaning(), see_saw.tilt])
+
+	# A scriptless RigidBody3D and a CharacterBody3D weighed by the same layer.
+	# That is rule 5 — everything obeys the same physics — and the crate proving
+	# it without a line of script is the whole point of the `heavy` group.
+	await _teleport(see_saw.to_global(Vector3(0, 0.3, -2.0)))
+	_note("the player and the crate both have weight",
+		see_saw.sensor.riders.size() == 2,
+		"%d riders, %.1f total" % [see_saw.sensor.riders.size(),
+			see_saw.sensor.total_mass])
+	_note("near the pivot the crate still wins", see_saw.sensor.moment > 0.0,
+		"moment %+.1f" % see_saw.sensor.moment)
+
+	# ...and THE SAME WEIGHT, FURTHER OUT, WINS. The lever is the lesson, and it
+	# is the one thing here a player can work out unaided.
+	await _teleport(see_saw.to_global(Vector3(0, 0.3, -4.2)))
+	_note("the same weight further out wins", see_saw.sensor.moment < 0.0,
+		"moment %+.1f" % see_saw.sensor.moment)
+
+	print("  -- and the slam is the see-saw launcher")
+	var thrown: Array[float] = []
+	see_saw.launched.connect(func(_body: Node3D, speed: float) -> void:
+		# Recorded into an ARRAY, never into a captured float. A GDScript lambda
+		# captures a local by VALUE, so assigning to a captured float writes to
+		# the lambda's own copy and the outer variable never changes — which
+		# reads as "the signal never fired" and has already cost this project an
+		# afternoon of hunting a bug that was not there.
+		thrown.append(speed))
+
+	# Dropped from 8 m onto one end, for real, rather than faking the signal.
+	await _teleport(see_saw.to_global(Vector3(0, 8.0, -4.0)))
+	# Long enough for WALK to notice there is no floor and hand over to AIR,
+	# because `crouch` only becomes a slam from AIR or CHARGE.
+	for i in 14:
+		await get_tree().physics_frame
+	Input.action_press("crouch")
+	await get_tree().physics_frame
+	Input.action_release("crouch")
+	for i in 120:
+		await get_tree().physics_frame
+		if thrown.size() > 0:
+			break
+	var detail := "nothing was thrown"
+	if thrown.size() > 0:
+		detail = "threw %d, fastest %.1f m/s" % [thrown.size(), thrown.max()]
+	_note("a slam on one end throws the other", thrown.size() > 0, detail)
+
+
+## Universal weight rule 1, and the build list's "pressure plate requiring
+## walk-mode precision" — which is a claim, so it is tested as one.
+func _plate() -> void:
+	print("  -- weight rule 1: a visible weight threshold")
+	var plate := level.get_node_or_null("Plate") as PressurePlate
+	var lift := level.get_node_or_null("PlateLift") as MovingPlatform
+	var deck := level.get_node_or_null("PlateDeck") as Node3D
+	if plate == null or lift == null or deck == null:
+		_note("the plate is in the level", false, "Plate / PlateLift / PlateDeck missing")
+		return
+
+	# Measured BEFORE the plate is pressed, while the lift is still at its start.
+	# Does it ARRIVE at the deck, or merely near it? "Nearly" is a lip the player
+	# trips on, and it is invisible until somebody measures it.
+	var lift_top := lift.global_position.y + 0.3 + lift.travel.y
+	var deck_top := deck.global_position.y + 0.4
+	_compare("the lift arrives at deck height", lift_top, deck_top, 0.05)
+
+	# THE DESIGN CLAIM, and it has to be tested before the standing one because
+	# this plate latches. A charge at 20 m/s is inside a 1.8 m pad for about five
+	# physics frames, against a fifteen-frame hold.
+	await _place(Vector3(22, 0.15, 4))
+	Input.action_press("attack")
+	var crossed := false
+	for i in 300:
+		await get_tree().physics_frame
+		if plate.down:
+			break
+		if player.global_position.z > 24.0:
+			crossed = true
+			break
+	Input.action_release("attack")
+	await get_tree().physics_frame
+	_note("a charge across it does NOT set it off", crossed and not plate.down,
+		"crossed=%s pressed=%s" % [crossed, plate.down])
+
+	# Standing on it is NOT enough any more, which is the interesting kind of
+	# plate: it wants 14 and the hero weighs 10. "Go and find something heavy"
+	# only became a solvable instruction when weight rule 2 went in.
+	await _place(Vector3(22, 0.45, 18))
+	for i in 60:
+		await get_tree().physics_frame
+	_note("your own weight is not enough", not plate.down,
+		"you weigh %.0f, it wants %.0f" % [player.mass, plate.required_mass])
+
+	# ...but the crate is. Placed rather than rammed here: the shove has its own
+	# section, and a six-metre push is not a repeatable measurement.
+	var crate := level.get_node_or_null("PlateCrate") as RigidBody3D
+	await _place(Vector3(40, 0.15, -52))
+	await _put(crate, Vector3(22, 0.8, 18))
+	var waited := 0.0
+	for i in 150:
+		await get_tree().physics_frame
+		waited += 1.0 / 60.0
+		if plate.down:
+			break
+	_note("a heavy enough crate is", plate.down,
+		"crate weighs %.0f, pressed after %.2f s" % [crate.mass, waited])
+	_note("and it raises the lift", lift.active, "lift active=%s" % lift.active)
+
+
+## Universal weight rule 2: momentum transfers on impact. All three directions,
+## because until this went in the hero could MEASURE weight everywhere and
+## deliver it nowhere — which is exactly how the props played.
+func _momentum_transfer() -> void:
+	print("  -- weight rule 2: momentum transfers on impact")
+	var crate := level.get_node_or_null("PlateCrate") as RigidBody3D
+	if crate == null:
+		_note("there is a crate to shove", false, "PlateCrate missing")
+		return
+
+	# ── the hero pushes an object, and takes the reaction ──
+	# At walking pace rather than in a charge, deliberately: `_was_stopped_dead()`
+	# only fires above `walk_speed`, so this measures the shove instead of
+	# measuring a crash. Ramming this crate IN a charge crash-stuns you, which is
+	# correct — it outweighs you 16 to 10.
+	await _put(crate, Vector3(40, 0.55, -44))
+	await _place(Vector3(40, 0.15, -48))
+	player.velocity = Vector3(0, 0, player.walk_speed)
+	var shifted := 0.0
+	var kept := player.walk_speed
+	for i in 120:
+		await get_tree().physics_frame
+		# HORIZONTAL speed only. Watching the whole vector triggered on the 5 cm
+		# the crate settles through under gravity, several frames before the
+		# player arrived — so the check passed while measuring nothing but the
+		# crate falling, and reported the player at full speed because they had
+		# not touched it yet.
+		var sideways := Vector2(crate.linear_velocity.x, crate.linear_velocity.z).length()
+		if sideways > 0.5:
+			shifted = sideways
+			kept = player.flat_speed()
+			break
+	_note("ramming a crate moves it", shifted > 1.0,
+		"it left at %.1f m/s" % shifted)
+	# The half that makes mass a reasoning tool rather than a stat.
+	_note("and the crate takes speed off YOU", kept < player.walk_speed * 0.8,
+		"kept %.1f of %.1f m/s" % [kept, player.walk_speed])
+
+	# ── a slam scatters what is lying around it ──
+	await _put(crate, Vector3(40, 0.55, -44))
+	await _teleport(Vector3(40, 9.0, -46))
+	# Long enough for WALK to notice there is no floor: `crouch` is only a slam
+	# from AIR or CHARGE.
+	for i in 14:
+		await get_tree().physics_frame
+	Input.action_press("crouch")
+	await get_tree().physics_frame
+	Input.action_release("crouch")
+	var lifted := 0.0
+	for i in 120:
+		await get_tree().physics_frame
+		lifted = maxf(lifted, crate.linear_velocity.y)
+	_note("a slam throws loose objects around it", lifted > 1.0,
+		"the crate went up at %.1f m/s" % lifted)
+
+	# ── and something arriving under its own steam moves the HERO ──
+	# The direction `get_slide_collision()` cannot see, because it only reports
+	# what WE moved into. A standing player is invisible to it.
+	await _put(crate, Vector3(40, 0.55, -48))
+	await _place(Vector3(40, 0.15, -44))
+	crate.linear_velocity = Vector3(0, 0, 18)
+	var shoved := 0.0
+	for i in 90:
+		await get_tree().physics_frame
+		shoved = maxf(shoved, player.velocity.z)
+		if shoved > 1.0:
+			break
+	_note("a crate thrown at you moves YOU", shoved > 1.0,
+		"shoved at %.1f m/s" % shoved)
+	await _put(crate, Vector3(16, 0.8, 18))
+
+
+## Parks a loose object somewhere, stopped.
+##
+## All four lines are needed. A `RigidBody3D` keeps its velocity, its spin AND
+## its sleep state across a teleport, so without clearing them the next
+## measurement begins with the last one's leftovers — and a sleeping body
+## ignores the impulse that the next check is trying to measure.
+func _put(body: RigidBody3D, at: Vector3) -> void:
+	if body == null:
+		return
+	body.global_position = at
+	body.rotation = Vector3.ZERO
+	body.linear_velocity = Vector3.ZERO
+	body.angular_velocity = Vector3.ZERO
+	body.sleeping = false
+	await get_tree().physics_frame
+
+
+## Puts the player somewhere and lets one physics frame pass, WITHOUT waiting
+## for them to land.
+##
+## Right for the weight checks and wrong for everything else: `weight_sensor.gd`
+## measures a volume, so a hovering player is weighed exactly like a standing
+## one — which is also what lets a carried or falling body count, and is why it
+## is a position check rather than a floor check.
+func _teleport(at: Vector3) -> void:
+	_release_all()
+	player.global_position = at
+	player.velocity = Vector3.ZERO
+	player._stun_left = 0.0
+	player._slam_recover_left = 0.0
+	player._windup_left = 0.0
+	player._charging = false
+	player._charge_through_air = false
+	player._charge_buffered = 0.0
+	player._jump_buffered = 0.0
+	player._set_state(HeavyPlayer.State.WALK)
 	await get_tree().physics_frame
 
 

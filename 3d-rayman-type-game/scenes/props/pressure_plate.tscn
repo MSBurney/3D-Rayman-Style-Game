@@ -1,0 +1,45 @@
+[gd_scene load_steps=4 format=3 uid="uid://byhylpx60k578"]
+
+[ext_resource type="Script" uid="uid://cx7qxlcphtqe0" path="res://scripts/props/pressure_plate.gd" id="1"]
+[ext_resource type="Script" uid="uid://3ip0nkuxmp67" path="res://scripts/components/weight_sensor.gd" id="2"]
+
+; `emission_enabled` is switched on HERE and never in code. Emission is a
+; feature flag and part of what Godot keys a shader on, so a duplicate that
+; turns it on at runtime needs its own shader compiled — a measured two-frame
+; stall. pressure_plate.gd duplicates this material and only ever writes
+; `albedo_color` and `emission`, which are plain uniforms and share one shader.
+[sub_resource type="StandardMaterial3D" id="Mat_pad"]
+albedo_color = Color(0.55, 0.5, 0.46, 1)
+emission_enabled = true
+emission = Color(0.55, 0.5, 0.46, 1)
+emission_energy_multiplier = 0.45
+
+[sub_resource type="BoxMesh" id="Mesh_pad"]
+material = SubResource("Mat_pad")
+size = Vector3(1.8, 0.1, 1.8)
+
+; NO COLLISION, and a Node3D rather than a StaticBody3D — see the note at the
+; top of pressure_plate.gd. A solid pad standing proud of the floor is a KERB: a
+; charge aimed across it stops dead against the side and crash-stuns. The weight
+; is measured as a volume instead, which is what `weight_sensor.gd` does anyway.
+;
+; The scene's ORIGIN SITS ON THE FLOOR, so a plate is placed at the height of
+; the surface it is set into rather than at half its own thickness. Same
+; thinking as the "author planks by their TOP height" rule in CLAUDE.md.
+[node name="PressurePlate" type="Node3D"]
+script = ExtResource("1")
+
+; Proud of the floor by 5 cm, so it reads as a plate without being a step.
+[node name="Pad" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Pad"]
+mesh = SubResource("Mesh_pad")
+
+; The box starts a hair BELOW the floor the plate is set into: a
+; CharacterBody3D's origin is at its feet, so a player standing here sits
+; exactly on that plane and a box starting level with it would skim past them.
+[node name="Weight" type="Node" parent="."]
+script = ExtResource("2")
+size = Vector3(1.8, 1.8, 1.8)
+offset = Vector3(0, 0.85, 0)

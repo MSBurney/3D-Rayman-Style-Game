@@ -100,3 +100,19 @@ spring_length = 7.5
 margin = 0.4
 
 [node name="Camera3D" type="Camera3D" parent="CameraRig/SpringArm3D"]
+
+; Notices loose objects arriving under their own steam. A RigidBody3D cannot
+; push a CharacterBody3D, and `get_slide_collision()` only reports what WE moved
+; into — so a crate flying at a standing player is invisible to both. This is
+; the only way the other half of weight rule 2 can reach us.
+;
+; An Area3D is safe here where it would not be for the spin: this one lives in
+; the scene and is never moved or re-added before being queried. Masked to layer
+; 64 alone — loose heavy objects — so level geometry never reaches it.
+[node name="Hitbox" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 64
+
+[node name="Shape" type="CollisionShape3D" parent="Hitbox"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 0)
+shape = SubResource("Shape_body")

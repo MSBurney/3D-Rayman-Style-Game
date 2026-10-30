@@ -2,6 +2,9 @@
 
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
 [ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="wall"]
+[ext_resource type="PackedScene" uid="uid://bgfe0aabl2p5s" path="res://scenes/props/see_saw.tscn" id="seesaw"]
+[ext_resource type="PackedScene" uid="uid://byhylpx60k578" path="res://scenes/props/pressure_plate.tscn" id="plate"]
+[ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="lift"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_top_color = Color(0.32, 0.52, 0.78, 1)
@@ -27,6 +30,22 @@ albedo_color = Color(0.58, 0.5, 0.38, 1)
 
 [sub_resource type="StandardMaterial3D" id="MatTower"]
 albedo_color = Color(0.4, 0.42, 0.5, 1)
+
+[sub_resource type="BoxShape3D" id="Shape_crate"]
+size = Vector3(1.1, 1.1, 1.1)
+
+[sub_resource type="StandardMaterial3D" id="MatCrate"]
+albedo_color = Color(0.72, 0.42, 0.26, 1)
+
+[sub_resource type="BoxMesh" id="Mesh_crate"]
+material = SubResource("MatCrate")
+size = Vector3(1.1, 1.1, 1.1)
+
+[sub_resource type="StandardMaterial3D" id="MatDeck"]
+albedo_color = Color(0.5, 0.56, 0.62, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatMarker"]
+albedo_color = Color(0.95, 0.82, 0.3, 1)
 
 [node name="GreyboxRoom" type="Node3D" unique_id=2077389015]
 
@@ -189,3 +208,93 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 7.6, -30)
 use_collision = true
 size = Vector3(26, 0.8, 4)
 material = SubResource("MatGround")
+
+; ───────────────────────── universal weight rule 3: the heavier side wins ────
+;
+; A plank with a crate on one end. Step onto the far end near the middle and
+; nothing happens, because the crate out-levers you. Walk right out to the end
+; and it tips — a lever multiplies by DISTANCE, not just by mass, and finding
+; that out unaided is the best thing this prop does. Then slam that end and the
+; crate is thrown off the other one.
+[node name="SeeSaw" parent="." unique_id=771200411 instance=ExtResource("seesaw")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 1.4, 6)
+
+; Decorative, and `use_collision` is deliberately absent. A solid fulcrum under
+; a kinematically-driven plank is just something for the physics to argue with.
+[node name="SeeSawFulcrum" type="CSGBox3D" parent="." unique_id=1055370238]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 0.6, 6)
+size = Vector3(1.2, 1.2, 1.2)
+material = SubResource("MatTower")
+
+; A RigidBody3D with a mass and NO SCRIPT AT ALL — which is the whole point of
+; the `heavy` group. `mass` is a property RigidBody3D already has, so the weight
+; layer reads a bare crate for free. Deliberately LIGHTER than the player (8
+; against 10), so that leverage and not mass is what decides this see-saw.
+[node name="SeeSawCrate" type="RigidBody3D" parent="." groups=["heavy"] unique_id=1719944525]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 2.2, 9.6)
+; Layer 64 is "loose heavy object" — the same layer the throwable keg uses. The
+; player masks it, so ramming works through slide collisions, and the player's
+; Hitbox masks ONLY this layer, so a crate arriving under its own steam is
+; noticed while level geometry never reaches the area at all.
+collision_layer = 64
+collision_mask = 67
+mass = 8.0
+
+[node name="Shape" type="CollisionShape3D" parent="SeeSawCrate"]
+shape = SubResource("Shape_crate")
+
+[node name="Mesh" type="MeshInstance3D" parent="SeeSawCrate"]
+mesh = SubResource("Mesh_crate")
+
+; ──────────────────── universal weight rule 1: a visible weight threshold ────
+;
+; Walk on and stand still and it latches, raising the lift. A charge crosses a
+; 1.8 m pad in about five physics frames against a fifteen-frame hold, so it
+; cannot be set off on the way past — which is what "walk-mode precision" means
+; here in practice rather than in principle.
+[node name="Plate" parent="." unique_id=288337109 instance=ExtResource("plate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 0, 18)
+; MORE THAN THE PLAYER WEIGHS (10), on purpose. This is the interesting kind of
+; plate — "this needs more than you, go and find something" — and it is only
+; solvable at all now that weight rule 2 exists: you ram PlateCrate onto it.
+required_mass = 14.0
+stays_pressed = true
+activates = NodePath("../PlateLift")
+
+; The answer to the plate, parked a push away to the WEST of it rather than in
+; front of it. Heavy enough to hold the plate on its own (16 against 14), so the
+; crate stays put and you walk off and ride the lift.
+;
+; Not in the plate's north-south lane on purpose: a 16-mass crate parked in
+; front of a 10-mass hero is a roadblock that crash-stuns every charge down that
+; line, and the lane is also how you prove a charge cannot trip the plate.
+[node name="PlateCrate" type="RigidBody3D" parent="." groups=["heavy"] unique_id=1066320415]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0.8, 18)
+collision_layer = 64
+collision_mask = 67
+mass = 16.0
+
+[node name="Shape" type="CollisionShape3D" parent="PlateCrate"]
+shape = SubResource("Shape_crate")
+
+[node name="Mesh" type="MeshInstance3D" parent="PlateCrate"]
+mesh = SubResource("Mesh_crate")
+
+[node name="PlateLift" parent="." unique_id=1942117925 instance=ExtResource("lift")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 0.3, 30)
+
+; Where the lift goes. Its top is 12.0, which matches the lift's travel exactly
+; rather than nearly — tests/greybox_probe.gd measures the pair against each
+; other, because "nearly" is a step the player trips on.
+[node name="PlateDeck" type="CSGBox3D" parent="." unique_id=480862326]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 11.6, 40)
+use_collision = true
+size = Vector3(10, 0.8, 10)
+material = SubResource("MatDeck")
+
+; Visible from the ground, so the plate reads as a question that has an answer
+; somewhere rather than as a button with no consequence.
+[node name="PlateMarker" type="CSGBox3D" parent="." unique_id=1377486290]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 13.6, 40)
+size = Vector3(0.6, 3.2, 0.6)
+material = SubResource("MatMarker")

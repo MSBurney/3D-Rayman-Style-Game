@@ -113,6 +113,10 @@ Current, against the tuning pass below.
 | charge-jump | **21.2 m** |
 | authority at walk speed / at top speed | 1.00 / 0.20 |
 | a chain of ten jump-boosts | **28.0 m/s** (a flat +7 each would give 85) |
+| a slam on a see-saw end | throws an 8-mass crate at **9.7 m/s** |
+| walking into a 16-mass crate | it leaves at 3.7 m/s, you keep **5.1 of 15.0** |
+| a slam beside a crate | throws it up at 4.6 m/s |
+| a crate thrown at you at 18 m/s | shoves you at **6.7 m/s** |
 
 **That `break_speed` row is the whole room.** The wall is deliberately out of reach of a charge on
 flat ground, so the slope is not a shortcut to it — it is the only way through it. If the wall ever
@@ -187,14 +191,201 @@ becomes breakable without the ramp, the room has stopped asking the doc's questi
 - **`floor_snap_length` is 0.8 on the heavy player**, above the 0.6 the old one uses, because a
   charge tops 26 m/s on a slope and the surface falls away faster than a straight-line step follows.
 
-### Not built yet, and both are named in the doc's build list
+### The weight layer: the see-saw and the plate (built 2026-10-30)
 
-**The see-saw and the pressure plate.** Both need new props rather than new geometry — the see-saw
-is universal weight rule 3 (*the heavier side of a pivot wins*) and is a real system, and the plate
-is a walk-mode precision input. They feed the doc's *secondary* read — "everyone looping the
-slope-and-wall means B-primary; everyone fiddling with the see-saw and plate means C-primary" — so
-leaving them out does not block the pass/fail judgement, but it does mean that secondary read
-cannot be taken yet.
+**The last two props on the doc's Milestone 1 build list**, which means the greybox can now be
+asked the doc's *secondary* question as well as its primary one — *"everyone looping the
+slope-and-wall means B-primary; everyone fiddling with the see-saw and plate means C-primary"*.
+
+Three files, and the first one is the important one:
+
+| | |
+| --- | --- |
+| **`components/weight_sensor.gd`** | a drop-in Node that answers "what is on me, and how heavy" |
+| **`props/see_saw.gd`** | weight rule 3 — the heavier side of a pivot wins |
+| **`props/pressure_plate.gd`** | weight rule 1 — surfaces have visible weight thresholds |
+
+#### The sensor is shared because the doc says it has to be
+
+Rules 1, 3 and 5 all need the same measurement, and the doc attaches an engineering instruction to
+them: they *"must behave identically everywhere, so they are built as ONE physics/interaction layer
+early — never as per-level scripts"*. **Rule 5 is what makes sharing non-optional** — "enemies obey
+the same physics as the player" is a promise two props could easily break in different ways. A
+see-saw and a plate that disagreed about how heavy the player is would be two bugs that only show
+up in the one puzzle using both.
+
+It is a component rather than a base class or a singleton because that is the pattern this project
+already has: `health.gd`, `thrown_flight.gd`, `coin_thief.gd` and `item_thief.gd` are all drop-in
+Nodes with no scene of their own.
+
+#### `heavy` is the extension point, and `mass` is the whole interface
+
+Anything with weight does exactly two things: joins a watched group (`heavy` is the general one,
+alongside `player`, `enemy` and `throwable`), and has a `mass` property. Same shape as `spinnable`
+before it, and the sensor never needs editing again.
+
+**A `RigidBody3D` already has `mass`, so a crate needs no script at all** — the greybox's
+`SeeSawCrate` is a bare `RigidBody3D` in the `heavy` group with `mass = 8.0`, and the weight layer
+reads it for free. `HeavyPlayer` now declares `@export var mass: float = 10.0` for the same reason,
+and it is asked for **by name through `get()`** rather than by checking the class. Note that the
+player's `mass` does not touch the movement code at all and never should: the weight in the
+handling is the authority curve and the charge (*"fake the mass"*), while this number is what the
+WORLD weighs you at.
+
+#### The sensor walks groups by position; it does not use an `Area3D`
+
+Both reasons are traps already paid for in this codebase. **A sleeping `RigidBody3D` is unreliable
+in an overlap query** — and a crate that has settled on a see-saw is exactly that, while also being
+the single most important thing a see-saw needs to know about. And **an area moved and queried in
+the same frame reports nothing**, which a see-saw does every physics frame. So the volume is
+checked with maths in the host's local space instead.
+
+A side effect worth knowing: because it is a position check and not a contact check, **a plate does
+not care whether you are standing, sliding or falling through it.**
+
+#### Leverage, not just mass
+
+`WeightSensor.moment` is `Σ mass × local z`, so standing further out counts for more. That is how a
+lever actually works, and it is the one thing about a see-saw a player can work out unaided. The
+greybox is arranged to teach exactly that: the crate (8) is deliberately **lighter** than the
+player (10) yet still wins from the middle, and only loses when you walk right out to the end.
+
+```
+  crate at z=+3.6, mass 8     moment +28.8
+  player at z=-2.0, mass 10   moment -20.0  → crate wins, nothing happens
+  player at z=-4.2, mass 10   moment -42.0  → you win, it tips
+```
+
+#### Two bugs the probe caught, and both were design bugs
+
+- **The plate was a kerb.** The first version was a solid `StaticBody3D` standing 25 cm proud of
+  the floor, and a charge aimed across it stopped dead against the side and crash-stunned — every
+  time. A plate you cannot charge over is a wall with a light on it, and worse, the one input it
+  exists to reward was the only one that ever reached the top of it. It is now a `Node3D` with **no
+  collision at all**: a visual sitting 5 cm proud, with the weight measured as a volume.
+- **The slam's "whack" swung the plank through its own passenger.** The verb table lists the slam as
+  the "see-saw launcher", so the first version snapped the plank to full tilt on the slammed side.
+  That lifts the far end UP through whatever is standing on it: the crate ended up a metre *below*
+  the plank in a single frame, outside the sensor's box, so it was never launched — and had it been,
+  it would have been fired into the plank's underside. **Any rotation that lifts an end sweeps
+  through its passenger unless the passenger is carried, and carrying only works when the motion is
+  gradual.** So the slam now contributes the impulse and nothing else, and the angle stays a pure
+  function of what is standing where. The pay-off is the crate leaving at ~10 m/s, and the plank
+  then tips toward you on its own because the crate is gone.
+
+#### What makes the plate walk-mode, which is a claim and so is tested as one
+
+`hold_time` (0.25 s). A charge at 20 m/s is inside a 1.8 m pad for about five physics frames
+against a fifteen-frame hold, so it cannot be set off on the way past — and the charge has no free
+brakes, so stopping on a small pad is a real act. `tests/greybox_probe.gd` charges across it and
+asserts it does **not** fire.
+
+**`hold_time` is not an input delay and must not grow into one.** The cardinal rule is instant
+inputs, heavy body: the player's input is never delayed, and the pad starts visibly sinking on the
+first frame your weight is on it. What takes time is the pad, which is a thing in the world. If it
+ever reads as lag, the fix is a faster visual response, not a shorter hold.
+
+The plate gives **two separate readouts, because there are two ways to fail**: it *tints* with how
+close the weight on it is to `required_mass`, and *sinks* with how far through the hold it is. "I am
+not heavy enough" and "I did not stand still long enough" are different problems, and one blended
+readout would make both look like the same shrug.
+
+It also reuses `Events.switch_toggled` rather than adding a signal, since that signal's own
+documentation already explains how to wire a door to a switch without the two knowing about each
+other — and a plate is a switch. `activates` is a **`NodePath`**, never a typed node export, for the
+documented reason that a typed node export does not survive a path hand-written into a `.tscn`.
+
+### Weight rule 2: momentum transfers on impact (built 2026-10-30)
+
+**The props above shipped measuring weight and unable to deliver any, and in play that is exactly
+how they felt** — the report was *"nothing really gets properly interacted with"*, and it was right.
+This is the fix, and it is one rule rather than three broken props.
+
+**A `CharacterBody3D` does not push a `RigidBody3D` in Godot. At all.** They are solved in separate
+passes: the character treats a crate as a wall and the crate never hears about it. Walking the slide
+collisions and applying the impulses by hand is the only way there is.
+
+**That makes this a VERB, not a detail.** The doc's verb set is Walk · Charge · Jump · Slam · Boost,
+with no grab and no carry, so ramming and stomping are the *only* ways the hero can put an object
+anywhere. Three directions, all in `heavy_player.gd`:
+
+| | |
+| --- | --- |
+| **`_shove_what_we_hit()`** | we ran into it — walks `get_slide_collision()` |
+| **`_scatter_loose_objects()`** | a slam threw it — walks the `heavy`/`throwable` groups by distance |
+| **`_on_hitbox_entered()`** | it ran into US — a persistent `Area3D` masked to layer 64 |
+
+#### One formula, no special cases
+
+Every impact resolves as a perfectly inelastic collision: both bodies end up travelling at
+`m1·v / (m1 + m2)`. Ram a crate lighter than you and it flies while you barely slow; ram something
+much heavier and you stop dead — **and the crash-stun then follows on its own out of
+`_was_stopped_dead()`, with no code anywhere that knows what "heavy" means.**
+
+That is the difference between mass as a reasoning tool and mass as a stat: a player can look at a
+thing and predict what ramming it will do. Measured, hero 10 against a crate of 16 at walking pace:
+
+```
+  the crate leaves at   3.7 m/s
+  you keep              5.1 m/s of 15.0
+```
+
+Note the consequence, because it is a design lever and not a bug: **a crate heavier than you
+crash-stuns a charge, every time** (you keep under half your speed, which is what
+`_was_stopped_dead()` asks). A charge is the wrong tool for a heavy crate; walking into it is the
+right one, because `_was_stopped_dead()` only fires above `walk_speed`. Nobody designed that
+distinction — it falls out of the formula.
+
+#### Three things in it that are not arbitrary
+
+- **It reads the PRE-MOVE velocity, never `velocity`.** The trap this project has now paid for
+  three times: `move_and_slide()` has already zeroed your speed by the time you can ask about the
+  collision, so a shove computed from `velocity` delivers nothing for exactly the head-on hits that
+  should be hardest. Same reason `approach_velocity()` exists for props.
+- **The reaction is SUBTRACTED from the post-slide velocity, not rebuilt from the incoming one.**
+  Rebuilding would throw away the wall slide `move_and_slide()` just worked out, which matters the
+  moment a crate is pinned against a wall. Subtracting composes with it: the solver already removed
+  all of our speed into the surface, so this gives back only the part the crate did not absorb.
+- **Layer 64 now means "loose heavy object"** — the layer the throwable keg already used. The
+  player masks it, so ramming works through slide collisions, and the player's `Hitbox` masks
+  **only** that layer, so level geometry never reaches the area at all.
+
+#### The Area3D is the exception that proves the rule
+
+`get_slide_collision()` only reports what **we** moved into, so a crate flying at a standing player
+is invisible to it — and a `RigidBody3D` cannot push a `CharacterBody3D` either, so without the
+hitbox a crate thrown by a see-saw passes straight through you. An `Area3D` is safe here where it
+would be wrong for the spin: **this one lives in the scene and is never moved or re-added before
+being queried.** The spin's problem was an area created and asked about in the same frame.
+
+#### And the see-saw now obeys rule 5
+
+`arrival_speed` / `arrival_transfer`. The plank used to answer *only* to `Events.slam_landed`, and
+nothing but the player emits that signal — so a prop built to demonstrate "everything obeys the same
+physics" responded to exactly one body in the world. A dropped crate, a thrown keg or a stomping
+enemy all have a mass and a downward speed, which is all it needs.
+
+**An arrival launches by transferring MOMENTUM, not through the `launch_per_force` curve the slam
+uses, and that is load-bearing rather than tidy.** Through the force curve a heavy crate can launch a
+second crate *faster than it arrived* — so two crates on opposite ends play tennis with each other at
+increasing speed, for ever. Conserving momentum cannot amplify, so the loop damps out by
+construction instead of by a cap catching it.
+
+#### What this unlocked in the greybox, and what it did not
+
+The plate now wants **14** against the hero's **10**, so standing on it is not enough and
+`PlateCrate` (16) has to be shoved onto it — which is the interesting kind of plate, and it was
+unsolvable before this.
+
+**Still not reachable: the see-saw launching the PLAYER.** Something heavy has to land on the far end
+while you stand on this one, and with no carry verb the only way to arrange that is to shove a crate
+off a ledge and then outrun its fall — about 0.6 s from 6 m, which is not a thing a person can do.
+The rule is implemented and correct, and an enemy or a timed drop will use it; the greybox has no
+setup for it, deliberately rather than by omission.
+
+**If a carry verb is ever wanted, that is a document amendment, not a code change** — the verb set is
+one of the doc's standing rules, and *"a proposal that violates one needs this document amended
+first, not an exception granted quietly."*
 
 ### The first tuning pass (2026-10-27), and the two things it contradicts
 
@@ -220,6 +411,26 @@ telling us something, and they are written down rather than reconciled:
   which is 15 m/s² against a 15 m/s walk, so **the plant takes about a second — twice
   `charge_windup`**, and the telegraph is a slow lean rather than the hard stop the comment there
   describes.
+
+**The stomp was tuned on 2026-10-30**, and these are defaults now too:
+`slam_drop_accel` 95 → **300**, `slam_max_speed` 42 → **130**, `impact_force_scalar` 1.0 → **2.0**.
+The stomp is now a near-instant plummet that hits twice as hard, which is the doc's build priority
+being taken seriously — *"the slam is this game's A-press… the controller is tuned around the fall
+feeling incredible before anything else."*
+
+Two consequences to carry around:
+
+- **Slam force is no longer a 0..1 number.** `impact_force_scalar` multiplies it, so what
+  `Events.slam_landed` carries now reaches about **4.2** (a full-height drop plus delivered speed,
+  doubled). Anything with a force threshold is reading a different scale than it was tuned on:
+  `CrumblingFloor.slam_power_needed` (0.12) is now cleared by almost any landing, and the shockwave
+  ring's own `clampf(force, 0.0, 1.5)` is pinned at maximum every time. Neither is wrong, but
+  neither was chosen.
+- **130 m/s is 2.17 m per physics frame.** `move_and_slide` sweeps its shape so the player will not
+  tunnel through a floor, but an `Area3D` sensor thinner than that can be stepped straight over
+  between frames. The breakable block's sensor is deliberately wider than the block for a related
+  reason; if a prop ever fails to notice a stomp that visibly hit it, this is the first thing to
+  check.
 
 **And the 14 m gap is no longer in the level.** `GroundSouth` in `greybox_room.tscn` is a single
 1000 x 1000 plane now, which makes the room a free-roam space to tune in but also removes the doc's
@@ -270,15 +481,15 @@ file to be read.
   scripts/
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
-    components/      health, thrown_flight, coin_thief, item_thief (drop-in Nodes,
-                     no matching scene)
+    components/      health, thrown_flight, coin_thief, item_thief, weight_sensor
+                     (drop-in Nodes, no matching scene)
     player/          heavy_player.gd (the modal controller, Milestone 1),
                      player.gd (the old moveset), abilities, camera, visuals, ledge sensor
     enemies/         walker, turret, bullet, boss_warden
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
                      breakable block, treasure, level exit, transformer, grind rail,
                      priced gate, vending machine, platform seed, seed socket,
-                     moving platform
+                     moving platform, see-saw, pressure plate (the weight layer)
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
                      main.tscn (moveset showcase), playground.tscn (momentum),
@@ -390,6 +601,23 @@ site, but they are worth knowing up front:
   one before testing rather than after.
 - **Sleeping `RigidBody3D`s are unreliable in `Area3D` overlap queries.** Grabbing a resting keg
   walks the `throwable` group by distance rather than using an area.
+- **A `CharacterBody3D` does not push a `RigidBody3D`, and a `RigidBody3D` cannot push a
+  `CharacterBody3D`.** Neither direction does anything at all — they are solved in separate passes,
+  so a character treats a crate as a wall and the crate never hears about it. There is no setting
+  for this; both halves have to be written by hand, and they need two different mechanisms:
+  - **Us into them:** walk `get_slide_collision()` after `move_and_slide()` and `apply_impulse()`.
+    Read the velocity from BEFORE the move (`approach_velocity()` / `_pre_move_flat`), because the
+    solver has already zeroed it — the same trap as the breakable block, and it makes a head-on hit
+    deliver nothing at all. Wake the body first (`sleeping = false`) or a settled crate ignores the
+    impulse.
+  - **Them into us:** `get_slide_collision()` only reports what WE moved into, so a crate flying at
+    a standing player is invisible to it. That half needs a persistent `Area3D` on the player. An
+    area is fine HERE, unlike for the spin, because it lives in the scene and is never moved or
+    re-added before being queried.
+
+  It cost this project a whole set of props that measured weight and could not deliver any: a
+  see-saw, a pressure plate and a weight sensor that all worked perfectly and played as though
+  nothing in the level was connected to anything.
 - **`--script` mode has no autoloads.** Running `--headless --script foo.gd` does *not* register
   `Events`, so every script mentioning it fails to compile, its node loads with a null script, and
   all its exported values read back as null — which looks exactly like broken data. Write throwaway
