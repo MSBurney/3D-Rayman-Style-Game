@@ -56,6 +56,9 @@ signal broken(at: Vector3)
 ## Seconds until it comes back. Negative means it is gone for good, which is
 ## what you usually want for a wall guarding a route.
 @export var reset_delay: float = -1.0
+## Anything at least this heavy opens it by touching it, at any speed at all.
+## Zero or below switches it off. The twin of `CrumblingFloor.break_mass`.
+@export var break_mass: float = -1.0
 ## Lets the player keep going rather than stopping dead on the frame it breaks.
 ## Without it a smashed wall still costs you all your speed, which defeats the
 ## point of having arrived fast.
@@ -102,12 +105,13 @@ func _physics_process(delta: float) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if broken_open:
 		return
-	# Duck-typed rather than `body as Player`, so the whole prop library works
-	# with BOTH controllers while the modal rewrite (heavy_player.gd) is proven
-	# alongside the old one. What a block needs is the pre-collision accessors,
-	# not a particular class.
-	var player := body as CharacterBody3D
-	if player == null or not player.has_method(&"approach_speed"):
+	# ANYTHING WITH A MASS AND A SPEED, not just a player — **rule 5, enemies
+	# obey the same physics.** This used to require a CharacterBody3D with
+	# `approach_speed()`, which meant a crate hurled at a wall at 30 m/s did
+	# absolutely nothing while the hero jogging into it at 22 opened it. That is
+	# the shape of bug the weight layer exists to stop: the block was asking
+	# *who are you* when the only honest question is *how fast were you going*.
+	if body == null:
 		return
 	# approach_speed(), NOT player.velocity. Running into the block means
 	# move_and_slide() has already zeroed the horizontal velocity by the time this
@@ -118,11 +122,20 @@ func _on_body_entered(body: Node3D) -> void:
 	#
 	# Horizontal only, deliberately: a block in a wall should not care that you
 	# were also falling, or a plain drop would open a wall you barely touched.
-	var speed: float = player.call(&"approach_speed")
+	# Too heavy to be resisted, however gently it arrived. **This is what makes
+	# the doc's "a lured heavy enemy is a wall-breaker you aim" true** — a giant
+	# walks at 3 m/s and can therefore never clear a speed gate, so a wall meant
+	# for one has to ask about its mass instead. Rule 1 again: the threshold is a
+	# number, so a level can set it between two masses and the wall becomes a
+	# filter for which body is allowed through it.
+	if break_mass > 0.0 and Weight.mass_of(body) >= break_mass:
+		_break(body)
+		return
+	var speed := Weight.impact_speed(body)
 	if speed < break_speed:
 		_refuse()
 		return
-	_break(player)
+	_break(body)
 
 
 ## Called by PlayerAbilities when a spin lands in range — see spin_switch.gd for
@@ -154,21 +167,24 @@ func _on_slam_landed(at: Vector3, force: float) -> void:
 
 
 ## Opens up. `through` is whoever did it, so their momentum can be preserved.
-func _break(through: CharacterBody3D) -> void:
+func _break(through: Node3D) -> void:
 	broken_open = true
 	_reset_left = reset_delay
 	shape.set_deferred(&"disabled", true)
 	sensor.set_deferred(&"monitoring", false)
 
-	if through != null:
-		# Restored from approach_velocity(), NOT scaled from `velocity`. Same trap
-		# as reading the speed: by the time this runs, move_and_slide() has
-		# already stopped the player dead against the block, so `velocity` is zero
-		# and scaling it keeps nothing. The whole reason for arriving fast is that
-		# you get to keep going, so the speed has to be put back explicitly.
-		var kept: Vector3 = through.call(&"approach_velocity") * speed_kept
-		through.velocity.x = kept.x
-		through.velocity.z = kept.z
+	var character := through as CharacterBody3D
+	if character != null:
+		# Restored from the PRE-COLLISION velocity, not scaled from `velocity`.
+		# Same trap as reading the speed: by the time this runs, move_and_slide()
+		# has already stopped the player dead against the block, so `velocity` is
+		# zero and scaling it keeps nothing. The whole reason for arriving fast is
+		# that you get to keep going, so it has to be put back explicitly.
+		var kept := Weight.impact_velocity(character) * speed_kept
+		character.velocity.x = kept.x
+		character.velocity.z = kept.z
+	# A RigidBody3D needs no such repair: nothing zeroed its velocity, so it
+	# carries straight on through under its own momentum.
 
 	_spawn_break_fx()
 	_drop_coins()

@@ -55,6 +55,15 @@ enum State {
 ## `Player.slam_power()`: a hop is about 0.08, a drop from the tower is 1.0.
 ## Above zero so that hopping on the spot does not clear a room of floors.
 @export var slam_power_needed: float = 0.12
+## Anything heavier than this breaks it just by STANDING on it, however gently
+## it arrived. Zero or below switches it off.
+##
+## **This is the doc's "floors that hold the player but not the giant chasing
+## them"**, and it is the cleanest expression of rule 1 there is: the surface
+## has a weight threshold and the threshold is a number, so a level can set it
+## between two masses and the floor becomes a filter. Set it between the hero
+## (10) and a heavy enemy (40) and the route is yours alone.
+@export var break_mass: float = -1.0
 
 @export_group("Timing")
 ## Warning time between cracking and actually giving way, so a fast player can
@@ -138,11 +147,18 @@ func _physics_process(delta: float) -> void:
 ## The player touched down on us. Whether that matters depends on how fast they
 ## were falling.
 func _on_landing(body: Node3D) -> void:
-	# Duck-typed, like breakable_block.gd, so either controller can break it.
-	if not body.has_method(&"descent_speed"):
+	# ANYTHING HEAVY, not just a player — **rule 5 again.** A crate dropped on a
+	# fragile floor used to do nothing at all, because this asked for a method
+	# only a hand-written character has.
+	if body == null:
 		return
 	# Just being on it is enough, if this plank is the fragile kind.
 	if break_on_stand:
+		_crack()
+		return
+	# ...or if whatever stepped on it is simply too heavy to be carried, which is
+	# a different question from how hard it landed.
+	if break_mass > 0.0 and Weight.mass_of(body) >= break_mass:
 		_crack()
 		return
 	# descent_speed(), NOT player.velocity.y. Landing on something zeroes the
@@ -150,7 +166,7 @@ func _on_landing(body: Node3D) -> void:
 	# overlap, so reading velocity.y here sees a stationary player and no landing
 	# is ever heavy enough. descent_speed() exists to give the speed from before
 	# the collision was resolved — its comment in player.gd explains the trap.
-	var falling: float = body.call(&"descent_speed")
+	var falling := Weight.descent(body)
 	if falling > -break_fall_speed:
 		return
 	_crack()
@@ -165,6 +181,20 @@ func _on_slam_landed(at: Vector3, force: float) -> void:
 	if global_position.distance_to(at) > slam_radius:
 		return
 	_crack()
+
+
+## Puts the slab back, whatever state it is in.
+##
+## **Public for the same reason `PressurePlate.reset()` is**, and the doc is
+## explicit about it: *"every puzzle state is recoverable... respawning
+## contraption pieces, room-reset levers, rebuild-on-reentry for discrete
+## puzzles."* A slab with `reset_delay` below zero is gone for good otherwise,
+## and a room-reset lever had nothing to call.
+func reset() -> void:
+	_timer = 0.0
+	position = _home
+	if state != State.WHOLE:
+		_restore()
 
 
 func _crack() -> void:

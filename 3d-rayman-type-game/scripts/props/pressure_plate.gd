@@ -173,6 +173,19 @@ func _release() -> void:
 	Events.switch_toggled.emit(self, false)
 
 
+## Puts it back up, whatever it is holding.
+##
+## **Public because the doc asks for it**, not as test scaffolding: *"every
+## puzzle state is recoverable… respawning contraption pieces, room-reset
+## levers, rebuild-on-reentry for discrete puzzles."* A latching plate is
+## exactly the kind of discrete contraption that needs a lever behind it, and
+## without this there was no way to put one back at all.
+func reset() -> void:
+	_held = 0.0
+	if down:
+		_release()
+
+
 ## For tests and HUD readouts: how far through the hold we are, 0..1.
 func progress() -> float:
 	if down:

@@ -53,13 +53,17 @@ extends AnimatableBody3D
 ## Minimum slam force that counts, on the scale `Events.slam_landed` carries.
 ## Above zero so that hopping on the spot is not a catapult.
 @export var slam_power_needed: float = 0.2
-## Metres per second of launch for each unit of slam force, at the very end of
-## the plank. Scaled down toward the pivot, because leverage is the point.
+## MOMENTUM of launch for each unit of slam force, at the very end of the plank.
+## Scaled down toward the pivot, because leverage is the point.
+##
+## Momentum and not speed, so one whack of the plank throws a light crate much
+## further than a heavy one — see `Weight.add_momentum`. Divide by a mass to
+## read it as a speed.
 ##
 ## Worth knowing when tuning: slam force is NOT 0..1. It is drop plus delivered
 ## speed, multiplied by the player's `impact_force_scalar`, so at the current
 ## settings it reaches about 4. Read this number as "per unit", not "at most".
-@export var launch_per_force: float = 6.0
+@export var launch_per_force: float = 48.0
 ## Safety rail, not a design cap — it exists so a mistuned `launch_per_force`
 ## cannot fire a crate out of the level. Raise it freely.
 @export var launch_speed_max: float = 30.0
@@ -242,7 +246,7 @@ func _launch_from_force(side: float, force: float) -> void:
 		var arm := _arm_of(body, side)
 		if arm <= 0.0:
 			continue
-		_apply_launch(body, minf(launch_per_force * force * arm, launch_speed_max))
+		_apply_momentum(body, launch_per_force * force * arm)
 
 
 ## A falling body: its momentum, shared out to whatever is on the far end. See
@@ -253,9 +257,7 @@ func _launch_from_momentum(side: float, momentum: float) -> void:
 		var arm := _arm_of(body, side)
 		if arm <= 0.0:
 			continue
-		var their_mass := sensor.mass_of(body)
-		var speed := momentum / maxf(their_mass, 0.01) * arm
-		_apply_launch(body, minf(speed, launch_speed_max))
+		_apply_momentum(body, momentum * arm)
 
 
 ## How much leverage `body` has, if it is on `side` at all — 0.0 if it is not.
@@ -269,23 +271,15 @@ func _arm_of(body: Node3D, side: float) -> float:
 	return clampf(absf(local.z) / maxf(size.z * 0.5, 0.01), 0.0, 1.0)
 
 
-func _apply_launch(body: Node3D, speed: float) -> void:
-	if speed <= 0.0:
+## Both launch paths end up here, and both now deal in momentum. The only thing
+## that ever differed between them was how the momentum was worked out.
+func _apply_momentum(body: Node3D, momentum: float) -> void:
+	if momentum <= 0.0:
 		return
-	if body is RigidBody3D:
-		var rigid := body as RigidBody3D
-		# Woken first: a sleeping body ignores an impulse, and a crate that has
-		# been sitting on a see-saw is always asleep.
-		rigid.sleeping = false
-		rigid.apply_central_impulse(Vector3.UP * speed * rigid.mass)
-	elif body is CharacterBody3D:
-		var character := body as CharacterBody3D
-		# maxf, never an assignment: if they were already going up faster than
-		# this, the plank has nothing to add and must not take any away.
-		character.velocity.y = maxf(character.velocity.y, speed)
-	else:
-		return
-	launched.emit(body, speed)
+	var speed := minf(momentum / maxf(Weight.mass_of(body), 0.01), launch_speed_max)
+	if Weight.launch(body, speed):
+		launched.emit(body, speed)
+
 
 
 ## For tests and for a HUD readout: which way it is leaning, -1, 0 or 1.

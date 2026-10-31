@@ -117,6 +117,12 @@ Current, against the tuning pass below.
 | walking into a 16-mass crate | it leaves at 3.7 m/s, you keep **5.1 of 15.0** |
 | a slam beside a crate | throws it up at 4.6 m/s |
 | a crate thrown at you at 18 m/s | shoves you at **6.7 m/s** |
+| a thrown crate | leaves at **17.0 m/s** and breaks a `break_speed` 12 block |
+| a crate dropped on the see-saw's far end | launches you at **7.2 m/s**, no slam |
+| walking into the giant / charging it | 150 vs 200 against a bar of **180** — only the charge fells it |
+| a felled giant's top | **0.45 m** — a step you can walk onto |
+| a refused ram | staggers him, scaled — 72% of the bar reads as 72% |
+| the giant walking into a standing player | shoves them at **2.4 m/s** |
 
 **That `break_speed` row is the whole room.** The wall is deliberately out of reach of a charge on
 flat ground, so the slope is not a shortcut to it — it is the only way through it. If the wall ever
@@ -383,9 +389,226 @@ off a ledge and then outrun its fall — about 0.6 s from 6 m, which is not a th
 The rule is implemented and correct, and an enemy or a timed drop will use it; the greybox has no
 setup for it, deliberately rather than by omission.
 
-**If a carry verb is ever wanted, that is a document amendment, not a code change** — the verb set is
-one of the doc's standing rules, and *"a proposal that violates one needs this document amended
-first, not an exception granted quietly."*
+### `weight.gd`: the actual physics layer (built 2026-10-30)
+
+**Built because the props still played badly after rule 2 went in, and the diagnosis is the valuable
+part.** The report was *"I'm nervous that we need to figure out additional physics calculations for
+all objects and systems"* — and that worry was correct, but **the cause was never the
+kinematic/rigid-body split.** It was this:
+
+> **The props were written to a CHARACTER-SHAPED interface.** `breakable_block.gd` asked for
+> `approach_speed()`. `crumbling_floor.gd` asked for `descent_speed()`. The see-saw listened to
+> `Events.slam_landed`. Those are things only a hand-written `CharacterBody3D` has.
+
+So a crate hurled at a breakable wall at 30 m/s did **nothing**, while the hero jogging into it at 22
+opened it. A crate dropped on a crumbling floor did nothing. A see-saw answered to exactly one body
+in the game. Each of those is rule 5 broken, each would have needed its own fix, and that is the
+treadmill the worry was about.
+
+**The props were asking *who are you* when the only honest question is *how heavy are you and how
+fast were you going*.**
+
+`scripts/weight.gd` — `class_name Weight`, static functions only, no state, never instantiated. Not
+a manager singleton and not a base class: a namespaced library, called as `Weight.collide(...)` from
+anywhere. The whole interface is two questions:
+
+| | |
+| --- | --- |
+| **`Weight.mass_of(node)`** | asked by NAME through `get()`, so a `RigidBody3D` answers for free |
+| **`Weight.impact_velocity(node)`** | pre-collision where that exists, `linear_velocity` otherwise |
+
+and four verbs built on them: `impact_speed` (horizontal, for walls), `descent` (vertical, for
+floors), `add_velocity` (the one place that knows an impulse from a velocity), `collide` (the
+inelastic transfer), `launch`.
+
+**The test of whether it worked: the diff.** Accepting objects cost `breakable_block.gd` and
+`crumbling_floor.gd` *one line each* — `Weight.impact_speed(body)` in place of a `has_method` guard
+plus a `call()`. The see-saw's launcher collapsed from a fifteen-line type switch to
+`if Weight.launch(body, speed):`. **Nothing new needs a physics calculation of its own; it needs a
+`mass`.** Same shape as the `spinnable` group, applied to physics instead of to attacks.
+
+Two mechanical notes:
+
+- **`impact_velocity()` reassembles the two halves.** Both controllers keep horizontal and vertical
+  in separate accessors (`approach_velocity()` and `descent_speed()`), so the library puts them back
+  together. Done there rather than by adding a third accessor to each player, so neither controller
+  had to change at all.
+- **Prop sensors needed their masks widened** to `66` — layer 2 (the player) *and* layer 64 (a loose
+  heavy object). Without the 64 a block's `Area3D` never sees a crate, and no amount of shared
+  arithmetic helps. If a prop ignores objects, check the mask before the code.
+
+### The carry verb (built 2026-10-30)
+
+**Specified by the user, and it closes the open question above:** approach an object and you carry it
+automatically, press the boost button to throw it. No grab button.
+
+**It had a real conflict with rule 2, because picking a thing up on contact and ramming it on contact
+are the SAME input.** One of them had to lose — and the mode split had already drawn the line:
+
+| | |
+| --- | --- |
+| **arrive at or below `walk_speed`** | you lift it |
+| **arrive committed (charging)** | you ram it |
+
+Nothing new decides that. `walk_speed` was already the border between precise and unstoppable, so
+the vocabulary falls out of the existing authority curve instead of needing a button nobody asked
+for. **And `carry_max_mass` gives a level two kinds of object from one number:** the greybox has an
+8 you can carry and a 16 you cannot, so the heavy one can *only* be rammed.
+
+Four things in it that are not arbitrary:
+
+- **The throw happens on the frame of the press, with no hold-versus-tap timer anywhere near it.** A
+  throw that waited to find out whether you meant a charge would be exactly the input latency the
+  cardinal rule forbids. The cost is that you cannot wind up a charge with your hands full, which is
+  a trade worth having rather than a limitation: carrying something takes your traversal verb away
+  until you throw it.
+- **The throw inherits your momentum.** Rule 2 and the same rule the jump obeys — a throw out of a
+  charge goes much further than one from a standstill. A flat throw speed would make the hero the one
+  object in the game that momentum does not apply to.
+- **`carry_regrab_delay` is the FIFTH time this trap has appeared**, after `ledge_cooldown`, the
+  spin's `regrab_delay`, `grind_relatch_delay` and `ItemThief.relatch_delay`. Pickup is automatic, so
+  without it the thing you just threw is re-collected on the next frame while it is still a metre
+  away. It also bit the probe, in the way the law predicts: the reset helper put a carried crate down
+  at the hold point, and the next check silently measured the wrong object.
+- **The velocity on release is applied DEFERRED.** A `RigidBody3D` ignores a velocity set on the
+  frame it unfreezes, and the throw drops limply at your feet.
+
+**And the carry verb is what finally makes the see-saw whole.** A heavy arrival on one end launches
+whoever is on the other — measured at **7.2 m/s with no slam involved** — which was implemented but
+unreachable, because something heavy has to land on the far end while you are already standing on
+this one. In play: throw the crate up over the far end and run to the near one while it is in the
+air, about 1.3 s of flight against a 0.5 s run.
+
+**The one safety that is NOT in the object.** `platform_seed.gd` rescues itself precisely because a
+carrier cannot be trusted to tidy up — but a bare scriptless crate has no script to do that with, so
+`HeavyPlayer._exit_tree()` puts down whatever it is holding. That is a weaker guarantee than the
+seed's and it is the right one here: losing a greybox crate is not an unfinishable level. Anything
+the critical path depends on should still guard itself.
+
+### The heavy enemy: rule 5, and the argument for the weight layer (built 2026-10-31)
+
+`scripts/enemies/heavy_enemy.gd`. The doc's *"fewer, larger, structural"* enemy — **a mobile puzzle
+element first and a combat target second**, and *"a system that recombines across many rooms, not an
+encounter to balance."*
+
+**It is also the test of whether `weight.gd` was worth building, and the answer is in the diff:
+adding it required a change to exactly zero props.** The doc lists four things a room should be able
+to do with a heavy enemy. All four work, and almost none of it is code in the enemy:
+
+| the doc's claim | what makes it true |
+| --- | --- |
+| a **counterweight** | it has a `mass` and is in the `enemy` group, so `WeightSensor` counts it |
+| a **pressure-plate holder** | the same two facts — 40 against the plate's 14 |
+| a **wall-breaker you aim** | `BreakableBlock.break_mass`, new, below |
+| a **bridge, once felled** | `_topple()` swaps to a low wide collider |
+| a **hazard the level exploits** | `CrumblingFloor.break_mass`, new, below |
+
+#### One number decides which of the hero's verbs works
+
+`topple_momentum` is **180**, and it is momentum rather than speed: the hero at `mass` 10 brings
+**150 at walking pace and 200 charging**. So **only a committed charge fells it** — the doc's
+*"aiming before committing is the skill"* as a single threshold instead of a special case. A thrown
+crate brings 136 and is the wrong tool; a slam within `slam_topple_radius` works because the
+signature verb has to work on the signature enemy.
+
+#### Two new thresholds, and both are rule 1
+
+- **`BreakableBlock.break_mass`** — opened by anything at least this heavy, at any speed. Without it
+  the doc's "wall-breaker you aim" is impossible: **a giant walks at 3 m/s and can never clear a
+  speed gate**, so a wall meant for one has to ask about its weight. The greybox's `MassWall` has
+  `break_speed` 999 and `break_mass` 30 — a wall the hero can never open and the giant strolls
+  through.
+- **`CrumblingFloor.break_mass`** — gives way under anything this heavy, however gently it arrived.
+  This is *"floors that hold the player but not the giant chasing them"*, and it is the cleanest
+  rule 1 there is: set the number between two masses and the surface becomes a filter for which body
+  is allowed across it. The greybox's `FragileSlab` is 20, between the hero's 10 and the giant's 40.
+
+#### The felled collider is authored, not rotated
+
+A standing 3.4 m box tipped on its side is a **1.7 m kerb you cannot climb**, and the entire value of
+felling a giant is that you can then walk over it. So there are two colliders and one is enabled at a
+time: `Standing` (1.7 × 3.4 × 1.7) and `Felled` (1.7 × 0.8 × 3.4). Measured, a felled giant's top
+sits at **0.45 m** — a step, not a wall. And `get_up_delay` below zero means felled for good, which
+is rule 6 applied to an enemy: a giant you dropped across a gap is a bridge you built.
+
+#### It is hit by a group walk, not an Area3D
+
+Three reasons, and the third is the one that is easy to miss: an area moved and queried in the same
+frame reports nothing, a settled `RigidBody3D` is asleep and unreliable in overlap queries, and
+**`body_entered` only fires on ENTRY** — so a player already leaning against the giant who then
+charges would never be noticed at all. `_take_incoming_hits()` walks `player`/`heavy`/`throwable` by
+distance, with `hit_cooldown` as the blind spell.
+
+#### Three bugs found in play, and only one of them was a number
+
+Reported as *"I tried to ram into the enemy, but there was no response, and the enemy doesn't seem to
+do anything to me, aside from walk towards me."* All three had passed the probe, which is the lesson
+as much as the bugs are.
+
+- **It measured only the OTHER body's velocity.** `closing` came from
+  `Weight.impact_velocity(body)` alone, so **a giant walking into a player who was standing still
+  registered a closing speed of zero** and did nothing whatever. Fixed with
+  `Weight.closing_speed()`, which is relative. The probe had only ever charged *at* him, so the case
+  where he is the one doing the moving was never measured — hence the new check that he shoves you
+  while you stand still.
+- **A refused hit did nothing at all.** No stagger, no dust, no sound — and that is this project's
+  own standing rule broken: **a refused hit has to read as "wrong tool", never as "no effect"**, the
+  same law that makes a refused `BreakableBlock` shake and makes the warden announce what would
+  work. `_stagger()` now rocks him by an amount that **scales with how close the hit came**, so a
+  near miss is obviously a near miss and a feeble bump obviously is not — the threshold made legible
+  without a word of UI, exactly as a pressure plate tints as it fills.
+- **`topple_momentum` was 180 and measured absolutely**, so a charge without a long run-up failed.
+  It is **200** now and the speed is relative, which includes his own approach: against a giant
+  walking at you the hero brings about **182 at walking pace and 232 charging**, so the two separate
+  cleanly instead of overlapping.
+
+**The honest reading of this: the probe tested the rule and not the interaction.** Every check was
+about whether a threshold was crossed; not one asked whether anything happened when it was not. Both
+new checks are written the other way round.
+
+#### `collide()` and `deliver()` are not interchangeable, and making them so broke both
+
+While fixing the above, `Weight.collide()` was changed to use a relative closing speed too. That is
+wrong, and the way it is wrong is worth keeping:
+
+| | |
+| --- | --- |
+| **`collide(mover, hit, …)`** | "I moved into it and the solver stopped me" — measures the **mover's own** approach, and gives the mover back what the impact leaves it |
+| **`deliver(arriving, receiver, …)`** | "it came to me and nothing was stopped" — measures the **relative** approach, and gives each side its true change |
+
+Measure `collide()` relatively and it starts firing for collisions the mover did not cause — a crate
+running into a stationary hero — and then shoves that hero **towards** the crate, cancelling out the
+correct push the hitbox had already given them. The symptom was a thrown crate moving the player at
+0.0 m/s having previously worked, which reads as the hitbox breaking rather than as the other half
+double-counting.
+
+#### Not named after anything
+
+`HeavyEnemy`, not any of the doc's crew — the tortoise, the storks, the pelican and the
+weaver-birds sit under a section marked **"DRAFT, return to this"**. This is the mass and the
+behaviour; the costume is a later decision and the file should not quietly make it.
+
+### A consistency bug the giant would have exposed on sight
+
+**`Weight.add_momentum()` and `Weight.launch_momentum()`.** The slam's shockwave and the see-saw's
+launcher both handed out a *velocity*, which meant **a 40-mass giant would have been flung exactly as
+fast as a 1-mass pebble.** Momentum is the right currency for anything delivering a fixed amount of
+force; a plain velocity is right only for `collide()`, where the mass is already inside the formula.
+
+`slam_scatter_power` is therefore **40** rather than 6, and `SeeSaw.launch_per_force` **48** rather
+than 6 — the same impacts, read in momentum. Divide by a mass to read either as a speed.
+
+### Two props can be put back now
+
+`PressurePlate.reset()` and `CrumblingFloor.reset()`, both public. **Not test scaffolding** — the doc
+makes it a non-negotiable law: *"every destruction consequence is previewable; every puzzle state is
+recoverable… respawning contraption pieces, room-reset levers, rebuild-on-reentry for discrete
+puzzles."* A latching plate and a permanently-gone slab are exactly the discrete contraptions that
+law is about, and a room-reset lever had nothing to call.
+
+**Worth knowing: rule 6 was already satisfied.** `BreakableBlock.reset_delay` defaults to **-1.0**,
+so world-scale breaks are permanent already; the tree fort's 3.0 and 4.0 values are crumbling
+floors, which the doc explicitly allows local resets for. Nothing needed changing.
 
 ### The first tuning pass (2026-10-27), and the two things it contradicts
 
@@ -479,13 +702,17 @@ file to be read.
 ```
 3d-rayman-type-game/
   scripts/
+    weight.gd        THE weight layer: mass, impact and momentum, as static
+                     functions anything can call. Read this before adding a prop
+                     that reacts to being hit
     game.gd          score, checkpoints, respawning
     events.gd        autoloaded signal bus, referred to in code as `Events`
     components/      health, thrown_flight, coin_thief, item_thief, weight_sensor
                      (drop-in Nodes, no matching scene)
     player/          heavy_player.gd (the modal controller, Milestone 1),
                      player.gd (the old moveset), abilities, camera, visuals, ledge sensor
-    enemies/         walker, turret, bullet, boss_warden
+    enemies/         walker, turret, bullet, boss_warden,
+                     heavy_enemy (the structural giant — a puzzle noun)
     props/           coin, keg, checkpoint, hazard, crumbling floor, spin switch,
                      breakable block, treasure, level exit, transformer, grind rail,
                      priced gate, vending machine, platform seed, seed socket,

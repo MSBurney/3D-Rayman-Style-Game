@@ -38,7 +38,13 @@ func _ready() -> void:
 	await _boost_fade()
 	await _see_saw()
 	await _momentum_transfer()
+	await _carrying()
+	# The plate runs BEFORE the giant, and the order is load-bearing: the plate
+	# LATCHES, and the lift's travel can only be measured against the deck while
+	# it is still sitting at its start. Let the giant stand on the plate first and
+	# every check after it passes for the wrong reason.
 	await _plate()
+	await _giant()
 	print("---- %d wrong ----" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
@@ -447,6 +453,284 @@ func _momentum_transfer() -> void:
 	await _put(crate, Vector3(16, 0.8, 18))
 
 
+## The carry verb: automatic pickup, and the boost button throws.
+##
+## The interesting part is the conflict it had to resolve. Picking an object up
+## on contact and ramming it on contact are the SAME input, so one of them had
+## to lose — and `walk_speed` had already drawn the line between precise and
+## committed. Both halves are checked here, because a rule you only test in one
+## direction is half a rule.
+func _carrying() -> void:
+	print("  -- the carry verb, and what decides between lifting and ramming")
+	var light := level.get_node_or_null("SeeSawCrate") as RigidBody3D
+	var heavy := level.get_node_or_null("PlateCrate") as RigidBody3D
+	var wall := level.get_node_or_null("ThrowWall") as BreakableBlock
+	var see_saw := level.get_node_or_null("SeeSaw") as SeeSaw
+	if light == null or heavy == null or wall == null or see_saw == null:
+		_note("the carry fixtures exist", false, "a crate, the wall or the see-saw is missing")
+		return
+
+	# ── walking up to one lifts it ──
+	await _hands_on(light, Vector3(-24, 0.15, -16))
+	_note("walking up to a crate picks it up", player.carried == light,
+		"carrying %s" % ("nothing" if player.carried == null else player.carried.name))
+
+	# ── but not one heavier than you ──
+	# The light one is parked back home FIRST. Pickup is automatic and the reset
+	# helper puts whatever was carried down at the hold point, a metre in front of
+	# the player â so leaving it there means they simply pick it straight back up
+	# and the next check measures the wrong crate.
+	await _put(light, Vector3(-24, 2.2, 9.6))
+	await _place(Vector3(-24, 0.15, -16))
+	await _put(heavy, Vector3(-24, 0.55, -14.9))
+	for i in 40:
+		await get_tree().physics_frame
+	_note("but not one heavier than you can lift", player.carried == null,
+		"it weighs %.0f against a limit of %.0f" % [heavy.mass, player.carry_max_mass])
+	await _put(heavy, Vector3(16, 0.8, 18))
+
+	# ── and a charge rams rather than lifts ──
+	await _place(Vector3(-24, 0.15, -24))
+	await _put(light, Vector3(-24, 0.55, -14))
+	Input.action_press("attack")
+	var rammed := 0.0
+	for i in 300:
+		await get_tree().physics_frame
+		rammed = maxf(rammed, _flat_speed_of(light))
+		if player.carried != null or rammed > 1.0:
+			break
+	Input.action_release("attack")
+	await get_tree().physics_frame
+	_note("charging into the same crate rams it instead",
+		player.carried == null and rammed > 1.0,
+		"it left at %.1f m/s, carried=%s" % [rammed, player.carried != null])
+
+	# ── the throw inherits your momentum ──
+	await _hands_on(light, Vector3(-24, 0.15, -16))
+	player.facing = Vector3(0, 0, 1)
+	await _tap("attack")
+	var flew := _flat_speed_of(light)
+	_note("the boost button throws it", player.carried == null and flew > 5.0,
+		"it left at %.1f m/s" % flew)
+
+	# ── and what it hits, it breaks ──
+	await _hands_on(light, Vector3(-24, 0.15, -16))
+	player.facing = Vector3(0, 0, 1)
+	await _tap("attack")
+	var opened := false
+	for i in 180:
+		await get_tree().physics_frame
+		if wall.broken_open:
+			opened = true
+			break
+	_note("a thrown crate breaks a block the hero could not", opened,
+		"break_speed %.0f, broken_open=%s" % [wall.break_speed, opened])
+
+	# ── THE PAY-OFF: a heavy arrival launches whoever is on the far end ──
+	# Dropped from a height rather than thrown, because this measures the RULE.
+	# In play the way you arrange it is to throw the crate up over the far end
+	# and run to the near one while it is in the air — about 1.3 s of flight
+	# against a 0.5 s run — but that is a sequence, not a rule, and a probe that
+	# depended on it would be measuring the throw arc instead of rule 5.
+	print("  -- and a heavy arrival launches whoever is on the far end")
+	await _place(see_saw.to_global(Vector3(0, 0.6, -3.6)))
+	await _put(light, see_saw.to_global(Vector3(0, 6.0, 3.6)))
+	var lifted := 0.0
+	for i in 150:
+		await get_tree().physics_frame
+		lifted = maxf(lifted, player.velocity.y)
+	_note("a crate dropped on the far end throws YOU", lifted > 1.0,
+		"launched at %.1f m/s, no slam involved" % lifted)
+	await _put(light, Vector3(-24, 2.2, 9.6))
+
+
+## **Universal weight rule 5: enemies obey the same physics as the player.**
+##
+## The doc lists four things a room should be able to do with a heavy enemy, and
+## every one of them is checked here — because "it is a puzzle noun" is a claim
+## about four separate props agreeing with each other, and nothing but a test
+## can tell you whether they do. None of it is code in `heavy_enemy.gd`.
+func _giant() -> void:
+	print("  -- weight rule 5: a heavy enemy is a puzzle noun")
+	var giant := level.get_node_or_null("Giant") as HeavyEnemy
+	var plate := level.get_node_or_null("Plate") as PressurePlate
+	var slab := level.get_node_or_null("FragileSlab") as CrumblingFloor
+	var wall := level.get_node_or_null("MassWall") as BreakableBlock
+	if giant == null or plate == null or slab == null or wall == null:
+		_note("the giant fixtures exist", false, "Giant, Plate, FragileSlab or MassWall missing")
+		return
+
+	_note("it weighs more than you do", giant.mass > player.mass,
+		"%.0f against your %.0f" % [giant.mass, player.mass])
+
+	# ── it holds a pressure plate down, so the crate is not the only answer ──
+	# Put back up first: `_plate()` has already latched it with the crate, and a
+	# plate that is still down proves nothing about who is standing on it.
+	plate.reset()
+	await _put(level.get_node_or_null("PlateCrate") as RigidBody3D, Vector3(16, 0.8, 18))
+	await _place(Vector3(40, 0.15, -52))
+	_put_giant(giant, Vector3(22, 0.1, 18))
+	var held := false
+	for i in 150:
+		await get_tree().physics_frame
+		if plate.down:
+			held = true
+			break
+	_note("standing on the plate holds it down", held,
+		"it wants %.0f and he brings %.0f" % [plate.required_mass, giant.mass])
+
+	# ── a floor tuned between the two masses carries you and not him ──
+	# The giant goes to the far side of the level for this one. He lures from 18 m
+	# away, so parking him anywhere near the slab means he walks over and breaks
+	# it himself — which is the right behaviour and the wrong measurement.
+	_put_giant(giant, Vector3(40, 0.1, -60))
+	# Put the slab back first. It has almost certainly been broken already by the
+	# giant walking over it during an earlier check — which is the system working,
+	# and would have this check measuring a hole in the ground instead of a floor.
+	slab.reset()
+	await _place(Vector3(28, 0.15, 20))
+	for i in 90:
+		await get_tree().physics_frame
+	_note("the fragile floor carries YOU", slab.state == CrumblingFloor.State.WHOLE,
+		"it breaks at %.0f and you weigh %.0f" % [slab.break_mass, player.mass])
+
+	await _place(Vector3(40, 0.15, -52))
+	slab.reset()
+	_put_giant(giant, Vector3(28, 0.1, 20))
+	var gave_way := false
+	for i in 150:
+		await get_tree().physics_frame
+		if slab.state != CrumblingFloor.State.WHOLE:
+			gave_way = true
+			break
+	_note("...and gives way under HIM", gave_way,
+		"he weighs %.0f" % giant.mass)
+
+	# ── a wall you can never open, which he walks through ──
+	# The player stands BEYOND the wall. He walks towards whoever he can see, so
+	# the only way to aim him at something is to stand behind it — which is also
+	# exactly how the puzzle is solved in play.
+	_put_giant(giant, Vector3(34, 0.1, 25))
+	await _place(Vector3(34, 0.15, 34))
+	var opened := false
+	for i in 300:
+		await get_tree().physics_frame
+		if wall.broken_open:
+			opened = true
+			break
+	_note("he opens a wall you cannot", opened,
+		"break_speed %.0f, break_mass %.0f" % [wall.break_speed, wall.break_mass])
+
+	# ── walking into him is not enough; a charge fells him ──
+	# The threshold is MOMENTUM, so the hero brings 150 at walking pace and 200
+	# charging, against a bar of 180. That one number is the whole difference
+	# between the right tool and the wrong one.
+	_put_giant(giant, Vector3(40, 0.1, -40))
+	await _place(Vector3(40, 0.15, -46))
+	player.velocity = Vector3(0, 0, player.walk_speed)
+	for i in 90:
+		await get_tree().physics_frame
+		if giant.is_down():
+			break
+	_note("walking into him does NOT fell him", not giant.is_down(),
+		"%.0f x %.1f = %.0f against a bar of %.0f"
+			% [player.mass, player.walk_speed, player.mass * player.walk_speed,
+			giant.topple_momentum])
+
+	# ...BUT IT HAS TO VISIBLY DO SOMETHING. This is the check that exists
+	# because the first version failed in play and not here: a hit under the bar
+	# did nothing at all, no stagger and no dust, and it was reported as "I tried
+	# to ram into the enemy, but there was no response". A refusal that looks
+	# identical to a dropped input is the one outcome this project has a standing
+	# rule against.
+	var shrugs: Array[float] = []
+	giant.shrugged_off.connect(func(_by: Node3D, share: float) -> void:
+		# An ARRAY, never a captured float. A GDScript lambda captures locals by
+		# VALUE, so assigning to a captured float updates the lambda's own copy
+		# and reads back here as "the signal never fired".
+		shrugs.append(share))
+	_put_giant(giant, Vector3(40, 0.1, -40))
+	await _place(Vector3(40, 0.15, -46))
+	player.velocity = Vector3(0, 0, player.walk_speed)
+	for i in 120:
+		await get_tree().physics_frame
+		if shrugs.size() > 0 or giant.is_down():
+			break
+	var shrug_detail := "nothing happened at all"
+	if shrugs.size() > 0:
+		shrug_detail = "shrugged it off at %.0f%% of the bar" % [shrugs[0] * 100.0]
+	_note("a refused hit staggers him instead of being ignored",
+		shrugs.size() > 0, shrug_detail)
+
+	# ── and HE shoves YOU, which is the half that measured zero ──
+	# A giant walking into a player standing perfectly still. The closing speed
+	# is entirely his, so reading only the other body's velocity gave zero and
+	# nothing happened — the other half of the same report.
+	_put_giant(giant, Vector3(40, 0.1, -44))
+	await _place(Vector3(40, 0.15, -40))
+	player.velocity = Vector3.ZERO
+	var pushed := 0.0
+	for i in 150:
+		await get_tree().physics_frame
+		pushed = maxf(pushed, player.velocity.z)
+		if pushed > 0.5:
+			break
+	_note("he shoves YOU when he walks into you", pushed > 0.5,
+		"shoved at %.1f m/s while standing still" % pushed)
+
+	_put_giant(giant, Vector3(40, 0.1, -30))
+	await _place(Vector3(40, 0.15, -52))
+	Input.action_press("attack")
+	for i in 300:
+		await get_tree().physics_frame
+		if giant.is_down():
+			break
+	Input.action_release("attack")
+	await get_tree().physics_frame
+	_note("but a charge does", giant.is_down(), "state %s" % giant.state_name())
+
+	# ── and a felled giant is something you can stand on ──
+	# The point of felling one. A standing box tipped on its side would be a kerb
+	# you cannot climb, so the felled collider is authored low and long and this
+	# measures that it really is.
+	var top := _height_at(giant.global_position.x, giant.global_position.z, 0.8)
+	_note("a felled giant is a low platform", not is_nan(top) and top > 0.4 and top < 1.4,
+		"its top is at %.2f" % top)
+	_put_giant(giant, Vector3(34, 0.1, 20))
+
+
+## Parks the giant somewhere, standing and unhurt.
+##
+## `_hit_left` has to be cleared too: it is the blind spell that stops one
+## collision being counted on several frames, and a leftover one would make the
+## next measurement look like the topple threshold had failed.
+func _put_giant(giant: HeavyEnemy, at: Vector3) -> void:
+	giant.global_position = at
+	giant.velocity = Vector3.ZERO
+	giant._hit_left = 0.0
+	giant._home = at
+	giant._home_set = true
+	if giant.is_down():
+		giant._stand_up()
+
+
+## Horizontal speed of a loose object. Watching the whole velocity vector picks
+## up the metre-per-second a crate gains just settling onto the floor.
+func _flat_speed_of(body: RigidBody3D) -> float:
+	return Vector2(body.linear_velocity.x, body.linear_velocity.z).length()
+
+
+## Puts the player at `at` with `what` close enough to be picked up, and waits
+## until it is in their hands.
+func _hands_on(what: RigidBody3D, at: Vector3) -> void:
+	await _place(at)
+	await _put(what, at + Vector3(0, 0.4, 1.1))
+	for i in 60:
+		await get_tree().physics_frame
+		if player.carried != null:
+			return
+
+
 ## Parks a loose object somewhere, stopped.
 ##
 ## All four lines are needed. A `RigidBody3D` keeps its velocity, its spin AND
@@ -473,6 +757,7 @@ func _put(body: RigidBody3D, at: Vector3) -> void:
 ## is a position check rather than a floor check.
 func _teleport(at: Vector3) -> void:
 	_release_all()
+	_empty_hands()
 	player.global_position = at
 	player.velocity = Vector3.ZERO
 	player._stun_left = 0.0
@@ -583,6 +868,7 @@ func _jump_distance(charged: bool) -> float:
 ## stunned and the jump simply never fired.
 func _place(at: Vector3) -> void:
 	_release_all()
+	_empty_hands()
 	player.global_position = at
 	player.velocity = Vector3.ZERO
 	player.facing = Vector3(0, 0, 1)
@@ -604,6 +890,29 @@ func _place(at: Vector3) -> void:
 		await get_tree().physics_frame
 		if player.is_on_floor():
 			break
+
+
+## Pickup is AUTOMATIC, so a crate left in the player's hands rides along into
+## the next measurement and quietly changes its mass. Both reset helpers call
+## this for the same reason they clear the timers.
+func _empty_hands() -> void:
+	var held := player.carried
+	if held != null:
+		player._release(Vector3.ZERO)
+	player._regrab = 0.0
+	var rigid := held as RigidBody3D
+	if rigid != null:
+		# PARKED out of the way, not merely dropped. `_release` leaves it at the
+		# hold point, a metre in front of the player, and pickup is automatic with
+		# the regrab delay cleared — so dropping it there means it is collected
+		# again on the next frame and the following check measures a crate it was
+		# never given. Teleporting it while it was still held does not work
+		# either: `_carry_tick()` puts a carried object back on the hold point
+		# every single frame.
+		rigid.global_position = Vector3(0, 0.6, -70)
+		rigid.linear_velocity = Vector3.ZERO
+		rigid.angular_velocity = Vector3.ZERO
+		rigid.sleeping = false
 
 
 func _release_all() -> void:

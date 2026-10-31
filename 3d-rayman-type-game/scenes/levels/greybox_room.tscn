@@ -5,6 +5,8 @@
 [ext_resource type="PackedScene" uid="uid://bgfe0aabl2p5s" path="res://scenes/props/see_saw.tscn" id="seesaw"]
 [ext_resource type="PackedScene" uid="uid://byhylpx60k578" path="res://scenes/props/pressure_plate.tscn" id="plate"]
 [ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="lift"]
+[ext_resource type="PackedScene" uid="uid://d3j7q7fgmie67" path="res://scenes/enemies/heavy_enemy.tscn" id="giant"]
+[ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb2"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_top_color = Color(0.32, 0.52, 0.78, 1)
@@ -230,7 +232,7 @@ material = SubResource("MatTower")
 ; the `heavy` group. `mass` is a property RigidBody3D already has, so the weight
 ; layer reads a bare crate for free. Deliberately LIGHTER than the player (8
 ; against 10), so that leverage and not mass is what decides this see-saw.
-[node name="SeeSawCrate" type="RigidBody3D" parent="." groups=["heavy"] unique_id=1719944525]
+[node name="SeeSawCrate" type="RigidBody3D" parent="." groups=["carryable", "heavy"] unique_id=1719944525]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 2.2, 9.6)
 ; Layer 64 is "loose heavy object" — the same layer the throwable keg uses. The
 ; player masks it, so ramming works through slide collisions, and the player's
@@ -245,6 +247,17 @@ shape = SubResource("Shape_crate")
 
 [node name="Mesh" type="MeshInstance3D" parent="SeeSawCrate"]
 mesh = SubResource("Mesh_crate")
+
+; Break speed 12, which the hero cannot reach on the flat (the charge tops out
+; at 20 but this sits in open ground with no run-up) and a thrown crate clears
+; easily at 17. **Rule 5 made visible:** before the weight layer existed, a
+; crate hurled at a wall did nothing whatsoever, because the block asked for a
+; method only a CharacterBody3D has.
+[node name="ThrowWall" parent="." unique_id=1288004712 instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 1, -9)
+break_speed = 12.0
+require_spin_step = -1
+require_slam_power = -1.0
 
 ; ──────────────────── universal weight rule 1: a visible weight threshold ────
 ;
@@ -268,7 +281,7 @@ activates = NodePath("../PlateLift")
 ; Not in the plate's north-south lane on purpose: a 16-mass crate parked in
 ; front of a 10-mass hero is a roadblock that crash-stuns every charge down that
 ; line, and the lane is also how you prove a charge cannot trip the plate.
-[node name="PlateCrate" type="RigidBody3D" parent="." groups=["heavy"] unique_id=1066320415]
+[node name="PlateCrate" type="RigidBody3D" parent="." groups=["carryable", "heavy"] unique_id=1066320415]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0.8, 18)
 collision_layer = 64
 collision_mask = 67
@@ -291,6 +304,42 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 11.6, 40)
 use_collision = true
 size = Vector3(10, 0.8, 10)
 material = SubResource("MatDeck")
+
+; ─────────────────── universal weight rule 5: it obeys the same physics ─────
+;
+; A mobile mass, and FOUR puzzle uses with no code written for any of them:
+;
+;   - lure it onto the Plate and its 40 holds the 14 down, so the crate is no
+;     longer the only answer. Two solutions is the doc working as intended:
+;     "rooms are stated as problems, not locks"
+;   - lure it over FragileSlab and the floor gives way under it and not under
+;     you, because `break_mass` sits between 40 and your 10
+;   - lure it into MassWall, which nothing you can do will open
+;   - charge it and it goes down, and a felled giant is a low wide platform
+[node name="Giant" parent="." unique_id=1443208853 instance=ExtResource("giant")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 0, 20)
+
+; Flush with the floor, top at y=0, so it is a surface and never a kerb — a
+; 30 cm lip would stop a charge dead and snag the giant's own walk cycle.
+;
+; Only MASS opens it: the fall speed and slam thresholds are set out of reach so
+; the demonstration is about weight alone and nothing else.
+[node name="FragileSlab" parent="." unique_id=1960409072 instance=ExtResource("crumb2")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 28, -0.3, 20)
+size = Vector3(4, 0.6, 4)
+break_mass = 20.0
+break_fall_speed = 999.0
+slam_power_needed = 99.0
+reset_delay = 5.0
+
+; A wall the hero CANNOT open, at any speed, ever: `break_speed` is out of
+; reach and only `break_mass` applies. The giant walks through it at 3 m/s.
+[node name="MassWall" parent="." unique_id=896130722 instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1, 29)
+break_speed = 999.0
+break_mass = 30.0
+require_spin_step = -1
+require_slam_power = -1.0
 
 ; Visible from the ground, so the plate reads as a question that has an answer
 ; somewhere rather than as a button with no consequence.

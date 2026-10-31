@@ -59,6 +59,10 @@ signal state_changed(from: State, to: State)
 ## A charge ended against something solid. Carries where, and the speed that was
 ## killed — which is what rule 2 (momentum transfers on impact) is made of.
 signal crashed(at: Vector3, force: float)
+## Picked something up, or threw it. A level can react without the player
+## knowing what a level is.
+signal picked_up(what: Node3D)
+signal thrown(what: Node3D, aim: Vector3)
 
 @export_group("Walk")
 ## Top speed the stick alone reaches, and the threshold below which control is
@@ -216,11 +220,40 @@ signal crashed(at: Vector3, force: float)
 ## How far a slam throws loose objects around it, at force 1.0. Scales with the
 ## force, so a hop barely rattles them and a tower drop clears the area.
 @export var slam_scatter_radius: float = 5.0
-## Metres per second given to a loose object right next to a slam of force 1.0.
-@export var slam_scatter_power: float = 6.0
+## MOMENTUM given to a loose object right next to a slam of force 1.0 — not a
+## speed. So the same impact tosses a crate and barely rocks something huge,
+## which is the only version that survives an enemy with a mass of 40 standing
+## next to it. Divide by a mass to read it as a speed: 40 of this is 5 m/s to an
+## 8-mass crate.
+@export var slam_scatter_power: float = 70.0
 ## How much of an incoming object's momentum lands on YOU. Rule 2 cuts both
 ## ways or it is not a rule — see `_on_hitbox_entered`.
 @export var impact_take: float = 0.8
+
+@export_group("Carry")
+## **The heaviest thing you can lift.** Above it, an object can only be rammed.
+##
+## That is a puzzle rather than a restriction, and it is the reason this number
+## exists at all: a crate you cannot pick up is one you have to shove, so the
+## same vocabulary gives a level two different kinds of object with one number.
+## The greybox has an 8 you can carry and a 16 you cannot.
+@export var carry_max_mass: float = 10.0
+## How close you have to be for the automatic pickup.
+@export var carry_reach: float = 1.9
+## Where a carried thing is held, relative to us and to `facing`.
+@export var carry_height: float = 1.95
+@export var carry_forward: float = 0.9
+## Blind spell after letting go, before the same object can be taken again.
+##
+## **Five for five in this codebase now**, after `ledge_cooldown`, the spin's
+## `regrab_delay`, `grind_relatch_delay` and `ItemThief.relatch_delay`. Pickup
+## here is automatic, so without it the thing you just threw is re-collected on
+## the next frame while it is still a metre away, and the throw looks like it
+## did nothing at all.
+@export var carry_regrab_delay: float = 0.55
+## Forward and upward speed added to a throw, on top of your own momentum.
+@export var throw_speed: float = 17.0
+@export var throw_lift: float = 6.5
 
 ## Gravity projected along the floor. Downhill is free acceleration, and
 ## converting height into speed is the game's currency.
@@ -264,6 +297,11 @@ var _charge_buffered: float = 0.0
 var _boosts_left: int = 0
 ## True while a jump is carrying a charge through the air. See `_jump()`.
 var _charge_through_air: bool = false
+## What we are carrying, or null. Public so a HUD or a test can read it.
+var carried: Node3D = null
+var _regrab: float = 0.0
+var _carried_layer: int = 0
+var _carried_mask: int = 0
 var _air_peak_y: float = 0.0
 ## Horizontal speed at the moment the slam began — the brake half of the impact.
 var _slam_entry_speed: float = 0.0
@@ -316,6 +354,8 @@ func _tick(delta: float) -> void:
 	_stun_left -= delta
 	_slam_recover_left -= delta
 	_boost_cool -= delta
+	_regrab -= delta
+	_carry_tick()
 	if is_on_floor():
 		_air_peak_y = global_position.y
 		_boosts_left = boost_taps
@@ -337,7 +377,20 @@ func _read_input() -> void:
 	# already moving to boost. Unambiguous because the two are only reachable
 	# from different states, and it adds no new binding.
 	if Input.is_action_just_pressed(&"attack"):
-		if state == State.WALK:
+		if carried != null:
+			# CARRYING REPLACES WHAT THE BUTTON MEANS, and the throw happens on
+			# the frame of the press with no hold-versus-tap timer anywhere near
+			# it. A throw that waited to find out whether you actually meant a
+			# charge would be precisely the input latency the cardinal rule
+			# forbids — and latency is the one thing a heavy character cannot
+			# afford to be mistaken for.
+			#
+			# The cost is that you cannot wind up a charge with your hands full.
+			# That is a trade worth having rather than a limitation: carrying
+			# something takes your traversal verb away until you throw it, which
+			# is the most Wario sentence in the file.
+			_throw()
+		elif state == State.WALK:
 			# Remembered rather than acted on, because a wind-up can only start
 			# from the floor. See charge_buffer.
 			_charge_buffered = charge_buffer
@@ -540,60 +593,21 @@ func _after_move(_delta: float) -> void:
 ## props that could measure weight and nothing that could deliver any — which is
 ## exactly how it played.
 func _shove_what_we_hit() -> void:
-	# THE PRE-MOVE VELOCITY, never `velocity`. This is the trap this project has
-	# now paid for three times: `move_and_slide()` has already zeroed the speed
-	# by the time you can ask about the collision, so a shove computed from
-	# `velocity` is a shove of nothing at all for exactly the head-on hits that
-	# should be hardest. Same reason `approach_velocity()` exists for props.
-	var incoming := Vector3(_pre_move_flat.x, _pre_move_vy, _pre_move_flat.z)
-	if incoming.length() < push_min_speed:
-		return
 	# One body can be reported several times across move_and_slide's iterations,
 	# and shoving it twice in a frame is twice the momentum out of nowhere.
 	var done: Array[RigidBody3D] = []
 	for i in get_slide_collision_count():
 		var hit := get_slide_collision(i)
 		var body := hit.get_collider() as RigidBody3D
-		if body == null or done.has(body):
+		if body == null or body == carried or done.has(body):
 			continue
 		done.append(body)
-		_shove(body, hit.get_normal(), hit.get_position(), incoming)
+		# The formula lives in `weight.gd` and nothing about it is player-specific.
+		# That is the point: when an enemy needs to shove crates, it is these four
+		# lines and not a second copy of the arithmetic to drift out of step.
+		Weight.collide(self, body, hit.get_normal(), hit.get_position(),
+			push_transfer, push_min_speed)
 
-
-## One impact, resolved as a perfectly inelastic collision: both bodies would
-## end up travelling at `m1 * v / (m1 + m2)`.
-##
-## **One formula, no special cases, and that is the point.** Ram a crate lighter
-## than you and it flies while you barely slow. Ram something much heavier and
-## you stop dead — and the crash-stun then follows on its own out of
-## `_was_stopped_dead()`, with no code anywhere that knows what "heavy" means.
-## A player can look at a thing and predict what ramming it will do, which is
-## the difference between mass as a reasoning tool and mass as a stat.
-func _shove(body: RigidBody3D, normal: Vector3, contact: Vector3, incoming: Vector3) -> void:
-	# Speed delivered INTO the surface. A graze delivers almost nothing, which is
-	# what the dot product buys: scraping past a crate must not fling it.
-	var closing := -incoming.dot(normal)
-	if closing < push_min_speed:
-		return
-
-	var share := mass / maxf(mass + body.mass, 0.01)
-	var given := closing * share * push_transfer
-	# Woken first: a settled crate is a SLEEPING RigidBody3D and ignores an
-	# impulse. Applied off-centre at the contact point so it tumbles instead of
-	# sliding like a hovercraft — the one place the doc's "simulate the garnish"
-	# gets to apply here.
-	body.sleeping = false
-	body.apply_impulse(-normal * given * body.mass, contact - body.global_position)
-
-	# ...and we keep exactly what the collision leaves us.
-	#
-	# SUBTRACTED from the post-slide velocity rather than rebuilt from
-	# `incoming`, which matters when a crate is pinned against a wall: rebuilding
-	# would throw away the wall slide that `move_and_slide()` just worked out and
-	# shove us into the wall instead. Subtracting composes with it — the solver
-	# already removed all of our speed into the surface, so this gives back only
-	# the part the crate did not absorb.
-	velocity -= normal * given
 
 
 ## Rule 2 and rule 4 together: an impact that big has to move what is lying
@@ -618,13 +632,14 @@ func _scatter_loose_objects(force: float) -> void:
 			var gap := offset.length()
 			if gap > reach or gap < 0.01:
 				continue
+			if body == carried:
+				continue
 			done.append(body)
 			# Mostly outward with a lift in it, so things leave the ground and
 			# the impact reads as a shockwave rather than as a floor sweep.
 			var away := (offset / gap + Vector3.UP * 0.9).normalized()
-			var speed := slam_scatter_power * force * (1.0 - gap / reach)
-			body.sleeping = false
-			body.apply_central_impulse(away * speed * body.mass)
+			var momentum := slam_scatter_power * force * (1.0 - gap / reach)
+			Weight.add_momentum(body, away * momentum)
 
 
 ## Something loose hit US, under its own steam.
@@ -639,24 +654,146 @@ func _scatter_loose_objects(force: float) -> void:
 ## masked to the loose-object layer alone, so level geometry never reaches it.
 func _on_hitbox_entered(body: Node3D) -> void:
 	var rigid := body as RigidBody3D
-	if rigid == null:
+	if rigid == null or rigid == carried:
 		return
-	var offset := global_position - rigid.global_position
+	var offset := rigid.global_position - global_position
 	if offset.length_squared() < 0.0001:
 		return
-	var toward := offset.normalized()
-	# Only what is actually coming AT us counts. A crate we are walking past, or
-	# one we just shoved away, delivers nothing.
-	var closing := rigid.linear_velocity.dot(toward)
-	if closing < push_min_speed:
+	# `deliver` and not `collide`, because nothing stopped this: the crate came
+	# to US and our own velocity was never zeroed by the solver. See the note on
+	# the two in `weight.gd` — using the wrong one pushes the receiver TOWARDS
+	# the thing that hit them.
+	var normal := offset.normalized()
+	var delivered := Weight.deliver(rigid, self, normal, rigid.global_position,
+		impact_take, push_min_speed)
+	if delivered <= 0.0:
 		return
-	# Their momentum, over our mass. Heavy and fast moves us; light and fast
-	# barely does, and it is the same arithmetic as `_shove` read backwards.
-	var delivered := rigid.mass * closing / maxf(mass, 0.01) * impact_take
-	velocity += toward * delivered
-	_spawn_puff(crash_colour, 10, 3.5, -toward)
+	_spawn_puff(crash_colour, 10, 3.5, normal)
 	_shake(clampf(delivered * 0.03, 0.0, crash_shake))
 	play_sfx(sfx_land)
+
+
+# ──────────────────────────────────────────────────── carrying and throwing
+
+## Where a carried thing rides: in front of the face, clear of the capsule so
+## that letting go does not drop it inside us.
+func hold_position() -> Vector3:
+	return global_position + Vector3.UP * carry_height + facing * carry_forward
+
+
+## Keeps a carried thing with us, and looks for one to pick up if we have none.
+func _carry_tick() -> void:
+	if carried != null:
+		if not is_instance_valid(carried):
+			carried = null
+			return
+		carried.global_position = hold_position()
+		return
+	_try_pick_up()
+
+
+## Automatic pickup, no button: walk into a carryable thing and you have it.
+##
+## **WALK MODE ONLY, and that is the resolution of a real conflict rather than a
+## restriction.** Picking things up on contact and ramming things on contact are
+## the same input, so one of them had to lose — and the mode split had already
+## drawn the line. Arrive slowly and you lift it; arrive committed and you hit
+## it. `walk_speed` was already the border between precise and unstoppable, so
+## the whole vocabulary falls out of the existing curve instead of needing a
+## button nobody asked for.
+func _try_pick_up() -> void:
+	if _regrab > 0.0 or state == State.CHARGE or _windup_left > 0.0:
+		return
+	if flat_speed() > walk_speed:
+		return
+
+	var best: Node3D = null
+	var closest := carry_reach
+	# Walked by GROUP and distance, never with an Area3D. A settled crate is a
+	# SLEEPING RigidBody3D and overlap queries are unreliable about those, which
+	# is exactly the state every crate worth picking up is in.
+	for node in get_tree().get_nodes_in_group(&"carryable"):
+		var body := node as Node3D
+		if body == null:
+			continue
+		# Too heavy to lift, so it has to be rammed instead. See `carry_max_mass`.
+		if Weight.mass_of(body) > carry_max_mass:
+			continue
+		var gap := body.global_position.distance_to(global_position + Vector3.UP * 0.9)
+		if gap < closest:
+			closest = gap
+			best = body
+	if best != null:
+		_pick_up(best)
+
+
+func _pick_up(what: Node3D) -> void:
+	carried = what
+	var rigid := what as RigidBody3D
+	if rigid != null:
+		# Frozen and taken off every layer for the duration. Leave it solid and it
+		# fights the body it is riding on; leave it simulating and gravity drags
+		# it out of our hands.
+		_carried_layer = rigid.collision_layer
+		_carried_mask = rigid.collision_mask
+		rigid.freeze = true
+		rigid.linear_velocity = Vector3.ZERO
+		rigid.angular_velocity = Vector3.ZERO
+		rigid.collision_layer = 0
+		rigid.collision_mask = 0
+	what.global_position = hold_position()
+	picked_up.emit(what)
+
+
+## Throws it, inheriting our own momentum.
+##
+## Rule 2 once more, and the same rule the jump obeys: a throw out of a charge
+## goes much further than one from a standstill, and what you threw arrives
+## somewhere carrying real speed. A flat throw speed that ignored your motion
+## would make the hero the one object in the game that momentum does not apply
+## to.
+func _throw() -> void:
+	var aim := facing * throw_speed + Vector3.UP * throw_lift
+	aim += Vector3(velocity.x, 0.0, velocity.z)
+	var what := carried
+	_release(aim)
+	if what != null:
+		_spawn_puff(boost_colour, 12, 4.5, -aim.normalized())
+		thrown.emit(what, aim)
+
+
+## Hands it back to the world with `aim` as its new velocity.
+func _release(aim: Vector3) -> void:
+	var what := carried
+	carried = null
+	_regrab = carry_regrab_delay
+	if what == null or not is_instance_valid(what):
+		return
+	var rigid := what as RigidBody3D
+	if rigid == null:
+		Weight.add_velocity(what, aim)
+		return
+	rigid.collision_layer = _carried_layer
+	rigid.collision_mask = _carried_mask
+	rigid.freeze = false
+	# DEFERRED, and this is not optional: a RigidBody3D ignores a velocity set on
+	# the frame it unfreezes, and the throw drops limply at your feet instead.
+	rigid.set_deferred(&"linear_velocity", aim)
+	rigid.set_deferred(&"sleeping", false)
+
+
+## Put down whatever we are holding before we stop existing.
+##
+## A frozen, layer-less object with nothing holding it is the "not held but
+## still frozen" state `platform_seed.gd` treats as always wrong — and the seed
+## rescues itself precisely because a carrier cannot be trusted to tidy up. A
+## bare scriptless crate has no such safety net, so the carrier is the only
+## thing that can, and it does it here rather than in any one code path.
+func _exit_tree() -> void:
+	if carried != null:
+		_release(Vector3.ZERO)
+
+
 
 
 ## Did that wall actually STOP us, or did we go through it?

@@ -1,0 +1,62 @@
+[gd_scene format=3 uid="uid://d3j7q7fgmie67"]
+
+[ext_resource type="Script" uid="uid://y5yoaokcvb1e" path="res://scripts/enemies/heavy_enemy.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://kqfsbm07xrgp" path="res://scenes/fx/jump_burst.tscn" id="puff"]
+
+[sub_resource type="BoxShape3D" id="Shape_standing"]
+size = Vector3(1.7, 3.4, 1.7)
+
+; LOW AND LONG, for when it is lying down. A standing box rotated onto its side
+; would be a 1.7 m kerb, and the entire value of felling a giant is that you can
+; then walk over it — so the felled collider is authored as the bridge it is
+; meant to be rather than derived from the standing one.
+[sub_resource type="BoxShape3D" id="Shape_felled"]
+size = Vector3(1.7, 0.8, 3.4)
+
+[sub_resource type="StandardMaterial3D" id="Mat_body"]
+albedo_color = Color(0.42, 0.34, 0.46, 1)
+
+[sub_resource type="BoxMesh" id="Mesh_body"]
+material = SubResource("Mat_body")
+size = Vector3(1.7, 3.4, 1.7)
+
+[sub_resource type="StandardMaterial3D" id="Mat_face"]
+albedo_color = Color(0.92, 0.78, 0.4, 1)
+
+[sub_resource type="BoxMesh" id="Mesh_face"]
+material = SubResource("Mat_face")
+size = Vector3(1.1, 0.5, 0.3)
+
+; Layer 4 is the enemy layer, as enemy_walker.tscn established. The mask covers
+; the world (1), the player (2) and loose heavy objects (64), because rule 5
+; means it has to bump into all three of them the way anything else does.
+[node name="HeavyEnemy" type="CharacterBody3D" groups=["enemy", "heavy"]]
+collision_layer = 4
+collision_mask = 67
+floor_max_angle = 0.872665
+floor_snap_length = 0.5
+script = ExtResource("1")
+topple_fx = ExtResource("puff")
+
+[node name="Standing" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+shape = SubResource("Shape_standing")
+
+; Enabled by _topple(), disabled by _stand_up(). Centred low, because this is
+; the shape of a thing on the ground.
+[node name="Felled" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+shape = SubResource("Shape_felled")
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="Body" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+mesh = SubResource("Mesh_body")
+
+; A face, so which way it is looking reads at a distance. Cartoon telegraphy is
+; a standing rule in the doc, and "readable at decision distance" starts with
+; being able to see where a thing is about to walk.
+[node name="Face" type="MeshInstance3D" parent="Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.6, 0.85)
+mesh = SubResource("Mesh_face")

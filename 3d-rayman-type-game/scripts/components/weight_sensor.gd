@@ -135,10 +135,7 @@ func scan() -> void:
 ## by checking the class, so a future prop or enemy only has to own a `mass` to
 ## be taken seriously — no edit here, exactly like the `spinnable` group.
 func mass_of(body: Node3D) -> float:
-	var value: Variant = body.get(&"mass")
-	if value is float or value is int:
-		return maxf(float(value), 0.0)
-	return unknown_mass
+	return Weight.mass_of(body, unknown_mass)
 
 
 ## True if `body` was inside the box at the last `scan()`.

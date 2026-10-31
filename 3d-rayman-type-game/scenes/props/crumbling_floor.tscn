@@ -50,7 +50,11 @@ mesh = SubResource("MeshCrack")
 [node name="Landing" type="Area3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
 collision_layer = 0
-collision_mask = 2
+; Layers 2, 4 and 64: the player, an enemy and a loose heavy object. All three,
+; because rule 5 means everything obeys the same physics - a thrown crate and a
+; lured giant both have to count. Miss a layer and the sensor never sees that
+; kind of body at all, and no amount of shared arithmetic helps.
+collision_mask = 70
 monitorable = false
 
 [node name="Shape" type="CollisionShape3D" parent="Landing"]
