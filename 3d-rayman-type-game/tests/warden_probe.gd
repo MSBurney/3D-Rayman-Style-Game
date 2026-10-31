@@ -110,17 +110,13 @@ func _fight() -> void:
 		boss.phase == BossWarden.Phase.ARMOURED and boss.snatcher.held == seed,
 		"phase=%s held=%s" % [BossWarden.Phase.keys()[boss.phase], boss.snatcher.held != null])
 
-	# --- the spin is refused, and says so.
+	# --- a pound while armoured is refused, however hard, and says what to do.
+	#
+	# There used to be a check above this for the SPIN being refused. The spin
+	# is gone with the old controller, and the boss deliberately does not join
+	# the `strikable` group in its place — see the note in boss_warden.gd.
 	var hints: Array[String] = []
 	Events.boss_refused.connect(func(_b: Node3D, h: String) -> void: hints.append(h))
-	boss.spin_hit(player)
-	await get_tree().physics_frame
-	_note("the spin is refused with a hint",
-		hints.size() == 1 and hints[0].length() > 0 and boss.phase == BossWarden.Phase.ARMOURED,
-		"hint=%s" % (hints[0] if hints.size() > 0 else "none"))
-
-	# --- a pound while armoured is refused too, however hard.
-	hints.clear()
 	Events.slam_landed.emit(boss.global_position, 1.0)
 	await get_tree().physics_frame
 	_note("a pound on the armour is refused",

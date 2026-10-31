@@ -281,6 +281,12 @@ signal state_changed(from: State, to: State)
 @export var slam_damage_max: int = 4
 ## Shockwave reach. Even the minimum is wider than the player, so a slam always
 ## catches what is standing next to you, not only directly underneath.
+## What a full-strength pound is worth as a STRIKE, in momentum. Matches the
+## modal controller's `slam_scatter_power` default so a prop's threshold reads
+## the same from either slam. A const rather than an @export because this file
+## is deprecated and is not gaining tuning knobs — see the header.
+const SLAM_STRIKE_MOMENTUM: float = 70.0
+
 @export var slam_radius_min: float = 2.5
 @export var slam_radius_max: float = 7.0
 ## How hard the shockwave shoves enemies away from the impact.
@@ -1287,6 +1293,17 @@ func _slam_impact() -> void:
 	# Breakable floors and pressure plates will listen for this. `power` lets
 	# them demand a real drop rather than firing on any landing.
 	Events.slam_landed.emit(at, power)
+	# And the shockwave STRIKES anything strikable it reaches, which is how a
+	# pound opens a block or trips a switch now that the spin no longer hands
+	# out a chain step. See weight.gd for the contract.
+	#
+	# `power` here is 0..1, where the modal controller's force runs to about
+	# 4.2, so the two slams are NOT equally strong strikes — this one tops out
+	# at SLAM_STRIKE_MOMENTUM and the modal one goes well past it. That is left
+	# alone deliberately rather than scaled to match: this controller is
+	# deprecated, and its numbers only have to keep the levels it still owns
+	# working.
+	Weight.strike_around(self, at, power * SLAM_STRIKE_MOMENTUM, radius)
 
 	velocity = Vector3.ZERO
 	_air_peak_y = at.y

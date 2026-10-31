@@ -243,22 +243,41 @@ func _hit_enemies(radius: float, damage: int, knockback: float) -> void:
 			body.velocity += away * knockback + Vector3.UP * knockback * 0.3
 
 
-## Anything that wants to react to a spin joins the `spinnable` group and
-## implements `spin_hit(by)`.
+## What each spin in the chain is worth, as MOMENTUM, so this deprecated verb
+## can speak the same strike contract everything else does.
 ##
-## This is the extension point for "a variety of other interactions" — switches
-## today, and whatever else later, with no change needed in here. A prop never
-## needs a reference to the player and the player never needs to know the prop
-## exists.
+## The spin itself never had a weight: its strength was a chain step, 1 to 3,
+## and a prop had to reach into `abilities.spin_step` to read it — which is why
+## retiring the spin meant retiring that contract too. These three numbers are
+## the translation, chosen so every threshold a level had already set still
+## separates exactly as it did: the props that wanted "any spin" sit at 12, a
+## default breakable block at 18, and a super-spin-only block at 200.
+const SPIN_MOMENTUM: Array[float] = [15.0, 45.0, 320.0]
+
+
+## Hands the spin to anything `strikable` in reach.
+##
+## **This no longer says "spin" anywhere**, which is the point: the contract is
+## `struck(by, momentum)` on the `strikable` group, shared with the modal
+## controller's slam shockwave, so a prop works for both and will work for the
+## next thing that can hit it. See the note in `weight.gd`.
+##
+## A prop never needs a reference to the player and the player never needs to
+## know the prop exists.
 func _trip_switches(radius: float) -> void:
 	var origin := _player.global_position + Vector3.UP * 0.7
-	for node in _player.get_tree().get_nodes_in_group(&"spinnable"):
+	# `spin_step` is zeroed the instant the third spin resolves, so the super
+	# spin arrives here reading 0. Treat that as the third, not as "no spin" —
+	# the same off-by-one every prop used to have to know about on its own.
+	var step := spin_step if spin_step > 0 else 3
+	var momentum: float = SPIN_MOMENTUM[clampi(step, 1, 3) - 1]
+	for node in _player.get_tree().get_nodes_in_group(&"strikable"):
 		var thing := node as Node3D
-		if thing == null or not thing.has_method(&"spin_hit"):
+		if thing == null:
 			continue
 		if origin.distance_to(thing.global_position) > radius:
 			continue
-		thing.call(&"spin_hit", _player)
+		Weight.strike(_player, thing, momentum)
 
 
 func _spawn_spin_fx(radius: float) -> void:

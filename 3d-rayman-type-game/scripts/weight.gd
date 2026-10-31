@@ -32,8 +32,8 @@ class_name Weight
 ##
 ## A `RigidBody3D` answers both for free. A `CharacterBody3D` answers with a
 ## `mass` export and its pre-collision accessors. Anything new answers by having
-## a mass, and no file in here needs editing. Same shape as the `spinnable`
-## group, applied to physics instead of to attacks.
+## a mass, and no file in here needs editing. Same shape as the `strikable`
+## group below, applied to physics instead of to attacks.
 ##
 ## ─── NOTHING HERE HOLDS STATE OR IS EVER INSTANTIATED ────────────────────────
 ##
@@ -264,3 +264,76 @@ static func launch(node: Node, speed: float) -> bool:
 		character.velocity.y = maxf(character.velocity.y, speed)
 		return true
 	return false
+
+
+# ─────────────────────────────── BEING STRUCK ────────────────────────────────
+#
+# **The strike contract, and it replaced the spin's.** Anything that should
+# react to being hit does exactly two things:
+#
+#   1. joins the `strikable` group
+#   2. implements `struck(by, momentum) -> bool`
+#
+# which is the same shape the `spinnable` group had, with one difference that is
+# the whole reason for the change: **what gets handed over is MOMENTUM, not a
+# chain step.** `spin_hit(by)` passed nothing but the attacker, so a prop had to
+# reach into `by.abilities.spin_step` to find out how hard it had been hit —
+# which named a class, named a verb that no longer exists, and meant only the
+# player could ever strike anything. Rule 5 broken, in the same way the props
+# were broken before this file existed.
+#
+# A momentum, by contrast, is something a thrown crate and a walking giant can
+# both produce, and a prop's threshold is then a NUMBER a level can set — rule
+# 1, visible weight thresholds, applied to attacks.
+#
+# `struck` returns whether the strike was ACCEPTED, so a striker can tell "that
+# was the wrong tool" from "there was nothing there". A prop that refuses must
+# still visibly react, which is this project's oldest standing rule about
+# feedback: a refused hit reads as "not hard enough", never as "no effect".
+
+
+## Strikes one known thing. Returns false if it is not strikable or refused it.
+static func strike(by: Node, target: Node, momentum: float) -> bool:
+	if target == null or momentum <= 0.0:
+		return false
+	if not target.is_in_group(&"strikable") or not target.has_method(&"struck"):
+		return false
+	return target.call(&"struck", by, momentum)
+
+
+## Strikes everything strikable within `radius` of a point, and returns how many
+## accepted it. This is the AoE — a slam's shockwave is the only thing in the
+## new moveset that reaches a prop without touching it.
+##
+## **FLAT inside the radius: no distance falloff, deliberately, and unlike the
+## momentum the same shockwave hands to loose objects.** The first version did
+## fall off linearly, to match what a crate at that distance gets, and it made
+## every threshold unreadable — a prop's number silently meant something
+## different depending on where you landed, so a puzzle that wanted 12 could
+## need a hit worth 100 if you stood at arm's length. Measured, a hop-stomp
+## 1.1 m from a switch delivered 1.4 of the 7 it was worth.
+##
+## The distinction that makes this consistent rather than a fudge: a crate is
+## being GIVEN force, where a prop is being ASKED A QUESTION. Force should
+## weaken with distance. A threshold test should not, because the radius is
+## already the distance half of the answer — the shockwave reaches as far as it
+## is strong (rule 4), and inside that it is a flat yes or no.
+##
+## Walked by GROUP and distance rather than with an `Area3D`, for the two
+## reasons the spin established and this project has now paid for repeatedly: an
+## area added and queried in the same frame reports nothing, and a settled
+## `RigidBody3D` is asleep and unreliable in overlap queries.
+static func strike_around(by: Node, at: Vector3, momentum: float,
+		radius: float) -> int:
+	if momentum <= 0.0 or radius <= 0.0:
+		return 0
+	var struck_count := 0
+	for node in by.get_tree().get_nodes_in_group(&"strikable"):
+		var thing := node as Node3D
+		if thing == null or thing == by:
+			continue
+		if thing.global_position.distance_to(at) > radius:
+			continue
+		if strike(by, thing, momentum):
+			struck_count += 1
+	return struck_count

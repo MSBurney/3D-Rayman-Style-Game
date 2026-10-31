@@ -84,7 +84,7 @@ signal purchase_refused(what: Node3D, short: int)
 ## never have to know about each other.
 ##
 ## Note the switch is passed along, so a listener can tell *which* one it was —
-## check `switch.name`, or give your door an `@export var opened_by: SpinSwitch`
+## check `switch.name`, or give your door an `@export var opened_by: StrikeSwitch`
 ## and compare. Reacting to any switch at all is almost never what you want once
 ## a level has two of them.
 signal switch_toggled(switch: Node3D, on: bool)

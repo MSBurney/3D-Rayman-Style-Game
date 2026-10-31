@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://b546i5pe5gix4"]
 
-[ext_resource type="Script" uid="uid://lygqm3exsfc2" path="res://scripts/props/spin_switch.gd" id="1"]
+[ext_resource type="Script" uid="uid://lygqm3exsfc2" path="res://scripts/props/strike_switch.gd" id="1"]
 
 [sub_resource type="CylinderShape3D" id="ShapeBase"]
 height = 0.9
@@ -22,7 +22,7 @@ height = 0.6
 radial_segments = 16
 rings = 8
 
-[node name="SpinSwitch" type="StaticBody3D"]
+[node name="StrikeSwitch" type="StaticBody3D"]
 collision_layer = 1
 collision_mask = 0
 script = ExtResource("1")

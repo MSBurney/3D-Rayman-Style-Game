@@ -2,7 +2,7 @@
 
 [ext_resource type="PackedScene" uid="uid://4nl2p1prnqmb" path="res://scenes/props/checkpoint.tscn" id="cp"]
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
-[ext_resource type="PackedScene" uid="uid://b546i5pe5gix4" path="res://scenes/props/spin_switch.tscn" id="sw"]
+[ext_resource type="PackedScene" uid="uid://b546i5pe5gix4" path="res://scenes/props/strike_switch.tscn" id="sw"]
 [ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="brk"]
 [ext_resource type="PackedScene" uid="uid://c2ocooorlwkcr" path="res://scenes/props/treasure.tscn" id="chest"]
 [ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
@@ -204,11 +204,10 @@ coin_drop = ExtResource("coin")
 
 ; Only the super spin opens this one, so the chain has a reason to exist beyond
 ; doing more damage.
-[node name="SpinOnlyBlock" parent="." instance=ExtResource("brk")]
+[node name="BigSlamBlock" parent="." instance=ExtResource("brk")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 1, 4)
 break_speed = 999.0
-require_spin_step = 3
-require_slam_power = -1.0
+strike_momentum = 300.0
 colour = Color(0.55, 0.45, 0.72, 1)
 
 ; And this one only opens to a real drop, which means climbing the steep ramp
@@ -216,8 +215,7 @@ colour = Color(0.55, 0.45, 0.72, 1)
 [node name="PoundOnlyBlock" parent="." instance=ExtResource("brk")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 1, 4)
 break_speed = 999.0
-require_spin_step = 0
-require_slam_power = 0.4
+strike_momentum = 28.0
 colour = Color(0.4, 0.62, 0.68, 1)
 
 ; The loop, assembled. Each chest sits behind a wall that needs a DIFFERENT tool,

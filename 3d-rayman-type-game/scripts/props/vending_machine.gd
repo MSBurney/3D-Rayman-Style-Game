@@ -39,6 +39,9 @@ extends StaticBody3D
 @export var sells_money: bool = false
 ## Heal amount for garlic, or value for money.
 @export var item_value: int = 1
+## Momentum a strike must bring before the machine takes it as a request. 12 is
+## "any stomp beside it" — see strike_switch.gd for the measured scale.
+@export var strike_momentum: float = 5.0
 ## Where the item appears, relative to the machine. Far enough out that it does
 ## not spawn inside the machine's own collision.
 @export var dispense_offset: Vector3 = Vector3(0, 1.1, 1.4)
@@ -57,7 +60,7 @@ var _locked: float = 0.0
 
 
 func _ready() -> void:
-	add_to_group(&"spinnable")
+	add_to_group(&"strikable")
 	_body.material_override = _material
 	# Same listen-plus-one-read as level_exit.gd and priced_gate.gd. See the
 	# comment there for why the single read up front is not optional.
@@ -89,23 +92,30 @@ func shortfall() -> int:
 	return maxi(price - _money, 0)
 
 
-func spin_hit(_by: Node3D) -> void:
+## The `strikable` contract — see strike_switch.gd. Whack the machine and it
+## gives you a drink, which is the most Wario way available to buy something.
+func struck(_by: Node3D, momentum: float) -> bool:
 	if _locked > 0.0 or item_scene == null:
-		return
+		return false
+	# A feeble hit is a different refusal from being broke or sold out, and must
+	# not borrow their announcement — `purchase_refused` carries a money figure.
+	# See priced_gate.gd.
+	if momentum < strike_momentum:
+		_rattle()
+		return false
 	_locked = retrigger_delay
 
 	if sold_out():
 		# Announced as being nothing-short, which the HUD prints as "0 short".
 		# Deliberate: an empty machine has to say something, or it reads as the
-		# spin having missed.
+		# hit having missed.
 		Events.purchase_refused.emit(self, 0)
-		return
+		_rattle()
+		return false
 	if shortfall() > 0:
 		Events.purchase_refused.emit(self, shortfall())
-		var shake := create_tween()
-		shake.tween_property(visual, "scale", Vector3.ONE * 1.08, 0.07)
-		shake.tween_property(visual, "scale", Vector3.ONE, 0.16)
-		return
+		_rattle()
+		return false
 
 	if stock > 0:
 		stock -= 1
@@ -113,6 +123,15 @@ func spin_hit(_by: Node3D) -> void:
 	Events.purchase_made.emit(self, price)
 	_dispense()
 	_apply_look()
+	return true
+
+
+## Shakes the cabinet. Used for every refusal; which one it was is carried by
+## whether `purchase_refused` went out alongside it.
+func _rattle() -> void:
+	var shake := create_tween()
+	shake.tween_property(visual, "scale", Vector3.ONE * 1.08, 0.07)
+	shake.tween_property(visual, "scale", Vector3.ONE, 0.16)
 
 
 func _dispense() -> void:

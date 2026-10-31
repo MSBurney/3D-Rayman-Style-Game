@@ -133,7 +133,7 @@ func scan() -> void:
 ## `RigidBody3D.mass` answers this for free, `HeavyPlayer` declares its own, and
 ## anything else falls back to `unknown_mass`. Asked through `get()` rather than
 ## by checking the class, so a future prop or enemy only has to own a `mass` to
-## be taken seriously — no edit here, exactly like the `spinnable` group.
+## be taken seriously — no edit here, exactly like the `strikable` group.
 func mass_of(body: Node3D) -> float:
 	return Weight.mass_of(body, unknown_mass)
 

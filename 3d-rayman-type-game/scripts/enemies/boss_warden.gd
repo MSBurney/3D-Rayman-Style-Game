@@ -132,7 +132,6 @@ var _hit_cooldown: float = 0.0
 
 
 func _ready() -> void:
-	add_to_group(&"spinnable")
 	_shell.material_override = _material
 	hurtbox.body_entered.connect(_on_hurtbox_entered)
 	# The pound reaches it through the bus, which is how every prop in this
@@ -262,28 +261,14 @@ func _face_travel(delta: float) -> void:
 
 
 # --------------------------------------------------------------- being attacked
-
-## The spin, which NEVER works on it.
-##
-## Refused in every phase, and loudly. The player's default attack being useless
-## is what forces the other three verbs to be learned — and that is only fair
-## because the refusal says what to do instead.
-func spin_hit(_by: Node3D) -> void:
-	if phase == Phase.BEATEN:
-		return
-	Events.boss_refused.emit(self, _spin_hint())
-	_clang()
-
-
-func _spin_hint() -> String:
-	match phase:
-		Phase.STUNNED:
-			return "Spinning will not crack it — ground pound it from above"
-		Phase.CRACKED:
-			return "No time for that — get the seed to the socket"
-		_:
-			return "The armour holds — dodge, and let it crash into a pillar"
-
+#
+# **It is deliberately NOT in the `strikable` group.** It used to answer the
+# spin — refusing it in every phase, which was the point: the player's default
+# attack being useless is what forced the other verbs to be learned. The modal
+# moveset has no such throwaway attack, so there is nothing left to refuse, and
+# joining the strike group would hand it a SECOND slam path beside the one
+# below. The refusals that carry the fight's hints all live in `_on_slam_landed`
+# now, which is the only verb that ever cracked it open anyway.
 
 ## A ground pound landed somewhere. The only thing that cracks it open.
 ##

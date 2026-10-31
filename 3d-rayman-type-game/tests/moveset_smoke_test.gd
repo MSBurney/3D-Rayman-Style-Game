@@ -21,7 +21,7 @@ const WALKER := preload("res://scenes/enemies/enemy_walker.tscn")
 ## Spawned for the weight-acts-on-the-world checks. Only the momentum playground
 ## has these placed in it, and this suite runs on main.tscn.
 const CRUMBLING := preload("res://scenes/props/crumbling_floor.tscn")
-const SWITCH := preload("res://scenes/props/spin_switch.tscn")
+const SWITCH := preload("res://scenes/props/strike_switch.tscn")
 const BLOCK := preload("res://scenes/props/breakable_block.tscn")
 const TREASURE := preload("res://scenes/props/treasure.tscn")
 const EXIT := preload("res://scenes/props/level_exit.tscn")
@@ -627,9 +627,11 @@ func _run() -> void:
 	_release_all()
 	await _step(60)
 
-	# --- a spin trips a switch. The `spinnable` group plus a `spin_hit` method is
-	# the whole contract, and this is what makes it extensible.
-	var switch := SWITCH.instantiate() as SpinSwitch
+	# --- a spin trips a switch. The `strikable` group plus a `struck(by, momentum)`
+	# method is the whole contract, and this is what makes it extensible. The
+	# spin reaches it through `Weight.strike`, exactly as the modal controller's
+	# slam shockwave does — one contract, two verbs.
+	var switch := SWITCH.instantiate() as StrikeSwitch
 	level.add_child(switch)
 	switch.global_position = PAD_TOP + Vector3(1.8, 0, 6)
 	await _step(10)
@@ -748,13 +750,18 @@ func _run() -> void:
 			else "%.1f" % kept[0]))
 	await _step(20)
 
-	# A super-spin-only block: any spin must be refused until the third.
+	# A block only the biggest hit opens: the first two spins must be refused.
+	#
+	# `strike_momentum` replaced `require_spin_step` here, and 300 is chosen to
+	# separate the chain exactly as step 3 did — the first two spins are worth 15
+	# and 45 in momentum, the third 320. See PlayerAbilities.SPIN_MOMENTUM. It is
+	# also out of reach of this controller's pound, which tops out at 70, exactly
+	# as the `require_slam_power = -1.0` it replaced was.
 	var spin_wall := BLOCK.instantiate() as BreakableBlock
 	level.add_child(spin_wall)
 	spin_wall.global_position = PAD_TOP + Vector3(1.9, 1, -26)
 	spin_wall.break_speed = 999.0
-	spin_wall.require_spin_step = 3
-	spin_wall.require_slam_power = -1.0
+	spin_wall.strike_momentum = 300.0
 	await _step(10)
 	_release_all()
 	_place(PAD_TOP + Vector3(0, 0.4, -26))
@@ -771,7 +778,7 @@ func _run() -> void:
 		await _step(3)
 		Input.action_release("attack")
 	await _step(6)
-	_check("only the super spin opens a spin-only block",
+	_check("only the biggest strike opens a hard block",
 		survived_first and spin_wall.broken_open,
 		"survived first=%s, open after three=%s"
 			% [survived_first, spin_wall.broken_open])
@@ -783,8 +790,9 @@ func _run() -> void:
 	level.add_child(pound_wall)
 	pound_wall.global_position = PAD_TOP + Vector3(0, 1, -32)
 	pound_wall.break_speed = 999.0
-	pound_wall.require_spin_step = 0
-	pound_wall.require_slam_power = 0.4
+	# 28 is `require_slam_power` 0.4 read in momentum — see
+	# Player.SLAM_STRIKE_MOMENTUM for the conversion.
+	pound_wall.strike_momentum = 28.0
 	await _step(10)
 	_place(PAD_TOP + Vector3(0, 16, -32))
 	await _step(10)
@@ -1608,10 +1616,10 @@ func _run() -> void:
 	# collected mattered until you crossed it, above the line nothing mattered at
 	# all. A till in the middle of a level gives the next coin a marginal use.
 	#
-	# Both are opened with the SPIN rather than by walking into them, so these
+	# Both are opened by being HIT rather than by walking into them, so these
 	# checks drive a real spin. That matters: it is the only thing proving the
 	# props are actually reachable through `_trip_switches`, and a direct call to
-	# spin_hit() would pass with the group membership broken.
+	# struck() would pass with the group membership broken.
 	var gate := GATE.instantiate() as PricedGate
 	level.add_child(gate)
 	gate.global_position = Vector3(400, 0, -20)
@@ -1979,20 +1987,24 @@ func _run() -> void:
 			% [boss_has_it, player.abilities.carried != null,
 				warden.snatcher.held == warden_seed])
 
-	# --- the spin is refused in EVERY phase, and says what to do instead. The
-	# player's default attack being useless is the point; the hint is what keeps
-	# that fair rather than opaque.
+	# --- a pound in the WRONG phase is refused, and says what to do instead.
+	#
+	# This used to drive the spin, which was refused in all three phases. The
+	# spin is gone, so the check asks the verb that is left — and the law it was
+	# really protecting is untouched: **a refusal has to say what would work.**
+	# Only STUNNED is missing from the list, because a pound there is supposed
+	# to succeed, and the check below is the one that proves it.
 	var warden_hints: Array[String] = []
 	var on_boss_refused := func(_b: Node3D, h: String) -> void: warden_hints.append(h)
 	Events.boss_refused.connect(on_boss_refused)
-	for p in [BossWarden.Phase.ARMOURED, BossWarden.Phase.STUNNED, BossWarden.Phase.CRACKED]:
+	for p in [BossWarden.Phase.ARMOURED, BossWarden.Phase.CRACKED]:
 		warden._set_phase(p)
-		warden.spin_hit(player)
+		Events.slam_landed.emit(warden.global_position, 1.0)
 		await _step(3)
 	Events.boss_refused.disconnect(on_boss_refused)
-	_check("the spin is refused in every phase, with a hint",
-		warden_hints.size() == 3 and not warden_hints.has(""),
-		"%d hints: %s" % [warden_hints.size(), str(warden_hints.size())])
+	_check("a pound in the wrong phase is refused, with a hint",
+		warden_hints.size() == 2 and not warden_hints.has(""),
+		"%d hints: %s" % [warden_hints.size(), str(warden_hints)])
 
 	# --- only a hard pound, and only on a stunned boss. Three outcomes from one
 	# move, which is what makes the pound a skill here rather than a button.

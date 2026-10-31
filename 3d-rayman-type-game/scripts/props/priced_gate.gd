@@ -19,20 +19,28 @@ extends StaticBody3D
 ## you below what the exit wants for a while. The scary part is not the 30 you
 ## handed over, it is walking around at 100 with an exit that wants 110.
 ##
-## ─── OPENED BY THE SPIN, NOT BY WALKING INTO IT ──────────────────────────────
+## ─── OPENED BY A STOMP, NOT BY WALKING INTO IT ───────────────────────────────
 ##
-## Two reasons. A sink you can trigger by accident is a terrible sink — being
-## charged 30 for brushing against a door would be infuriating. And `spinnable`
-## is already the documented extension point for precisely this: spin_switch.gd
-## names "a gate" in its own list of things that should answer to a spin. So this
-## does the same two things anything spinnable does, and needed no change at all
-## in `player_abilities.gd`:
+## **A sink you can trigger by accident is a terrible sink** — being charged 30
+## for brushing against a door would be infuriating. That rule is why this was
+## opened by the spin, and the slam inherits it for exactly the same reason: a
+## slam cannot happen by accident, because it needs the air and a button press.
+## Walking into the panel does nothing at all.
 ##
-##   1. join the `spinnable` group
-##   2. implement `spin_hit(by)`
+## So it does the same two things anything strikable does, and needed no change
+## at all in either controller:
+##
+##   1. join the `strikable` group
+##   2. implement `struck(by, momentum) -> bool`
+##
+## See strike_switch.gd for the contract and weight.gd for why it carries a
+## momentum rather than an attacker.
 
 ## What it costs to open.
 @export var price: int = 30
+## Momentum a strike must bring before it is read as a deliberate attempt to
+## pay. 5 is "any stomp beside it" — see strike_switch.gd for the measured scale.
+@export var strike_momentum: float = 5.0
 ## Ignores further hits for this long, so one spin cannot pay twice and a chain
 ## of three spins is not charged three times. Same job as the switch's
 ## `retrigger_delay`.
@@ -61,7 +69,7 @@ var _locked: float = 0.0
 
 
 func _ready() -> void:
-	add_to_group(&"spinnable")
+	add_to_group(&"strikable")
 	_panel.material_override = _material
 	# Tracked by listening, with one read up front — copied from level_exit.gd,
 	# including the reason: `money_changed` only reports changes from now on, so
@@ -92,30 +100,46 @@ func shortfall() -> int:
 	return maxi(price - _money, 0)
 
 
-func spin_hit(_by: Node3D) -> void:
+## The `strikable` contract — see strike_switch.gd.
+func struck(_by: Node3D, momentum: float) -> bool:
 	if paid or _locked > 0.0:
-		return
+		return false
+	# TOO FEEBLE is a different refusal from TOO POOR, and must not be reported
+	# as the same thing: `purchase_refused` carries a money shortfall, and
+	# printing "30 short" at a player who has the money and merely tapped the
+	# gate would be a lie about what went wrong. So a weak hit rattles and says
+	# nothing, exactly as a switch does.
+	if momentum < strike_momentum:
+		_rattle()
+		return false
 	_locked = retrigger_delay
 
 	if shortfall() > 0:
 		# Refused LOUDLY. A gate that does nothing when you are poor is
 		# indistinguishable from a gate that is not a gate.
 		Events.purchase_refused.emit(self, shortfall())
-		var shake := create_tween()
-		shake.tween_property(visual, "scale", Vector3.ONE * 1.1, 0.07)
-		shake.tween_property(visual, "scale", Vector3.ONE, 0.16)
-		return
+		_rattle()
+		return false
 
 	paid = true
 	# Game does the deducting, so it can clamp. See Events.money_spent.
 	Events.money_spent.emit(price)
 	Events.purchase_made.emit(self, price)
 	_open()
+	return true
+
+
+## Shakes the panel. Used for both refusals, since the difference between them
+## is carried by whether `purchase_refused` went out with it.
+func _rattle() -> void:
+	var shake := create_tween()
+	shake.tween_property(visual, "scale", Vector3.ONE * 1.1, 0.07)
+	shake.tween_property(visual, "scale", Vector3.ONE, 0.16)
 
 
 func _open() -> void:
 	# Collision off first and deferred, because this is very likely running from
-	# inside a physics query — the spin walks the `spinnable` group during
+	# inside a physics query — a strike walks the `strikable` group during
 	# _physics_process, and changing a body's shapes mid-query is exactly the
 	# kind of thing Godot warns about.
 	shape.set_deferred(&"disabled", true)

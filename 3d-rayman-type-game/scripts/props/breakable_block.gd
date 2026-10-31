@@ -1,7 +1,7 @@
 class_name BreakableBlock
 extends StaticBody3D
 
-## A block you destroy by running into it, spinning it, or pounding it.
+## A block you destroy by arriving fast, slamming it, or simply being too heavy.
 ##
 ## This is the Wario Land idea in its cheapest form: **Wario goes through a level
 ## rather than over it.** Mario respects the geometry; Wario removes it. A wall
@@ -13,14 +13,20 @@ extends StaticBody3D
 ##
 ## Each one answers a different question the player might ask:
 ##
-##   • **Spin** — "can I open this from standing?" Yes, but only with the chain.
-##     `require_spin_step` decides how far in; at 3 only the super spin does it,
-##     which makes a block a reason to use the chain on purpose.
-##   • **Ground pound** — "can I open this from above?" Scales with fall distance,
-##     so a tall drop opens heavier blocks. Reuses `Events.slam_landed`.
+##   • **Slam** — "can I open this from above?" `strike_momentum` decides how
+##     hard; the slam shockwave's momentum falls off with distance, so landing
+##     on top of it opens a heavier block than landing beside it does.
 ##   • **Impact speed** — "can I open this by arriving fast?" This is the Wario
-##     one. Run, slide a ramp, long jump into it. Nothing else in the project
+##     one. Run, charge a ramp, charge-jump into it. Nothing else in the project
 ##     rewards raw speed with access.
+##   • **Mass** — "am I simply too heavy to be stopped?" What makes a lured giant
+##     a wall-breaker you aim, since a giant walks at 3 m/s and can never clear
+##     a speed gate.
+##
+## There used to be a fourth, the SPIN, answering "can I open this from
+## standing?" — and there is deliberately no replacement for it. The modal
+## moveset has no standing attack, and the block already had two better-aimed
+## questions than "did you press the button near me".
 ##
 ## A block that refuses you is supposed to be informative, not silent, so a
 ## refused hit still shakes it. "I need to hit this harder" has to be readable
@@ -34,14 +40,25 @@ signal broken(at: Vector3)
 ## reaches ~17 down a ramp and ~28 out of a long jump, so this sits above
 ## running pace on purpose: arriving fast has to be a choice.
 @export var break_speed: float = 12.0
-## Which spin in a chain opens it: 1 any spin, 3 only the super spin, 0 never.
-@export_range(0, 3) var require_spin_step: int = 2
-## Ground pound strength needed, on the same 0..1 scale as `Player.slam_power()`
-## — a hop is about 0.08, a drop from the tower is 1.0. Negative means a pound
-## never opens it.
-@export var require_slam_power: float = 0.25
-## How far a pound can reach. Wider than the block so landing beside it counts.
-@export var slam_radius: float = 3.0
+## Momentum a strike must bring to open it — rule 1, a visible threshold in the
+## same currency as everything else that hits things. Zero or below means no
+## strike ever opens it, however hard.
+##
+## In practice this is the SLAM gate, since the slam shockwave is the only thing
+## in the moveset that strikes without touching. The measured scale, from
+## `tests/greybox_probe.gd`:
+##
+##   a hop-stomp beside it         7, reaching 1.25 m
+##   a drop from 4 m              48, reaching 3.45 m
+##   a drop from 12 m            140, reaching 10 m
+##   a drop from 12 m, charging  294, reaching 10 m
+##
+## 25 sits between a hop and a 4 m drop, which is where the
+## `require_slam_power` 0.25 this replaced sat: it reads as "a real drop, not a
+## hop". **Note it does NOT overlap `break_speed`:** a strike is what reaches
+## you from above, `break_speed` is what arrives through you, and a block with
+## `break_speed` 999 is still unreachable by any charge however fast.
+@export var strike_momentum: float = 25.0
 
 @export_group("Loot")
 ## Money dropped when it breaks. Smashing has to pay something, or breaking a
@@ -85,11 +102,10 @@ var _reset_left: float = 0.0
 
 
 func _ready() -> void:
-	add_to_group(&"spinnable")
+	add_to_group(&"strikable")
 	add_to_group(&"breakable")
 	_apply_colour()
 	sensor.body_entered.connect(_on_body_entered)
-	Events.slam_landed.connect(_on_slam_landed)
 
 
 func _physics_process(delta: float) -> void:
@@ -138,32 +154,21 @@ func _on_body_entered(body: Node3D) -> void:
 	_break(body)
 
 
-## Called by PlayerAbilities when a spin lands in range — see spin_switch.gd for
-## the `spinnable` contract.
-func spin_hit(by: Node3D) -> void:
-	if broken_open:
-		return
-	var player := by as Player
-	var step := player.abilities.spin_step if player != null else 1
-	# spin_step is zeroed the moment the third spin resolves, so the super spin
-	# arrives here reading 0. Treat that as 3 rather than as "no spin".
-	if step <= 0:
-		step = 3
-	if require_spin_step <= 0 or step < require_spin_step:
+## The `strikable` contract — see strike_switch.gd. Returns whether it opened.
+##
+## `_break(null)` rather than `_break(by)`, deliberately: `_break` exists to give
+## a body back the momentum it spent arriving, and a strike is not something you
+## were travelling through. Hand the slammer over here and a stomp beside the
+## block would fling you sideways out of it on whatever `_pre_move_flat` happened
+## to hold.
+func struck(_by: Node3D, momentum: float) -> bool:
+	if broken_open or strike_momentum <= 0.0:
+		return false
+	if momentum < strike_momentum:
 		_refuse()
-		return
-	_break(player)
-
-
-func _on_slam_landed(at: Vector3, force: float) -> void:
-	if broken_open or require_slam_power < 0.0:
-		return
-	if global_position.distance_to(at) > slam_radius:
-		return
-	if force < require_slam_power:
-		_refuse()
-		return
+		return false
 	_break(null)
+	return true
 
 
 ## Opens up. `through` is whoever did it, so their momentum can be preserved.

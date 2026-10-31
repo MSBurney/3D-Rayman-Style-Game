@@ -13,6 +13,10 @@ extends Node
 ## charges down the slope, and prints both against the wall's `break_speed`.
 
 const MAIN := preload("res://scenes/greybox_main.tscn")
+## Spawned rather than placed in the level, because the strike checks want a
+## switch they can put exactly where the measurement needs it.
+const SWITCH := preload("res://scenes/props/strike_switch.tscn")
+const BLOCK := preload("res://scenes/props/breakable_block.tscn")
 ## The ramp's top surface, by construction: 15 degrees, passing through y = 4
 ## at z = -15. Everything about the ramp is checked against this one line.
 const RAMP_TAN := 0.26795
@@ -45,6 +49,7 @@ func _ready() -> void:
 	# every check after it passes for the wrong reason.
 	await _plate()
 	await _giant()
+	await _striking()
 	await _skidding()
 	await _no_death()
 	await _grinding()
@@ -716,6 +721,95 @@ func _put_giant(giant: HeavyEnemy, at: Vector3) -> void:
 	giant._home_set = true
 	if giant.is_down():
 		giant._stand_up()
+
+
+## The strike contract, which replaced the spin's.
+##
+## **The slam shockwave is the only AoE left in the moveset**, so it is the only
+## thing that can reach a switch, a till, a chest or a block without touching
+## it. These checks are written the way the giant's bugs taught: one for the
+## threshold being crossed, and one for what happens when it is NOT — because
+## every check that only ever asked "did it fire" missed three bugs in a row.
+func _striking() -> void:
+	print("  -- the strike contract: what a slam reaches")
+
+	var switch := SWITCH.instantiate() as StrikeSwitch
+	level.add_child(switch)
+	var switch_at := Vector3(44, 0.0, -52)
+	switch.global_position = switch_at
+	await get_tree().physics_frame
+
+	# A hop-stomp beside it. Worth about 15 momentum at point blank against the
+	# switch's 12, which is the "any deliberate stomp" band the switch is for.
+	var before := switch.on
+	await _stomp_at(switch_at + Vector3(1.1, 0.15, 0))
+	_note("a stomp beside a switch trips it", switch.on != before,
+		"on %s -> %s" % [before, switch.on])
+
+	# ...and the SAME stomp from across the room does not, because the momentum
+	# falls off to nothing at the edge of the shockwave. A radius with no falloff
+	# would make "stand close" meaningless.
+	var distant := SWITCH.instantiate() as StrikeSwitch
+	level.add_child(distant)
+	distant.global_position = Vector3(44, 0.0, -32)
+	await get_tree().physics_frame
+	var distant_before := distant.on
+	await _stomp_at(switch_at + Vector3(1.1, 0.15, 0))
+	_note("...and the same stomp 20 m away does not",
+		distant.on == distant_before,
+		"on %s, %.0f m off" % [distant.on,
+			distant.global_position.distance_to(switch_at)])
+
+	# A block wanting a REAL drop. 100 is out of reach of a hop (7) and inside
+	# what a fall from height brings (140), so the same button gives two answers
+	# depending on how far you fell — rule 4, as a single number.
+	var block := BLOCK.instantiate() as BreakableBlock
+	level.add_child(block)
+	var block_at := Vector3(50, 1.0, -52)
+	block.global_position = block_at
+	block.break_speed = 999.0
+	block.break_mass = -1.0
+	block.strike_momentum = 100.0
+	await get_tree().physics_frame
+
+	await _stomp_at(block_at + Vector3(1.6, -0.85, 0))
+	var shrugged := not block.broken_open
+	_note("a hop-stomp will not open a block wanting a real drop", shrugged,
+		"broken=%s against strike_momentum %.0f" % [block.broken_open,
+			block.strike_momentum])
+
+	# The same stomp, from 18 m up.
+	await _place(block_at + Vector3(1.6, 17.0, 0))
+	_tap("crouch")
+	for i in 150:
+		await get_tree().physics_frame
+		if block.broken_open:
+			break
+	_note("...and dropping on it from 18 m does", block.broken_open,
+		"broken=%s" % block.broken_open)
+	_release_all()
+
+	switch.queue_free()
+	distant.queue_free()
+	block.queue_free()
+	await get_tree().physics_frame
+
+
+## Stands at `at`, hops, and stomps. The shockwave goes out from wherever the
+## player lands, so what the strike is worth is decided by where they stood.
+func _stomp_at(at: Vector3) -> void:
+	await _place(at)
+	_tap("jump")
+	await _until_airborne()
+	for i in 8:
+		await get_tree().physics_frame
+	_tap("crouch")
+	for i in 70:
+		await get_tree().physics_frame
+		if player.is_on_floor():
+			break
+	_release_all()
+	await get_tree().physics_frame
 
 
 ## The skid and the side-jump: the immediate turnaround.

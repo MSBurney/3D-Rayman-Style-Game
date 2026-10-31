@@ -34,7 +34,7 @@ extends Path3D
 ## rail around in the editor without retyping anything.
 
 ## Joined so the player can find rails by walking the group. Same idea as
-## `spinnable` and `throwable`: the rail holds no reference to the player and
+## `strikable` and `throwable`: the rail holds no reference to the player and
 ## the player does not need to know this script exists.
 const GROUP := &"grindable"
 

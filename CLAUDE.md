@@ -779,14 +779,109 @@ ahead of the travel, and jumping out of it leaves at **13.0 m/s upward against a
 the heading never moved at all, while every other part of the skid worked. Rotate about `Vector3.UP`
 by a clamped `signed_angle_to` instead, which is what the charge's steering already did.
 
+### Stage B2: the spin's names went with the spin (done 2026-10-31)
+
+**`spinnable` → `strikable`, and `spin_hit(by)` → `struck(by, momentum) -> bool`.** Six props and the
+boss spoke the old contract; none do now. The replacement lives in `weight.gd` beside everything
+else about mass, as `Weight.strike()` and `Weight.strike_around()`.
+
+#### The rename is the small half; the ARGUMENT is the point
+
+`spin_hit(by)` handed over nothing but the attacker, so a prop that wanted to know how hard it had
+been hit reached into `by.abilities.spin_step` — which named a class, named a verb, and meant **only
+the player could ever strike anything.** That is rule 5 broken in exactly the way the props were
+broken before `weight.gd` existed, and it is why `breakable_block.gd` and `treasure.gd` were the
+last two files in the project still saying `as Player`.
+
+A **momentum** is something a thrown crate and a walking giant can both produce, so a prop's gate
+becomes a number a level can set — rule 1, visible thresholds, applied to attacks instead of to
+floors.
+
+#### The slam shockwave is the only AoE left, and that is the whole re-homing
+
+The doc's verb set is Walk · Charge · Jump · Slam · Boost. **The slam is the only one of those that
+can touch something it is not touching**, so it inherits everything the spin's radius used to do.
+It costs one call in `_slam_impact()` beside the `_scatter_loose_objects` that was already there, and
+the two now share `_slam_reach()` so there is one shockwave rather than two that can drift apart.
+
+Measured, which matters because the first set of thresholds were guesses and all of them were wrong:
+
+| | force | momentum | reach |
+| --- | --- | --- | --- |
+| a hop-stomp | 0.10 | **7** | 1.25 m |
+| a drop from 4 m | 0.69 | **48** | 3.45 m |
+| a drop from 12 m | 2.00 | **140** | 10.00 m |
+| the same, out of a charge | 4.20 | **294** | 10.00 m |
+
+So the thresholds are: **5** for a switch, a till and a chest ("any deliberate stomp"), **25** for a
+breakable block ("a real drop, not a hop" — the faithful reading of the `require_slam_power` 0.25 it
+replaced), and **300** for the playground's block that only the biggest hit opens.
+
+**Note it is the REACH that keeps a hop honest, not the number.** A weak shockwave only carries
+1.25 m, so a feeble stomp has to be delivered right beside the thing. That falls out of rule 4
+rather than being designed.
+
+#### A strike does NOT fall off with distance, and that was a real bug
+
+The first version scaled the momentum down linearly to the edge of the radius, to match what a loose
+crate at that distance gets. It made every threshold unreadable: a prop's number silently meant
+something different depending on where you landed, and a hop-stomp 1.1 m from a switch delivered
+**1.4 of the 7 it was worth** — so both of the probe's new "it fires" checks failed.
+
+The distinction that makes a flat strike consistent rather than a fudge: **a crate is being GIVEN
+force, where a prop is being ASKED A QUESTION.** Force should weaken with distance. A threshold test
+should not, because the radius is already the distance half of the answer.
+
+#### Three props' gates collapsed into one
+
+`breakable_block.gd` and `treasure.gd` each had `require_spin_step` (0..3), `require_slam_power`
+(0..1) and `slam_radius`, in three different currencies, two of which CLAUDE.md already recorded as
+having been silently recalibrated by `impact_force_scalar` going to 2.0 — *"neither is wrong, but
+neither was chosen"*. All three are now `strike_momentum`, and the radius belongs to the shockwave.
+
+**And "pound-only" survived exactly**, which is the happy part: `break_speed` 999 still shuts out
+every charge, and the slam is still the only thing that strikes without touching, so the
+playground's `PoundOnlyBlock` works unchanged at `strike_momentum` 28. What did NOT survive is
+*"can I open this from standing?"* — the block's spin question. There is deliberately no
+replacement: the modal moveset has no standing attack, and the block already had two better-aimed
+questions in `break_speed` and `break_mass`.
+
+#### The deprecated spin now speaks the new contract too
+
+`PlayerAbilities.SPIN_MOMENTUM` is `[15, 45, 320]` — the chain step translated into momentum, chosen
+so every threshold the old levels had already set separates exactly as it did. **That is why 214
+checks stayed green through a contract change**, and it is better than keeping a second method
+around: there is one contract, and the deprecated verb is a caller of it rather than a dialect.
+
+`player.gd`'s pound strikes as well, through `SLAM_STRIKE_MOMENTUM` (70, matching the modal
+controller's `slam_scatter_power` default). It is a `const` and not an `@export` because that file
+is deprecated and is not gaining tuning knobs.
+
+#### The boss is deliberately NOT strikable
+
+`boss_warden.gd` lost `spin_hit` and left the group rather than joining the new one. Its spin
+refusal existed *because* the spin was a throwaway attack — *"the player's default attack being
+useless is what forces the other three verbs to be learned"* — and there is no throwaway attack any
+more, so there is nothing left to refuse. Joining `strikable` would hand it a **second** slam path
+beside `_on_slam_landed`, which is the one verb that ever cracked it open. The suite's three-phase
+hint check is now a two-phase one asking the slam, since the law it was really protecting — **a
+refusal has to say what would work** — is untouched.
+
+#### Every refusal had to be built, because most of these props had none
+
+The switch, the chest and both tills previously just *worked*, so none of them had a "not hard
+enough" state. Adding a threshold without adding a refusal would break this project's oldest
+feedback rule, so each gained a rattle — and the tills needed care: **too feeble is a different
+refusal from too poor**, and `purchase_refused` carries a money shortfall, so reporting a weak hit
+through it would print "30 short" at a player who has the money and merely tapped the gate.
+
 ### Stage B: what is left, in dependency order
 
 1. ~~Decouple the props from the `Player` class.~~ **Done — B1 above.**
-2. **Retire the spin's names along with the spin.** `spin_switch`, `priced_gate`,
-   `vending_machine`, `treasure` and the breakable block's spin path all use the `spinnable` group
-   and `spin_hit()` — and the heavy controller has no spin. The slam already broadcasts position and
-   force, so a weight-based strike is the natural trigger; the group and method should stop saying
-   "spin" once there is no spin.
+2. ~~Retire the spin's names along with the spin.~~ **Done — B2 above.** `strike_switch`,
+   `priced_gate`, `vending_machine`, `treasure` and the breakable block all speak
+   `struck(by, momentum)` on the `strikable` group now, and the slam shockwave is what reaches them.
+   **This was the last thing naming the `Player` class** outside the two deprecated files.
 3. ~~Remove health and death.~~ **Done, as a side effect of B1** — see the `take_hit` note above.
    The HUD hides its hearts when the player has no Health, hazards fall back to a hard hit, and
    `game.gd` only respawns through a duck-typed `respawn_at`. Enemies keep their own health; the doc
@@ -834,7 +929,8 @@ file to be read.
 ```
 3d-rayman-type-game/
   scripts/
-    weight.gd        THE weight layer: mass, impact and momentum, as static
+    weight.gd        THE weight layer: mass, impact and momentum, plus the
+                     `strikable` / `struck(by, momentum)` contract, as static
                      functions anything can call. Read this before adding a prop
                      that reacts to being hit
     game.gd          score, checkpoints, respawning

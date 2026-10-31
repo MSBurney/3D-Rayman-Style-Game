@@ -91,8 +91,7 @@ material = SubResource("MatTower")
 [node name="BreakWall" parent="." unique_id=1305332187 instance=ExtResource("wall")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 4)
 break_speed = 22.0
-require_spin_step = -1
-require_slam_power = -1.0
+strike_momentum = -1.0
 
 [node name="CrumbleSlab" parent="." unique_id=981438592 instance=ExtResource("crumb")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 32)
@@ -268,8 +267,7 @@ mesh = SubResource("Mesh_crate")
 [node name="ThrowWall" parent="." unique_id=1288004712 instance=ExtResource("wall")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 1, -9)
 break_speed = 12.0
-require_spin_step = -1
-require_slam_power = -1.0
+strike_momentum = -1.0
 
 ; ──────────────────── universal weight rule 1: a visible weight threshold ────
 ;
@@ -343,8 +341,7 @@ curve = SubResource("Curve_greybox")
 [node name="FireWall" parent="." unique_id=1534322155 instance=ExtResource("wall")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1, 14)
 break_speed = 18.0
-require_spin_step = -1
-require_slam_power = -1.0
+strike_momentum = -1.0
 
 ; ─────────────────── universal weight rule 5: it obeys the same physics ─────
 ;
@@ -379,8 +376,7 @@ reset_delay = 5.0
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 1, 29)
 break_speed = 999.0
 break_mass = 30.0
-require_spin_step = -1
-require_slam_power = -1.0
+strike_momentum = -1.0
 
 ; Visible from the ground, so the plate reads as a question that has an answer
 ; somewhere rather than as a button with no consequence.

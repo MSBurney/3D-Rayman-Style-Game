@@ -794,6 +794,15 @@ func _shove_what_we_hit() -> void:
 
 
 
+## How far the shockwave carries. Rule 4 — it grows with the force, so a drop
+## from a height reaches things a hop does not. Shared by BOTH halves of the
+## shockwave (loose objects and strikable props) so a crate and a switch
+## standing side by side are reached by one radius and one falloff rather than
+## by two that can drift apart.
+func _slam_reach(force: float) -> float:
+	return slam_scatter_radius * clampf(force, 0.25, 2.0)
+
+
 ## Rule 2 and rule 4 together: an impact that big has to move what is lying
 ## around it, or the slam reads as a sound effect with a decal on it.
 ##
@@ -804,7 +813,7 @@ func _shove_what_we_hit() -> void:
 func _scatter_loose_objects(force: float) -> void:
 	if force <= 0.0:
 		return
-	var reach := slam_scatter_radius * clampf(force, 0.25, 2.0)
+	var reach := _slam_reach(force)
 	var done: Array[RigidBody3D] = []
 	for group in [&"heavy", &"throwable"]:
 		for node in get_tree().get_nodes_in_group(group):
@@ -1516,6 +1525,23 @@ func _slam_impact() -> void:
 	# Props hear about this through the bus; loose objects are not props and have
 	# no script to listen with, so they are kicked directly.
 	_scatter_loose_objects(force)
+	# **THE SHOCKWAVE IS THIS GAME'S ONLY AoE, now that the spin is gone.**
+	#
+	# A switch, a till, a chest and a breakable block used to be reachable by a
+	# spin from standing; the modal moveset has no such verb, so the slam is the
+	# one thing that can strike something it is not touching.
+	#
+	# Same reach and same strength as the loose-object half above, but with NO
+	# distance falloff — see `Weight.strike_around` for why a force and a
+	# threshold want opposite treatment there. Measured, at `slam_scatter_power`
+	# 70:
+	#
+	#   a hop-stomp         force 0.10   momentum   7    reach  1.25 m
+	#   a drop from 4 m     force 0.69   momentum  48    reach  3.45 m
+	#   a drop from 12 m    force 2.00   momentum 140    reach 10.00 m
+	#   the same, charging  force 4.20   momentum 294    reach 10.00 m
+	Weight.strike_around(self, global_position, slam_scatter_power * force,
+		_slam_reach(force))
 	_spawn_ring(2.4 + 4.0 * clampf(force, 0.0, 1.5), force > 0.8)
 	_spawn_puff(crash_colour, 16, 4.0, Vector3.DOWN)
 	_shake(land_shake + force * 0.6)

@@ -10,7 +10,7 @@ extends Node3D
 ## rather than a unilateral delete.
 ##
 ## If you want them to do something again, the cheap option is to make them
-## `spinnable` (see spin_switch.gd) so a spin can at least knock them.
+## `strikable` (see strike_switch.gd) so a hit can at least knock them.
 ##
 ## Original description follows.
 ##

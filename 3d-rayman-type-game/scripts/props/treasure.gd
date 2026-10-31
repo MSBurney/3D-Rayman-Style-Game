@@ -11,7 +11,7 @@ extends StaticBody3D
 ## It is deliberately NOT a pickup you walk into. You have to hit it, because a
 ## chest you collect by brushing past is indistinguishable from a coin, and the
 ## whole point is that the reward reads as bigger than the coins that led you to
-## it. Spin it, or pound near it.
+## it. **Stomp beside it** — the slam shockwave is what reaches it.
 ##
 ## Opening it does not spawn coins to collect — it pays straight into the total.
 ## Scattering fifty coins out of a chest looks generous and is actually a chore,
@@ -31,12 +31,11 @@ signal opened(worth: int)
 @export var show_payout: bool = true
 
 @export_group("What opens it")
-## Which spin in a chain opens it: 1 any spin, 3 only the super spin, 0 never.
-@export_range(0, 3) var require_spin_step: int = 1
-## Ground pound strength needed, on `Player.slam_power()`'s 0..1 scale. Negative
-## means a pound never opens it.
-@export var require_slam_power: float = 0.1
-@export var slam_radius: float = 3.0
+## Momentum a strike must bring. Rule 1, and in the same currency as everything
+## else that hits things — see strike_switch.gd for the measured scale. 5 is
+## "any deliberate stomp", which is what a chest in the open should want; put a
+## higher number on one you mean to be a puzzle.
+@export var strike_momentum: float = 5.0
 
 @export_group("Look")
 @export var closed_colour: Color = Color(0.58, 0.42, 0.26)
@@ -45,41 +44,47 @@ signal opened(worth: int)
 
 var open: bool = false
 
+## The rattle tween, kept so a second feeble hit restarts it rather than
+## fighting the first one half way through.
+var _shake: Tween = null
+
 @onready var lid: Node3D = $Visual/Lid
 @onready var _sfx: AudioStreamPlayer3D = $Sfx
 
 
 func _ready() -> void:
-	add_to_group(&"spinnable")
+	add_to_group(&"strikable")
 	add_to_group(&"treasure")
 	_tint($Visual/Body, closed_colour)
 	_tint(lid, lid_colour)
-	Events.slam_landed.connect(_on_slam_landed)
 
 
-## The `spinnable` contract — see spin_switch.gd.
-func spin_hit(by: Node3D) -> void:
-	if open:
-		return
-	var player := by as Player
-	var step := player.abilities.spin_step if player != null else 1
-	# spin_step is zeroed the instant the third spin resolves, so the super spin
-	# arrives here reading 0. Treat that as 3, not as "no spin".
-	if step <= 0:
-		step = 3
-	if require_spin_step <= 0 or step < require_spin_step:
-		return
+## The `strikable` contract — see strike_switch.gd.
+func struck(_by: Node3D, momentum: float) -> bool:
+	if open or strike_momentum <= 0.0:
+		return false
+	if momentum < strike_momentum:
+		# A refused hit RATTLES rather than sitting silent. The old version of
+		# this just returned, which is the one thing a chest must not do: a
+		# chest that needs a harder hit and a chest that is scenery look exactly
+		# the same if neither moves.
+		_rattle()
+		return false
 	_open()
+	return true
 
 
-func _on_slam_landed(at: Vector3, force: float) -> void:
-	if open or require_slam_power < 0.0:
-		return
-	if global_position.distance_to(at) > slam_radius:
-		return
-	if force < require_slam_power:
-		return
-	_open()
+## Shivers without opening. See the breakable block for the same idea, and for
+## why `position` is read here rather than cached in `_ready()`.
+func _rattle() -> void:
+	if _shake != null and _shake.is_valid():
+		_shake.kill()
+	var base := position
+	_shake = create_tween()
+	_shake.tween_property(self, "position",
+		base + Vector3(randf_range(-0.05, 0.05), 0.0,
+			randf_range(-0.05, 0.05)), 0.04)
+	_shake.tween_property(self, "position", base, 0.12)
 
 
 func _open() -> void:
