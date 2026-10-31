@@ -53,6 +53,19 @@ enum State {
 	AIR,
 	## Aimed falling mass, and the emergency brake. The signature verb.
 	SLAM,
+	## On a rail. No steering, no gravity, and `move_and_slide()` does not run at
+	## all — the rail sets the position itself.
+	GRIND,
+	## Set alight: sprinting the way you were facing with almost no steering,
+	## until it burns out. A penalty AND a key.
+	FLAMING,
+	## Inflated: floating upward, weightless, unable to act. The vertical twin of
+	## FLAMING.
+	PUFFY,
+	## Turning round the hard way: sliding one direction while already facing the
+	## other. The doc's "crash-stop / slide", and the only immediate way to
+	## reverse that the authority curve allows.
+	SKID,
 }
 
 signal state_changed(from: State, to: State)
@@ -186,6 +199,98 @@ signal thrown(what: Node3D, aim: Vector3)
 @export var brake_impact_scalar: float = 0.055
 @export var slam_recover: float = 0.25
 
+@export_group("Skid and side-jump")
+## **The immediate turnaround, and the reason it is allowed to exist.**
+##
+## The authority curve deliberately will not let you turn at speed, which is
+## correct and also means a heavy character has no answer at all to "I am going
+## the wrong way". A skid is that answer without breaking the rule: it does not
+## TURN you, it stops you — hard, over a visible slide, while your heading
+## pivots ahead of your body. You pay in distance for the direction.
+##
+## The doc already has it: *"Crash-stop / slide — ending a charge: hit
+## something, slide out, or cancel into slam. Stopping is itself a mechanic
+## with a cost."*
+##
+## Minimum speed to be worth skidding. Below it, ordinary walk authority already
+## turns you and a skid would just be a stutter.
+@export var skid_min_speed: float = 8.0
+## How far the stick has to be turned back against your travel, as a dot
+## product. 0.4 is roughly 115 degrees or more.
+@export_range(0.0, 1.0) var skid_turn_dot: float = 0.4
+## How hard the slide brakes. This is the cost of the turn, so it is the number
+## to tune if a skid feels either free or interminable.
+@export var skid_friction: float = 26.0
+## Drop below this and the skid is over, pointed the new way at this speed.
+@export var skid_exit_speed: float = 2.5
+## RADIANS PER SECOND that the heading swings round during the slide. Faster
+## than the body, on purpose: facing the new way before travelling it is the
+## whole read. At 9 a full reversal takes about a third of a second.
+@export var skid_turn_speed: float = 9.0
+@export var skid_colour: Color = Color(0.95, 0.88, 0.45)
+## The skid cashed in for height — Mario 64's side flip. Jump during a skid.
+##
+## SETS velocity rather than adding to it, like every other move here. The long
+## jump was the only additive one and was the only one that could be farmed.
+@export var side_jump_speed: float = 11.0
+@export var side_jump_rise: float = 13.0
+@export var side_jump_colour: Color = Color(0.5, 0.95, 0.6)
+
+@export_group("Taking a hit")
+## **THERE IS NO DEATH.** A hit knocks you back and scatters the money you were
+## carrying where you lost it, for you to scramble back — the doc's field-damage
+## model, and every penalty is live and in-arena rather than travel time.
+@export var hit_knockback: float = 12.0
+## Blind spell after a hit, so one hazard cannot drain you in a single second.
+@export var hurt_invuln: float = 0.9
+
+@export_group("Rail grinding")
+## Ported from `player.gd` along with the two bugs it took to get right — read
+## the rail-grinding section of CLAUDE.md before touching any of this.
+##
+## **This is a verb the design doc's state diagram does not contain.** It was
+## kept by an explicit decision rather than by the doc, so the document wants
+## amending to say so.
+@export var grind_snap_distance: float = 1.6
+@export var grind_friction: float = 4.0
+@export var grind_accel: float = 16.0
+@export var grind_stall_speed: float = 1.2
+@export var grind_jump_boost: float = 1.0
+## Without it, jumping off re-attaches you on the very next frame because you
+## are still well inside the snap distance, and the jump looks like it did
+## nothing. The let-go law again.
+@export var grind_relatch_delay: float = 0.35
+## Divides drag AND the accelerator, so weight buys top speed and costs
+## response — the same trade the rest of the character makes. Note that is the
+## opposite sign from "heavy things grind slower".
+@export var grind_weight: float = 1.6
+@export var grind_jump_colour: Color = Color(0.35, 1.0, 0.8)
+
+@export_group("Transformations")
+## A TOOL transforms you and does no damage; a THREAT damages you. That split is
+## the load-bearing idea and nothing in here touches it — see `transformer.gd`.
+##
+## Every transformation must time out. They are states with no exit but the
+## clock (and `crouch` to pop PUFFY), so the timer is the only thing stopping
+## them from being a trap.
+@export var flame_time: float = 2.2
+## Above every `BreakableBlock.break_speed` on purpose, so being set alight
+## opens every speed-gated wall in the game at no cost in code anywhere. Keep it
+## above `break_speed` or the point of the transformation goes.
+@export var flame_speed: float = 20.0
+## Radians per second of steering while alight — nearly nothing. You have to
+## line yourself up BEFORE touching the fire, and that is the skill the penalty
+## creates rather than an annoyance it imposes.
+@export var flame_turn_rate: float = 0.9
+@export var flame_colour: Color = Color(1.0, 0.55, 0.15)
+@export var puff_time: float = 3.0
+@export var puff_rise: float = 3.4
+@export_range(0.0, 1.0) var puff_control: float = 0.3
+## Downward speed you pop out with, so deflating is a committed drop rather than
+## a gentle stop.
+@export var puff_pop_fall: float = -6.0
+@export var puff_colour: Color = Color(0.6, 0.85, 1.0)
+
 @export_group("Weight")
 ## How heavy this body is, for anything that resolves by mass: see-saws,
 ## pressure plates, counterweights. **Universal weight rule 3** (the heavier
@@ -302,6 +407,27 @@ var carried: Node3D = null
 var _regrab: float = 0.0
 var _carried_layer: int = 0
 var _carried_mask: int = 0
+
+var _rail: GrindRail = null
+## How far along `_rail` we have travelled, in metres from its start.
+var _rail_offset: float = 0.0
+## SIGNED, not a magnitude plus a direction: one line of slope maths then
+## handles both ways along a rail correctly.
+var _rail_speed: float = 0.0
+var _rail_dir: float = 1.0
+var _grind_lock: float = 0.0
+
+## Where the skid is pointing us. Held separately from `facing` because the
+## heading chases it while the body is still sliding the other way.
+var _skid_aim: Vector3 = Vector3.FORWARD
+var _hurt_lock: float = 0.0
+var _spawn: Transform3D
+
+var _transform_left: float = 0.0
+## Our mass with nothing done to us, so PUFFY can take it to zero and give it
+## back. Captured in `_ready()` rather than on transforming, so transforming
+## twice cannot capture the zero.
+var _base_mass: float = 10.0
 var _air_peak_y: float = 0.0
 ## Horizontal speed at the moment the slam began — the brake half of the impact.
 var _slam_entry_speed: float = 0.0
@@ -322,6 +448,8 @@ func _ready() -> void:
 	facing = -global_transform.basis.z
 	_boosts_left = boost_taps
 	hitbox.body_entered.connect(_on_hitbox_entered)
+	_base_mass = mass
+	_spawn = global_transform
 
 
 func _physics_process(delta: float) -> void:
@@ -333,6 +461,24 @@ func _physics_process(delta: float) -> void:
 		State.CHARGE: _do_charge(delta)
 		State.AIR: _do_air(delta)
 		State.SLAM: _do_slam(delta)
+		State.SKID: _do_skid(delta)
+		State.FLAMING: _do_flaming(delta)
+		State.PUFFY: _do_puffy(delta)
+		State.GRIND:
+			_do_grind(delta)
+			# Kept honest even though nothing moves us with it, because it is
+			# what `approach_velocity()` hands a breakable block you grind
+			# into. The old controller left these stale here, so a rail into a
+			# block measured the speed from before the grind began.
+			_pre_move_flat = Vector3(velocity.x, 0.0, velocity.z)
+			_pre_move_vy = velocity.y
+			_update_visual(delta)
+			# RETURNS BEFORE `move_and_slide()`, and that is a requirement rather
+			# than an optimisation: the rail sets `global_position` itself, and
+			# letting the physics body also move us drags us straight off the
+			# line. If a grind ever stutters or sags off a rail, something
+			# re-enabled this.
+			return
 
 	# Kept from BEFORE collision resolution, because move_and_slide() is about
 	# to zero whichever axis we hit something on. Props ask for these rather
@@ -355,6 +501,8 @@ func _tick(delta: float) -> void:
 	_slam_recover_left -= delta
 	_boost_cool -= delta
 	_regrab -= delta
+	_grind_lock -= delta
+	_hurt_lock -= delta
 	_carry_tick()
 	if is_on_floor():
 		_air_peak_y = global_position.y
@@ -377,7 +525,17 @@ func _read_input() -> void:
 	# already moving to boost. Unambiguous because the two are only reachable
 	# from different states, and it adds no new binding.
 	if Input.is_action_just_pressed(&"attack"):
-		if carried != null:
+		if state == State.GRIND:
+			# `attack` is the rail ACCELERATOR while grinding, read directly by
+			# `_do_grind()` as a held button — so the press must not also throw or
+			# boost. The grind takes the button over for its duration, which is a
+			# real conflict and the same one the spin had with it on the old
+			# controller.
+			pass
+		elif is_transformed():
+			# A transformation you can act your way out of is not a penalty.
+			pass
+		elif carried != null:
 			# CARRYING REPLACES WHAT THE BUTTON MEANS, and the throw happens on
 			# the frame of the press with no hold-versus-tap timer anywhere near
 			# it. A throw that waited to find out whether you actually meant a
@@ -398,7 +556,11 @@ func _read_input() -> void:
 			_try_boost()
 
 	if Input.is_action_just_pressed(&"crouch"):
-		if state == State.AIR or state == State.CHARGE:
+		if state == State.PUFFY:
+			# Deciding WHEN to deflate is the one real choice the state offers.
+			# Without it, PUFFY is pure waiting.
+			_pop_puffy()
+		elif state == State.AIR or state == State.CHARGE:
 			_begin_slam()
 
 
@@ -441,6 +603,12 @@ func _do_walk(delta: float) -> void:
 	if _charge_buffered > 0.0 and is_on_floor():
 		_charge_buffered = 0.0
 		_begin_windup()
+		return
+
+	# Checked before steering, so the frame you ask to turn round is the frame it
+	# starts, rather than being spent fighting `_steer_ground` first.
+	if _wants_skid():
+		_begin_skid()
 		return
 
 	_steer_ground(delta)
@@ -542,6 +710,14 @@ func _do_air(delta: float) -> void:
 	velocity.z = flat.z
 	_apply_gravity(delta)
 
+	# Catching a rail. Checked from the AIR only, so you have to jump or fall on
+	# to one rather than walking sideways into it.
+	if _grind_lock <= 0.0:
+		var rail := _find_rail()
+		if rail != null:
+			_attach_to_rail(rail)
+			return
+
 	# LETTING GO IN MID-AIR ends it, so holding really is the whole condition and
 	# the charge is never resumed by surprise. This is also why tapping for a
 	# boost up here gives up the charge: you cannot tap without releasing, so you
@@ -580,6 +756,14 @@ func _after_move(_delta: float) -> void:
 		State.SLAM:
 			if is_on_floor():
 				_slam_impact()
+		State.SKID:
+			if not is_on_floor() and _coyote <= 0.0:
+				_set_state(State.AIR)
+		State.FLAMING, State.PUFFY:
+			# Nothing. A transformation ends on its own clock and on nothing else,
+			# which is what makes it a state you have to plan around rather than
+			# one you can scrub off against the first wall you find.
+			pass
 
 
 # ──────────────────────────────── weight rule 2: momentum transfers on impact
@@ -794,6 +978,383 @@ func _exit_tree() -> void:
 		_release(Vector3.ZERO)
 
 
+
+
+# ───────────────────────────────────────────────── skidding and the side-jump
+
+## Has the stick been turned back against the way we are actually travelling?
+##
+## Measured on the INPUT and never on the velocity, and that is the one lesson
+## the old controller's side flip paid for: heavy handling will not let velocity
+## turn round quickly BY DESIGN, so a move that waited for the velocity to
+## reverse would simply never fire.
+##
+## Deliberately not reachable from CHARGE. A charge has **no free brakes** — it
+## ends by impact, by sliding out, or by cancelling into a slam — and a skid out
+## of one would be the free brake the whole verb is defined by not having.
+func _wants_skid() -> bool:
+	if wish_dir == Vector3.ZERO or not is_on_floor():
+		return false
+	var flat := Vector3(velocity.x, 0.0, velocity.z)
+	if flat.length() < skid_min_speed:
+		return false
+	return wish_dir.dot(flat.normalized()) < -skid_turn_dot
+
+
+func _begin_skid() -> void:
+	_skid_aim = wish_dir
+	_set_state(State.SKID)
+	_spawn_puff(skid_colour, 14, 3.5, -wish_dir)
+	play_sfx(sfx_land)
+
+
+func _do_skid(delta: float) -> void:
+	# The heading pivots while the body keeps sliding, which IS the read: you are
+	# visibly facing the new way before you are travelling it, so the slide looks
+	# like a decision rather than like losing control.
+	if wish_dir != Vector3.ZERO:
+		_skid_aim = wish_dir
+	# ROTATED about UP by a clamped angle, never `slerp`. A skid is very often an
+	# exact 180-degree reversal, and `Vector3.slerp` between opposite vectors is
+	# DEGENERATE — there is no defined axis to turn about, so it returns the start
+	# unchanged and the heading never moves at all. The charge's steering already
+	# uses this pattern for the same reason.
+	var swing := skid_turn_speed * delta
+	var angle := facing.signed_angle_to(_skid_aim, Vector3.UP)
+	facing = facing.rotated(Vector3.UP, clampf(angle, -swing, swing)).normalized()
+
+	_brake(delta, skid_friction)
+	_slope_pull(delta)
+	_apply_gravity(delta)
+
+	if _jump_buffered > 0.0 and (_coyote > 0.0 or is_on_floor()):
+		_side_jump()
+		return
+	if flat_speed() <= skid_exit_speed:
+		# Out of the far side pointed the new way, at walking pace. The slide was
+		# the cost; the direction is what it bought.
+		velocity.x = _skid_aim.x * skid_exit_speed
+		velocity.z = _skid_aim.z * skid_exit_speed
+		facing = _skid_aim
+		_set_state(State.WALK)
+
+
+## A skid cashed in for height, and the reason it earns a place: the authority
+## curve will not turn you at speed, so the set needs ONE move that reverses you
+## outright. Mario 64 spends its side flip on exactly this.
+func _side_jump() -> void:
+	_jump_buffered = 0.0
+	_coyote = 0.0
+	facing = _skid_aim
+	velocity.x = _skid_aim.x * side_jump_speed
+	velocity.z = _skid_aim.z * side_jump_speed
+	velocity.y = side_jump_rise
+	_set_state(State.AIR)
+	play_sfx(sfx_jump)
+	# Thrown BACKWARDS, against the new heading. The direction dust is thrown is
+	# what you read before you have consciously registered the colour.
+	_spawn_puff(side_jump_colour, 16, 5.5, -_skid_aim)
+
+
+# ───────────────────────────────────────── taking a hit, with no death in it
+
+## **THERE IS NO DEATH, so `damage` is accepted and ignored.**
+##
+## Deliberately still named and shaped like the old controller's `take_hit`:
+## every hazard, enemy, bullet and boss in the project already calls exactly
+## this, so the no-death model belongs HERE, in one place, rather than in a
+## change to each of them. They hand over a damage number; this controller is
+## simply not interested in it.
+##
+## What happens instead is the doc's field-damage model: a reaction, knockback,
+## and **the money you were carrying scatters where you lost it** for you to
+## scramble back. Every penalty is live and in-arena, never travel time.
+func take_hit(_damage: int, from: Vector3, coin_cost: int = 0) -> bool:
+	if _hurt_lock > 0.0:
+		return false
+	_hurt_lock = hurt_invuln
+
+	var away := global_position - from
+	away.y = 0.0
+	if away.length_squared() < 0.0001:
+		away = -facing
+	away = away.normalized()
+	velocity.x = away.x * hit_knockback
+	velocity.z = away.z * hit_knockback
+	velocity.y = maxf(velocity.y, hit_knockback * 0.45)
+	_stun_left = maxf(_stun_left, crash_stun)
+	_charging = false
+	_charge_through_air = false
+	if carried != null:
+		_release(Vector3.ZERO)
+
+	# Game owns the running total and is therefore the only thing that can clamp
+	# the loss to what you actually have, which is why the scatter lives there.
+	Events.player_hurt.emit(global_position, coin_cost)
+	_set_state(State.AIR)
+	_spawn_puff(crash_colour, 16, 5.0, away)
+	_shake(crash_shake)
+	play_sfx(sfx_land)
+	return true
+
+
+## Bounced off something we landed on — an enemy stomp calls this.
+func bounce(force: float = -1.0) -> void:
+	velocity.y = jump_speed if force < 0.0 else force
+	_set_state(State.AIR)
+
+
+## Put back, without having died. There is no death here, so this is only ever
+## "you fell off the world" or a checkpoint — never a penalty in itself.
+func respawn_at(where: Transform3D) -> void:
+	global_transform = where
+	velocity = Vector3.ZERO
+	if carried != null:
+		_release(Vector3.ZERO)
+	_stun_left = 0.0
+	_slam_recover_left = 0.0
+	_windup_left = 0.0
+	_charging = false
+	_charge_through_air = false
+	_transform_left = 0.0
+	_rail = null
+	_grind_lock = 0.0
+	_hurt_lock = 0.0
+	mass = _base_mass
+	_set_state(State.AIR)
+	Events.player_respawned.emit()
+
+
+## Puts down what we are holding, if it is `what` — or whatever we have, if
+## `what` is null. Public so a boss can take something back out of your hands
+## without naming this controller, and so `platform_seed.gd` can insist on
+## being let go.
+func drop_carried(what: Node3D = null) -> void:
+	if carried == null:
+		return
+	if what != null and carried != what:
+		return
+	_release(Vector3.ZERO)
+
+
+func spawn_transform() -> Transform3D:
+	return _spawn
+
+
+## Transforms us by NAME rather than by a `State` value.
+##
+## The old controller's `FLAMING` is a different number from this one's, so a
+## prop that passed an enum value between them would be a bug waiting for the
+## next time either enum gained a member. A name cannot drift.
+func transform_named(form: StringName, seconds: float = -1.0) -> void:
+	match form:
+		&"FLAMING":
+			transform_into(State.FLAMING, seconds)
+		&"PUFFY":
+			transform_into(State.PUFFY, seconds)
+
+
+# ──────────────────────────────────────────────────────────────── grinding
+
+## On a rail. Ported from `player.gd`; the comments there earned their keep.
+func _do_grind(delta: float) -> void:
+	if _rail == null:
+		_leave_rail(false)
+		return
+
+	var tangent := _rail.tangent_at(_rail_offset)
+
+	# Gravity along the rail, and the one line worth reading twice. `tangent`
+	# always points towards the rail's far end, so `tangent.y` IS the grade in
+	# that direction. Because the speed is SIGNED, the same line correctly slows
+	# you when you are running the other way along the same rail. Write it with
+	# absolute values and an uphill grind accelerates.
+	_rail_speed += -tangent.y * slope_gravity * delta
+
+	var weight := maxf(grind_weight, 0.01)
+	# The accelerator pushes along the way we are already going, never backwards.
+	if Input.is_action_pressed(&"attack"):
+		_rail_speed += _rail_dir * (grind_accel / weight) * delta
+
+	# Drag opposes travel, and is CLAMPED rather than simply subtracted: without
+	# the clamp, the frame that takes your last 0.1 m/s carries on and pushes you
+	# gently backwards up the rail you just stopped on.
+	var shed := (grind_friction * _rail.friction_scale / weight) * delta
+	if absf(_rail_speed) <= shed:
+		_rail_speed = 0.0
+	else:
+		_rail_speed -= signf(_rail_speed) * shed
+
+	if absf(_rail_speed) > 0.01:
+		_rail_dir = signf(_rail_speed)
+
+	_rail_offset += _rail_speed * delta
+	velocity = tangent * _rail_speed
+
+	# Ran out of rail. The speed is KEPT: flying off the end fast is the whole
+	# pay-off for taking the rail fast.
+	if _rail_offset <= 0.0 or _rail_offset >= _rail.length():
+		_rail_offset = clampf(_rail_offset, 0.0, _rail.length())
+		_leave_rail(false)
+		return
+
+	# Jumping off. Read from the BUFFER rather than the raw button, as everywhere
+	# else, and eaten so it cannot fire again the moment we land.
+	if _jump_buffered > 0.0:
+		_jump_buffered = 0.0
+		_leave_rail(true)
+		return
+
+	# Ground to a halt without trying to recover, so fall off.
+	if absf(_rail_speed) < grind_stall_speed and not Input.is_action_pressed(&"attack"):
+		_leave_rail(false)
+		return
+
+	global_position = _rail.point_at(_rail_offset)
+	facing = _flatten(tangent * _rail_dir)
+
+
+## The nearest rail within `grind_snap_distance`, or null.
+##
+## Walks the `grindable` group by distance rather than using an `Area3D`, for the
+## usual reason plus one specific to rails: a rail is a thin line tens of metres
+## long, so an area shaped like it would be a chain of little boxes, and "how far
+## along it are you" would still need the curve.
+func _find_rail() -> GrindRail:
+	var best: GrindRail = null
+	var best_distance := grind_snap_distance
+	for node in get_tree().get_nodes_in_group(GrindRail.GROUP):
+		var rail := node as GrindRail
+		if rail == null or rail.curve == null:
+			continue
+		var distance := rail.distance_to_rail(global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = rail
+	return best
+
+
+## Locks on, carrying in the speed we arrived with — PROJECTED on to the rail,
+## not our total speed. So crossing a rail at right angles gives you almost
+## nothing and running along its line gives you everything, which is what makes
+## a ramp leading into a rail worth building.
+func _attach_to_rail(rail: GrindRail) -> void:
+	_rail = rail
+	_rail_offset = rail.closest_offset(global_position)
+	var tangent := rail.tangent_at(_rail_offset)
+	_rail_speed = velocity.dot(tangent)
+	if absf(_rail_speed) > 0.01:
+		_rail_dir = signf(_rail_speed)
+	else:
+		# Landed with no speed ALONG the rail, which is what dropping on to a flat
+		# one out of a fall looks like. `_rail_dir` survives between grinds, so
+		# without this branch it still holds the LAST rail's direction and the
+		# accelerator pushes you whichever way that happened to be.
+		_rail_dir = 1.0 if facing.dot(tangent) >= 0.0 else -1.0
+	global_position = rail.point_at(_rail_offset)
+	_set_state(State.GRIND)
+
+
+## Lets go. Either way you keep the speed you had, pointed along the rail —
+## that one rule is what makes rails traversal instead of scenery.
+func _leave_rail(jumped: bool) -> void:
+	var launch := Vector3.ZERO
+	if _rail != null:
+		launch = _rail.tangent_at(_rail_offset) * _rail_speed
+	velocity = launch
+	if jumped:
+		# SET rather than added, and note this throws away the vertical part of
+		# `launch`, which is the point: jumping off a steep downhill rail should
+		# send you UP, not slightly less down.
+		var along := absf(_rail_speed)
+		velocity.y = minf(jump_speed + along * jump_speed_scaling, jump_speed_max) \
+			+ grind_jump_boost
+		play_sfx(sfx_jump)
+		_spawn_puff(grind_jump_colour, 14, 5.0, -_flatten(launch))
+	_rail = null
+	_rail_speed = 0.0
+	_set_state(State.AIR)
+
+
+# ──────────────────────────────────────────────────────────── transformations
+
+## A TOOL did this to us. Does NO damage — that is the whole tools/threats split.
+func transform_into(which: State, seconds: float = -1.0) -> void:
+	if which != State.FLAMING and which != State.PUFFY:
+		return
+	# Whatever we were holding is let go, or it stays welded to the hold point.
+	if carried != null:
+		_release(Vector3.ZERO)
+	_charging = false
+	_charge_through_air = false
+	_windup_left = 0.0
+	if which == State.FLAMING:
+		_transform_left = seconds if seconds > 0.0 else flame_time
+	else:
+		_transform_left = seconds if seconds > 0.0 else puff_time
+		# MASS ZERO while inflated — the doc's weight grammar for this form is
+		# exactly "mass zero: thresholds and pivots stop answering to you". It
+		# costs one line because `mass` is a real number the weight layer reads,
+		# so a puffy player stops holding pressure plates down and stops tipping
+		# see-saws without either prop knowing this state exists.
+		mass = 0.0
+	_set_state(which)
+	_spawn_puff(flame_colour if which == State.FLAMING else puff_colour,
+		16, 4.0, Vector3.UP)
+
+
+## Sprinting the way you were facing, with almost no steering.
+##
+## The penalty IS the key: `flame_speed` is above every block's `break_speed`,
+## so being alight opens every speed-gated wall — and you cannot steer, so you
+## have to line yourself up before touching the fire.
+func _do_flaming(delta: float) -> void:
+	_transform_left -= delta
+	if wish_dir != Vector3.ZERO:
+		# A fixed ANGULAR allowance per second, not a slerp fraction: a slerp
+		# turns fastest when the gap is widest, which is exactly when you must
+		# not be able to turn.
+		var allowance := flame_turn_rate * delta
+		var angle := facing.signed_angle_to(wish_dir, Vector3.UP)
+		facing = facing.rotated(Vector3.UP,
+			clampf(angle, -allowance, allowance)).normalized()
+	velocity.x = facing.x * flame_speed
+	velocity.z = facing.z * flame_speed
+	_apply_gravity(delta)
+	if _transform_left <= 0.0:
+		_set_state(State.WALK if is_on_floor() else State.AIR)
+
+
+## Rising whether you like it or not, and weightless while you do.
+func _do_puffy(delta: float) -> void:
+	_transform_left -= delta
+	if wish_dir != Vector3.ZERO:
+		var flat := Vector3(velocity.x, 0.0, velocity.z)
+		flat = flat.move_toward(wish_dir * walk_speed * puff_control,
+			walk_accel * delta)
+		velocity.x = flat.x
+		velocity.z = flat.z
+	velocity.y = puff_rise
+	if _transform_left <= 0.0:
+		_pop_puffy()
+
+
+## Deflates — by the clock, or by `crouch`.
+func _pop_puffy() -> void:
+	_set_state(State.AIR)
+	velocity.y = puff_pop_fall
+	_spawn_puff(puff_colour, 12, 4.5, Vector3.DOWN)
+
+
+## True while a transformation has us. Props ask this rather than comparing
+## states, so a third form needs no edits outside this file.
+func is_transformed() -> bool:
+	return state == State.FLAMING or state == State.PUFFY
+
+
+func _flatten(v: Vector3) -> Vector3:
+	var flat := Vector3(v.x, 0.0, v.z)
+	return flat.normalized() if flat.length_squared() > 0.0001 else Vector3.ZERO
 
 
 ## Did that wall actually STOP us, or did we go through it?
@@ -1136,6 +1697,15 @@ func _set_state(next: State) -> void:
 	state = next
 	if next != State.CHARGE:
 		_charging = false
+	if previous == State.GRIND:
+		# Dropped HERE and not only in `_leave_rail()`, because plenty of things
+		# can knock us out of this state without going through it. Leave `_rail`
+		# set through one of those and the next `_do_grind()` drives us along a
+		# rail we are no longer anywhere near.
+		_rail = null
+		_grind_lock = maxf(_grind_lock, grind_relatch_delay)
+	if previous == State.PUFFY:
+		mass = _base_mass
 	state_changed.emit(previous, next)
 
 
@@ -1152,5 +1722,10 @@ func debug_info() -> Dictionary:
 		"boosts": "%d (cool %.2f, worth %.1f)" % [
 			_boosts_left, maxf(_boost_cool, 0.0), boost_strength()],
 		"charge held": _charge_through_air,
+		"carry": carried.name if carried != null else "-",
+		"rail": ("%s at %.1fm, %.1f m/s" % [_rail.name, _rail_offset, _rail_speed]
+			if _rail != null else "-"),
+		"form": ("%s %.2fs" % [state_name(), maxf(_transform_left, 0.0)]
+			if is_transformed() else "-"),
 		"slam": "power %.2f" % slam_power(),
 	}

@@ -15,7 +15,7 @@ extends StaticBody3D
 @export var sfx_hit: AudioStream
 @export var sfx_die: AudioStream
 
-var _player: Player = null
+var _player: Node3D = null
 var _cooldown: float = 0.0
 var _dead: bool = false
 
@@ -33,7 +33,7 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 	if _player == null:
-		_player = get_tree().get_first_node_in_group(&"player") as Player
+		_player = get_tree().get_first_node_in_group(&"player") as Node3D
 		if _player == null:
 			return
 

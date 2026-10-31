@@ -1,6 +1,22 @@
 class_name Player
 extends CharacterBody3D
 
+## **DEPRECATED, and kept on disk for one reason only.**
+##
+## This is the old Mario 64/Odyssey-shaped controller. The design doc that now
+## governs the project says to scrap it outright — *"an agility moveset made
+## heavier can only produce a worse Mario"* — and `heavy_player.gd` is the
+## from-scratch replacement. Everything worth keeping has been ported: the rail
+## grinding, both transformations, and the whole prop library.
+##
+## **It survives because `scene_smilex.tscn` instances `player.tscn` directly.**
+## That is Ian's level, and this file has said since the grapple was deleted
+## that breaking it needs a conversation rather than a unilateral delete. So
+## nothing of OURS points here any more, and the real delete is a conversation.
+##
+## Do not add anything to this file, and do not fix anything in it that is not
+## breaking Ian's level. Read `heavy_player.gd` instead.
+
 ## Rayman-style 3D platformer controller.
 ##
 ## ─── START HERE ──────────────────────────────────────────────────────────────

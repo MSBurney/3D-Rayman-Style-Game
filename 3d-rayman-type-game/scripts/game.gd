@@ -4,7 +4,10 @@ extends Node
 ## never has to reach into the level or the player.
 
 @export var respawn_delay: float = 1.1
-@export var player: Player
+## Typed `Node3D` and not `Player`: that class is deprecated and the modal
+## controller is not one of them. Anything in the `player` group will do, and
+## what is needed from it is asked for by method name.
+@export var player: Node3D
 
 @export_group("Money spilled on a hit")
 ## Getting hit knocks money out of you and it lands on the floor, where you can
@@ -52,7 +55,7 @@ func _ready() -> void:
 	# player.s health once on pickup.
 	add_to_group(&"game")
 	if player == null:
-		player = get_tree().get_first_node_in_group(&"player") as Player
+		player = get_tree().get_first_node_in_group(&"player") as Node3D
 	if player != null:
 		_respawn = player.global_transform
 
@@ -181,4 +184,5 @@ func _do_respawn() -> void:
 	for node in get_tree().get_nodes_in_group(&"throwable"):
 		if node.has_method(&"return_home"):
 			node.call(&"return_home")
-	player.respawn_at(_respawn)
+	if player.has_method(&"respawn_at"):
+		player.call(&"respawn_at", _respawn)

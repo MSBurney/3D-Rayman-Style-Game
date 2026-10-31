@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="lift"]
 [ext_resource type="PackedScene" uid="uid://d3j7q7fgmie67" path="res://scenes/enemies/heavy_enemy.tscn" id="giant"]
 [ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb2"]
+[ext_resource type="PackedScene" uid="uid://fxaq75wjpd27" path="res://scenes/props/grind_rail.tscn" id="rail"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_top_color = Color(0.32, 0.52, 0.78, 1)
@@ -32,6 +33,17 @@ albedo_color = Color(0.58, 0.5, 0.38, 1)
 
 [sub_resource type="StandardMaterial3D" id="MatTower"]
 albedo_color = Color(0.4, 0.42, 0.5, 1)
+
+; A straight 30 m rail dropping 4.5 m, so about 8.5 degrees: downhill enough
+; that coasting builds speed without the accelerator. Curve3D stores THREE
+; Vector3s per point — in-handle, out-handle, then position, handles relative —
+; and both handles at zero give the straight segments a probe can actually check.
+[sub_resource type="Curve3D" id="Curve_greybox"]
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -4.5, 30),
+"tilts": PackedFloat32Array(0, 0)
+}
+point_count = 2
 
 [sub_resource type="BoxShape3D" id="Shape_crate"]
 size = Vector3(1.1, 1.1, 1.1)
@@ -304,6 +316,35 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 11.6, 40)
 use_collision = true
 size = Vector3(10, 0.8, 10)
 material = SubResource("MatDeck")
+
+; ──────────────────────────────── the rail, and the wall only fire opens ────
+;
+; A rail has to be caught in MID-AIR, so it sits under the lip of a platform you
+; drop off. The post marks the head of it, as in the rail yard.
+[node name="RailDeck" type="CSGBox3D" parent="." unique_id=1771604485]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 6.6, -26)
+use_collision = true
+size = Vector3(8, 0.8, 8)
+material = SubResource("MatGround")
+
+[node name="RailPost" type="CSGBox3D" parent="." unique_id=1140226387]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 7.9, -22.4)
+size = Vector3(0.5, 1.8, 0.5)
+material = SubResource("MatMarker")
+
+[node name="Rail" parent="." unique_id=2089426216 instance=ExtResource("rail")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 6.4, -22)
+curve = SubResource("Curve_greybox")
+
+; `break_speed` 18 is out of reach of the charge on the flat (20 needs a long
+; run-up and this sits in the open), and well under `flame_speed` (20). So being
+; set alight opens it for free — the synergy that makes FLAMING worth having,
+; and it costs no code in the block at all.
+[node name="FireWall" parent="." unique_id=1534322155 instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1, 14)
+break_speed = 18.0
+require_spin_step = -1
+require_slam_power = -1.0
 
 ; ─────────────────── universal weight rule 5: it obeys the same physics ─────
 ;

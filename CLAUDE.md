@@ -665,6 +665,138 @@ about a check that had silently stopped meaning anything.
 `tests/greybox_probe.gd` is the measurement harness; it is also currently the only test the new
 controller has, so do not delete it until either the controller is adopted and gets a suite, or
 Milestone 1 kills it.
+## Reunifying the project (started 2026-10-31)
+
+**The project has been split in two since Milestone 1** — an old `player.gd` carrying nine scenes
+and a 109-check suite, and a `heavy_player.gd` carrying one greybox. The decision is to **collapse
+it to one**: the heavy controller keeps everything worth keeping, the old player goes, and the
+levels and systems come with it.
+
+Two calls were made deliberately and both are worth knowing:
+
+- **Rail grinding is PORTED, not retired.** The design doc's state diagram has no grind, so this is
+  a verb the document does not contain — kept by an explicit decision rather than by the doc. By the
+  doc's own standing rules (*"a proposal that violates one needs this document amended first, not an
+  exception granted quietly"*) **the document wants amending to say so.**
+- **Health and death are being REMOVED**, per the doc's *"there is no death"*. A hit becomes
+  knockback plus a collectible scatter you can scramble back, which is the doc's field-damage model
+  and which `game.gd` already does half of.
+
+### Ian's level sets the shape of the delete
+
+`scene_smilex.tscn` instances `scenes/player/player.tscn` **directly**, along with
+`grapple_point.tscn` and the HUD. CLAUDE.md has said since the grapple was deleted that this needs a
+conversation with Ian rather than a unilateral delete, and that still holds. So:
+
+**`player.gd` and `player.tscn` stay on disk, marked deprecated, referenced only by Ian's level.**
+Everything of ours stops pointing at them. That unifies the project without breaking somebody else's
+work, and leaves the actual delete as a conversation instead of a merge conflict.
+
+### Stage A: the heavy controller can do everything the old one could (done)
+
+`State.GRIND`, `State.FLAMING` and `State.PUFFY` are on `heavy_player.gd`, measured by
+`tests/greybox_probe.gd` against a rail and a speed-gated wall now in the greybox.
+
+Three things the port had to re-wire by hand, which is why it is tested rather than assumed:
+
+- **`_physics_process` returns before `move_and_slide()` while grinding.** The rail sets
+  `global_position` itself and letting the physics body also move you drags you off the line. The
+  port also fills `_pre_move_flat`/`_pre_move_vy` before returning, which the old controller did
+  not — so grinding into a breakable block used to measure the speed from before the grind began.
+- **`attack` is the rail accelerator, so it must not also throw or boost.** The grind takes the
+  button over for its duration. That is the same conflict the spin had with it on the old
+  controller, and it resolves the same way.
+- **PUFFY takes `mass` to zero.** The doc's weight grammar for that form is literally *"mass zero:
+  thresholds and pivots stop answering to you"*, and it costs **one line** because `mass` is a real
+  number the weight layer reads — an inflated player stops holding pressure plates down and stops
+  tipping see-saws without either prop knowing the state exists. Restored in `_set_state` on the way
+  out, and captured in `_ready()` rather than on transforming so transforming twice cannot capture
+  the zero.
+
+**`flame_damage` was deliberately not ported.** The old FLAMING hurt enemies it touched; the doc
+frames this form as *"destruction by other means — burns rope, thatch and timber that mass cannot
+crack"*, which is a material language rather than a damage number. Nothing tested it either.
+
+### Stage B1: the props stopped naming `Player` (done)
+
+Seventeen scripts named the class; none do now. The pattern throughout is **ask by method name, not by
+class** — `has_method(&"take_hit")`, `is_in_group(&"player")`, `call(&"respawn_at", …)` — which is
+the same shape `weight.gd` already uses for mass and the `spinnable` group uses for attacks.
+
+**And Stage B3 fell out of it for free.** `HeavyPlayer.take_hit(damage, from, coin_cost)` exists,
+accepts the damage number and **ignores it**:
+
+> Every hazard, enemy, bullet and boss already calls exactly that signature, so the no-death model
+> belongs in ONE place rather than in a change to each of them. They hand over a damage number; this
+> controller is simply not interested in it.
+
+What happens instead is the doc's field-damage model — a reaction, knockback, and the money you were
+carrying scatters where you lost it for you to scramble back. Measured: a 99-damage hit throws you at
+11.9 m/s, emits `player_hurt` with the cost, and a second hit inside `hurt_invuln` is refused.
+
+Three consequences worth knowing, all of them deliberate:
+
+- **A "lethal" hazard is no longer lethal.** `instant_kill` calls `kill()` if the body has one and
+  otherwise lands the hardest ordinary hit it can. The doc bans ejection from an arena outright and
+  requires every penalty to be live and in-arena rather than travel time.
+- **Garlic is inert**, because `heal()` does not exist any more. That is the honest state of it
+  rather than an oversight: the doc replaces health with food that scatters when you are hit, and
+  that system is not built. Until it is, a garlic is a coin that pays nothing.
+- **A transformer prop has no effect on the deprecated controller.** Transformations are now asked
+  for by NAME (`transform_named(&"FLAMING")`) rather than by passing an enum value, because the old
+  controller's `FLAMING` is a different number from the modal one's and an int handed between two
+  enums is a bug waiting for either to gain a member. The old suite transforms by calling the player
+  directly, so nothing regressed.
+
+### The skid and the side-jump (built 2026-10-31)
+
+**Asked for as "a more immediate means to turn around", and the interesting part is that the doc
+already had it:** *"Crash-stop / slide — ending a charge: hit something, slide out, or cancel into
+slam. Stopping is itself a mechanic with a cost."*
+
+A skid is allowed to exist where free steering is not, because **it does not turn you, it stops
+you** — hard, over a visible slide, while your heading pivots ahead of your body. You pay in
+distance for the direction, so the authority curve is untouched. And it is **deliberately not
+reachable from CHARGE**: a charge has no free brakes, and a skid out of one would be exactly the free
+brake the verb is defined by not having.
+
+- **Entry is on the INPUT reversing, never the velocity.** The old controller's side flip paid for
+  this lesson: heavy handling will not let velocity turn round quickly *by design*, so a move that
+  waited for the velocity to reverse would never fire at all.
+- **The side-jump is the same turn cashed in for height** — Mario 64's side flip, and it earns its
+  place for the same reason: the authority curve will not reverse you, so the set needs exactly one
+  move that does. It **sets** velocity rather than adding to it, like everything else here; the long
+  jump was the only additive move and was the only one that could be farmed.
+
+Measured: a reversal from 12 m/s brakes to 7.7 in ten frames with the heading already swung 86°
+ahead of the travel, and jumping out of it leaves at **13.0 m/s upward against a standing jump's
+9.0**.
+
+#### The bug in it, which is a Godot one worth remembering
+
+**`Vector3.slerp` between exactly opposite vectors is degenerate.** A skid is very often a precise
+180° reversal, and there is no defined axis to turn about — so slerp returned the start unchanged and
+the heading never moved at all, while every other part of the skid worked. Rotate about `Vector3.UP`
+by a clamped `signed_angle_to` instead, which is what the charge's steering already did.
+
+### Stage B: what is left, in dependency order
+
+1. ~~Decouple the props from the `Player` class.~~ **Done — B1 above.**
+2. **Retire the spin's names along with the spin.** `spin_switch`, `priced_gate`,
+   `vending_machine`, `treasure` and the breakable block's spin path all use the `spinnable` group
+   and `spin_hit()` — and the heavy controller has no spin. The slam already broadcasts position and
+   force, so a weight-based strike is the natural trigger; the group and method should stop saying
+   "spin" once there is no spin.
+3. ~~Remove health and death.~~ **Done, as a side effect of B1** — see the `take_hit` note above.
+   The HUD hides its hearts when the player has no Health, hazards fall back to a hard hit, and
+   `game.gd` only respawns through a duck-typed `respawn_at`. Enemies keep their own health; the doc
+   only says the *player* does not die.
+4. **Repoint the eight scenes** to `heavy_player.tscn`.
+5. **Rewrite the suite.** About 50 of its 109 checks test verbs that are being deleted — the Mario
+   moveset, the spin chain. It will get smaller before it grows back, and `_run()` should be split
+   into per-system functions while it is being rewritten; it has hung twice on a local-name
+   collision in that one enormous scope.
+
 ## Who this is for
 
 This is a **learning project**. The people working on it can program but are **new to Godot**.

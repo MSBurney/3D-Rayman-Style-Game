@@ -15,7 +15,7 @@ extends RigidBody3D
 ## Ring drawn at the burst, the same scene the player's slam uses.
 @export var burst_fx: PackedScene
 
-var _carrier: Player = null
+var _carrier: Node3D = null
 var _armed: bool = false
 var _spent: bool = false
 var _home: Transform3D
@@ -39,13 +39,26 @@ func _ready() -> void:
 func _physics_process(_delta: float) -> void:
 	if _carrier == null:
 		return
-	var hold := _carrier.hold_point
-	if hold == null:
-		return
-	global_position = hold.global_position
-	rotation = _carrier.visual.rotation
+	# Two carriers, two shapes. The deprecated controller holds things at a
+	# `hold_point` node; the modal one works it out from `facing` every frame
+	# and offers `hold_position()`. Asked for by method name so neither has to
+	# know about the other.
+	global_position = _hold_of(_carrier)
+	var visual: Variant = _carrier.get(&"visual")
+	if visual is Node3D:
+		rotation = (visual as Node3D).rotation
 
-func pick_up(by: Player) -> void:
+## Where `carrier` holds things, whichever controller it is.
+func _hold_of(carrier: Node3D) -> Vector3:
+	if carrier.has_method(&"hold_position"):
+		return carrier.call(&"hold_position")
+	var point: Variant = carrier.get(&"hold_point")
+	if point is Node3D:
+		return (point as Node3D).global_position
+	return carrier.global_position + Vector3.UP * 1.4
+
+
+func pick_up(by: Node3D) -> void:
 	_carrier = by
 	_armed = false
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC

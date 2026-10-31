@@ -29,9 +29,9 @@ func _physics_process(delta: float) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if _spent:
 		return
-	var player := body as Player
-	if player != null:
-		player.take_hit(damage, global_position, coin_cost)
+	var player := body as Node3D
+	if player != null and player.has_method(&"take_hit"):
+		player.call(&"take_hit", damage, global_position, coin_cost)
 	_pop()
 
 func _pop() -> void:

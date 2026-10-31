@@ -12,7 +12,7 @@ extends Control
 @export var heart_spacing: float = 30.0
 @export var heart_origin: Vector2 = Vector2(34.0, 34.0)
 
-var _player: Player = null
+var _player: Node3D = null
 var _health: int = 0
 var _health_max: int = 0
 var _money: int = 0
@@ -42,15 +42,22 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	if _player == null:
-		_player = get_tree().get_first_node_in_group(&"player") as Player
+		_player = get_tree().get_first_node_in_group(&"player") as Node3D
 		if _player != null:
 			# The player announces its health in _ready(), which runs before this
 			# HUD has connected to the bus, so that first broadcast is missed and
 			# no hearts are ever drawn. Pull the current values once on pickup.
-			_on_health_changed(_player.health.current, _player.health.max_health)
+			# **An absent Health is the expected case now, not an error.** The doc
+			# says there is no death, and the modal controller has no health at
+			# all — so the hearts simply never appear, rather than the HUD
+			# failing to find something it assumed was there.
+			var health := _player.get_node_or_null(^"Health") as HealthComponent
+			if health != null:
+				_on_health_changed(health.current, health.max_health)
 	_message_left -= _delta
 	if _debug and _player != null:
-		debug_label.text = _format_debug(_player.debug_info())
+		if _player.has_method(&"debug_info"):
+			debug_label.text = _format_debug(_player.call(&"debug_info"))
 	# Reticle and hearts are drawn, so they need a redraw every frame.
 	queue_redraw()
 

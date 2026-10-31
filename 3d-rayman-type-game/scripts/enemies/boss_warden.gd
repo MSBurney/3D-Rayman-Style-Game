@@ -116,7 +116,7 @@ enum Phase {
 
 var phase: Phase = Phase.ARMOURED
 
-var _player: Player = null
+var _player: Node3D = null
 var _seed: PlatformSeed = null
 var _windup: float = 0.0
 var _charge_left: float = 0.0
@@ -156,7 +156,7 @@ func _grab_seed() -> void:
 func _physics_process(delta: float) -> void:
 	_hit_cooldown -= delta
 	if _player == null:
-		_player = get_tree().get_first_node_in_group(&"player") as Player
+		_player = get_tree().get_first_node_in_group(&"player") as Node3D
 
 	var wanted := Vector3.ZERO
 	match phase:
@@ -310,7 +310,9 @@ func _on_slam_landed(at: Vector3, force: float) -> void:
 
 
 func _on_hurtbox_entered(body: Node3D) -> void:
-	var player := body as Player
+	var player := body as Node3D
+	if player == null or not player.has_method(&"take_hit"):
+		return
 	if player == null or phase == Phase.BEATEN or _hit_cooldown > 0.0:
 		return
 	_hit_cooldown = hit_cooldown
@@ -318,14 +320,15 @@ func _on_hurtbox_entered(body: Node3D) -> void:
 	# carrying, and then there would be nothing left to take back.
 	var had_seed := (_seed != null and is_instance_valid(_seed)
 		and _seed.carrier() == player)
-	player.take_hit(contact_damage, global_position, contact_coin_cost)
+	player.call(&"take_hit", contact_damage, global_position, contact_coin_cost)
 	if not had_seed:
 		return
 	# THE FAIL STATE. Caught carrying the seed: it goes straight back and the
 	# fight loses a phase. You lost ground, not a life — which is the whole
 	# point of the exercise, and why there is no timer anywhere in here.
-	if player.abilities != null and player.abilities.carried == _seed:
-		player.abilities.carried = null
+	# Takes it back out of your hands, whichever controller is holding it.
+	if player.has_method(&"drop_carried"):
+		player.call(&"drop_carried", _seed)
 	snatcher.take(_seed)
 	Events.boss_phase.emit(self, "It took the seed back", "Crack it open again")
 	_set_phase(Phase.ARMOURED)

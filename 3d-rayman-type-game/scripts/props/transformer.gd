@@ -27,7 +27,7 @@ extends Area3D
 ## interesting if there is something above it. A tool with nothing behind it is
 ## just an inconvenience, which is exactly the failure mode to avoid.
 
-## What it turns you into. Values match `Player.State`, chosen in the Inspector.
+## What it turns you into, as a name the controller resolves. Chosen in the Inspector.
 enum Form { FLAMING, PUFFY }
 
 @export var form: Form = Form.FLAMING
@@ -69,18 +69,30 @@ func _process(delta: float) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if _cool_left > 0.0:
 		return
-	var player := body as Player
-	if player == null:
+	# Asked for by NAME, not by passing an enum value. The deprecated
+	# controller's `FLAMING` is a different number from the modal one's, so an
+	# int handed between the two enums is a bug waiting for either of them to
+	# gain a member. A name cannot drift.
+	#
+	# Note this means a transformer has no effect on the DEPRECATED controller,
+	# which has no `transform_named`. That is deliberate: nothing of ours points
+	# at that controller any more, and the old suite transforms by calling the
+	# player directly rather than through this prop.
+	var player := body as Node3D
+	if player == null or not player.has_method(&"transform_named"):
 		return
 	_cool_left = cooldown
-	player.transform_into(_player_state(), duration)
+	player.call(&"transform_named", form_name(), duration)
 
 
-## Maps our own enum onto the player's. Kept as a translation rather than
-## exporting `Player.State` directly, so the Inspector shows only the two forms
-## that make sense here instead of every state the player can be in.
-func _player_state() -> Player.State:
-	return Player.State.PUFFY if form == Form.PUFFY else Player.State.FLAMING
+## Our own enum as a NAME, which is what a controller is asked for.
+##
+## Kept as a translation rather than exporting the controller's own `State`
+## directly, for two reasons: the Inspector then shows only the two forms that
+## make sense here instead of every state a player can be in, and a prop that
+## named a controller's enum would be a prop tied to one controller.
+func form_name() -> StringName:
+	return &"PUFFY" if form == Form.PUFFY else &"FLAMING"
 
 
 func _apply_look() -> void:

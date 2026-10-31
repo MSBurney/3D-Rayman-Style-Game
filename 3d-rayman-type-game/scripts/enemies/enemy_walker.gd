@@ -38,7 +38,7 @@ extends CharacterBody3D
 var _origin: Vector3
 var _patrol_axis: Vector3 = Vector3.RIGHT
 var _direction: float = 1.0
-var _player: Player = null
+var _player: Node3D = null
 var _chasing: bool = false
 var _dead: bool = false
 ## Set while the player is magneting us in — the player owns our
@@ -46,7 +46,7 @@ var _dead: bool = false
 var _tethered: bool = false
 var _held: bool = false
 var _thrown: bool = false
-var _carrier: Player = null
+var _carrier: Node3D = null
 
 @onready var health: HealthComponent = $Health
 @onready var visual: Node3D = $Visual
@@ -81,9 +81,16 @@ func _physics_process(delta: float) -> void:
 	# Held: ride the carrier's hold point.
 	if _held:
 		if _carrier != null and is_instance_valid(_carrier):
-			var hold := _carrier.hold_point
-			if hold != null:
-				global_position = hold.global_position
+			# Asked for by method name, because there are two controllers that can
+			# be carrying this and neither should be named here. The modal one
+			# works its hold point out from `facing` each frame; the deprecated one
+			# parks a node in front of its chest.
+			if _carrier.has_method(&"hold_position"):
+				global_position = _carrier.call(&"hold_position")
+			else:
+				var point: Variant = _carrier.get(&"hold_point")
+				if point is Node3D:
+					global_position = (point as Node3D).global_position
 		return
 
 	# Thrown: the Flight child owns our position while we rocket and ricochet, so
@@ -147,7 +154,7 @@ func _physics_process(delta: float) -> void:
 func _update_awareness() -> void:
 	if _player == null:
 		var found := get_tree().get_first_node_in_group(&"player")
-		_player = found as Player
+		_player = found as Node3D
 	if _player == null:
 		return
 	var distance := global_position.distance_to(_player.global_position)
@@ -174,28 +181,32 @@ func _face_travel(delta: float) -> void:
 func _on_hurtbox_entered(body: Node3D) -> void:
 	if _dead:
 		return
-	var player := body as Player
-	if player == null:
+	# Duck-typed: what matters is that it can be hit and can say how fast it was
+	# falling, which is two methods and not a class.
+	var player := body as Node3D
+	if player == null or not player.has_method(&"take_hit"):
 		return
 	# A falling player landing on top is a stomp, not a collision — let the
 	# stompbox have it rather than trading damage.
-	if player.descent_speed() < -1.0 and player.global_position.y > global_position.y + 0.6:
+	if (Weight.descent(player) < -1.0
+			and player.global_position.y > global_position.y + 0.6):
 		return
-	player.take_hit(contact_damage, global_position, contact_coin_cost)
+	player.call(&"take_hit", contact_damage, global_position, contact_coin_cost)
 
 func _on_stomp(body: Node3D) -> void:
 	if _dead:
 		return
-	var player := body as Player
-	if player == null:
+	var player := body as Node3D
+	if player == null or not player.has_method(&"bounce"):
 		return
-	# descent_speed(), not velocity.y — see Player.descent_speed(). Also require
-	# the player to actually be overhead, so brushing the box sideways is not a stomp.
-	if player.descent_speed() > -1.0:
+	# The PRE-COLLISION descent, not velocity.y: landing on this zeroes the
+	# vertical velocity in the same step the stompbox fires. `Weight.descent()`
+	# is the one place that knows how to ask, whichever body it is.
+	if Weight.descent(player) > -1.0:
 		return
 	if player.global_position.y < global_position.y + 0.8:
 		return
-	player.bounce()
+	player.call(&"bounce")
 	health.damage(2)
 
 func _on_damaged(_amount: int) -> void:
@@ -245,7 +256,7 @@ func _play(stream: AudioStream) -> void:
 # picked up. Nothing in player_abilities.gd knows this is an enemy.
 
 ## The player's spin magnet has latched on and is dragging us in.
-func being_pulled(_by: Player) -> void:
+func being_pulled(_by: Node3D) -> void:
 	if _dead:
 		return
 	_tethered = true
@@ -253,7 +264,7 @@ func being_pulled(_by: Player) -> void:
 
 
 ## We reached the player and are now being carried.
-func pick_up(by: Player) -> void:
+func pick_up(by: Node3D) -> void:
 	if _dead:
 		return
 	_tethered = false

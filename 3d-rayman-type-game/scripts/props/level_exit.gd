@@ -81,8 +81,8 @@ func shortfall() -> int:
 func _on_body_entered(body: Node3D) -> void:
 	if cleared:
 		return
-	var player := body as Player
-	if player == null:
+	var player := body as Node3D
+	if player == null or not player.is_in_group(&"player"):
 		return
 
 	if shortfall() > 0:

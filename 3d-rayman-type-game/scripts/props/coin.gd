@@ -144,13 +144,19 @@ func _process(delta: float) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if _taken or _no_pickup > 0.0:
 		return
-	var player := body as Player
-	if player == null:
+	# Anything in the `player` group, rather than one particular class.
+	var player := body as Node3D
+	if player == null or not player.is_in_group(&"player"):
 		return
 	_taken = true
 	match kind:
 		Kind.GARLIC:
-			player.heal(value)
+			# **Garlic is inert against a controller with no health**, which is the
+			# honest state of it rather than an oversight: the doc replaces health
+			# with food that scatters when you are hit, and that system does not
+			# exist yet. Until it does, a garlic is a coin that pays nothing.
+			if player.has_method(&"heal"):
+				player.call(&"heal", value)
 		_:
 			Events.money_collected.emit(value)
 

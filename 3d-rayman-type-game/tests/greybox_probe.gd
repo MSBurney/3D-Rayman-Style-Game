@@ -45,6 +45,10 @@ func _ready() -> void:
 	# every check after it passes for the wrong reason.
 	await _plate()
 	await _giant()
+	await _skidding()
+	await _no_death()
+	await _grinding()
+	await _transformations()
 	print("---- %d wrong ----" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
@@ -712,6 +716,259 @@ func _put_giant(giant: HeavyEnemy, at: Vector3) -> void:
 	giant._home_set = true
 	if giant.is_down():
 		giant._stand_up()
+
+
+## The skid and the side-jump: the immediate turnaround.
+##
+## The direction the stick means depends on where the camera is looking, so
+## rather than guessing, this presses a key, reads back what `wish_dir` became,
+## and then sets the velocity the OTHER way. Deterministic whatever the rig is
+## doing, which a hardcoded axis would not be.
+func _skidding() -> void:
+	print("  -- skidding, and the side-jump out of it")
+
+	var entered := await _start_skid()
+	_note("reversing the stick at speed starts a skid", entered,
+		"state %s" % player.state_name())
+	if not entered:
+		_release_all()
+		return
+
+	var aim := player._skid_aim
+	var entry := player.flat_speed()
+	for i in 10:
+		await get_tree().physics_frame
+		if player.state != HeavyPlayer.State.SKID:
+			break
+	_note("the slide brakes you hard", player.flat_speed() < entry - 2.0,
+		"%.1f m/s, entered at %.1f" % [player.flat_speed(), entry])
+	# The heading pivots AHEAD of the body, which is what makes a slide read as a
+	# decision rather than as losing control.
+	#
+	# Compared against where the body is actually TRAVELLING rather than against
+	# a fixed angle: the heading leading the travel is the claim, and an absolute
+	# threshold would only be measuring how many frames the check waited.
+	var going := Vector3(player.velocity.x, 0.0, player.velocity.z).normalized()
+	_note("...while you already face the new way",
+		player.facing.dot(aim) > going.dot(aim) + 0.5,
+		"heading is %.2f towards it, travel is still %.2f"
+			% [player.facing.dot(aim), going.dot(aim)])
+
+	# Out the far side, pointed the other way.
+	for i in 60:
+		await get_tree().physics_frame
+		if player.state != HeavyPlayer.State.SKID:
+			break
+	_note("and it leaves you walking the other way",
+		player.state == HeavyPlayer.State.WALK and player.facing.dot(aim) > 0.9,
+		"state %s, facing dot aim %.2f" % [player.state_name(), player.facing.dot(aim)])
+	_release_all()
+	await get_tree().physics_frame
+
+	# ── the side-jump: the same turn, cashed in for height ──
+	entered = await _start_skid()
+	if not entered:
+		_note("a skid can be jumped out of", false, "the skid never started")
+		_release_all()
+		return
+	aim = player._skid_aim
+	# `_tap` and not a press-and-check: a press needs a frame to be seen, and
+	await _tap("jump")
+	_note("jumping out of a skid reverses you", player.state == HeavyPlayer.State.AIR
+		and Vector3(player.velocity.x, 0.0, player.velocity.z).normalized().dot(aim) > 0.9,
+		"state %s" % player.state_name())
+	_note("...and throws you higher than a standing jump",
+		player.velocity.y > player.jump_speed,
+		"%.1f m/s up against a jump of %.1f" % [player.velocity.y, player.jump_speed])
+	_release_all()
+	await get_tree().physics_frame
+
+
+## Gets a skid going and returns whether it started.
+func _start_skid() -> bool:
+	await _place(Vector3(40, 0.15, -52))
+	Input.action_press("move_forward")
+	await get_tree().physics_frame
+	var aim := player.wish_dir
+	if aim == Vector3.ZERO:
+		return false
+	# Travelling the opposite way to the stick, fast enough to be worth skidding.
+	player.velocity = -aim * (player.skid_min_speed + 4.0)
+	for i in 20:
+		await get_tree().physics_frame
+		if player.state == HeavyPlayer.State.SKID:
+			return true
+	return false
+
+
+## **There is no death**, so a hit has to do something else instead.
+func _no_death() -> void:
+	print("  -- taking a hit, in a game with no death")
+	var hurts: Array[int] = []
+	Events.player_hurt.connect(func(_at: Vector3, cost: int) -> void:
+		# An ARRAY, never a captured int. A lambda captures locals by VALUE.
+		hurts.append(cost))
+
+	await _place(Vector3(40, 0.15, -52))
+	player.velocity = Vector3.ZERO
+	var from := player.global_position + Vector3(0, 0, -2)
+	var landed := player.take_hit(99, from, 7)
+	await get_tree().physics_frame
+	# 99 damage, and it is simply ignored: the controller has no health to take
+	# it off. Every caller in the project still hands a number over, which is
+	# exactly why the no-death model lives in `take_hit` and not in each of them.
+	_note("a hit lands and does not kill you",
+		landed and is_instance_valid(player), "state %s" % player.state_name())
+	_note("it throws you away from whatever hit you", player.velocity.z > 1.0,
+		"thrown at %.1f m/s" % player.velocity.z)
+	_note("and scatters your money where you lost it", hurts.size() > 0,
+		"player_hurt carried a cost of %s"
+			% ("nothing" if hurts.is_empty() else str(hurts[0])))
+	_note("a second hit inside the blind spell is refused",
+		not player.take_hit(99, from, 7),
+		"invuln is %.2f s" % player.hurt_invuln)
+	_release_all()
+	await get_tree().physics_frame
+
+
+## Rail grinding, ported from `player.gd` onto the modal controller.
+##
+## Checked because a port is exactly the kind of change that compiles and then
+## does nothing: the state machine, the input fork and the early return before
+## `move_and_slide()` all had to be re-wired by hand.
+func _grinding() -> void:
+	print("  -- rail grinding, ported to the heavy controller")
+	var rail := level.get_node_or_null("Rail") as GrindRail
+	if rail == null:
+		_note("there is a rail", false, "Rail missing")
+		return
+
+	# Dropped on to the head of the rail. A rail is caught from the AIR only, so
+	# this has to be a fall and not a walk.
+	var caught := await _catch_rail(rail)
+	_note("you catch a rail in mid-air", caught,
+		"state %s" % player.state_name())
+	if not caught:
+		return
+
+	# Downhill, so coasting alone has to build speed: the slope maths reuses
+	# `slope_gravity`, which means a rail physically cannot disagree with a ramp
+	# about which way is downhill.
+	var entry := absf(player._rail_speed)
+	for i in 70:
+		await get_tree().physics_frame
+		if player.state != HeavyPlayer.State.GRIND:
+			break
+	_note("a downhill rail builds speed on its own",
+		absf(player._rail_speed) > entry + 1.0 or player.state != HeavyPlayer.State.GRIND,
+		"entered at %.1f, reached %.1f m/s" % [entry, absf(player._rail_speed)])
+
+	# Jumping off keeps what you earned, which is the one rule that makes a rail
+	# traversal instead of scenery.
+	caught = await _catch_rail(rail)
+	for i in 50:
+		await get_tree().physics_frame
+		if player.state != HeavyPlayer.State.GRIND:
+			break
+	var before := absf(player._rail_speed)
+	await _tap("jump")
+	_note("jumping off keeps your speed",
+		player.state == HeavyPlayer.State.AIR and player.flat_speed() > before * 0.5,
+		"left at %.1f of %.1f m/s, state %s"
+			% [player.flat_speed(), before, player.state_name()])
+	_note("and you do not re-catch the rail you just left",
+		player.state != HeavyPlayer.State.GRIND,
+		"relatch lock %.2f" % maxf(player._grind_lock, 0.0))
+	_release_all()
+	await get_tree().physics_frame
+
+
+## The two transformations, ported.
+##
+## The PUFFY mass check is the one worth having: it is the doc's weight grammar
+## for that form ("mass zero: thresholds and pivots stop answering to you"), and
+## it only works because `mass` is a real number the weight layer reads.
+func _transformations() -> void:
+	print("  -- transformations, ported to the heavy controller")
+	var wall := level.get_node_or_null("FireWall") as BreakableBlock
+	var plate := level.get_node_or_null("Plate") as PressurePlate
+	if wall == null or plate == null:
+		_note("the transformation fixtures exist", false, "FireWall or Plate missing")
+		return
+
+	# ── FLAMING: sprints you, and the stick barely answers ──
+	await _place(Vector3(-40, 0.15, 4))
+	player.facing = Vector3(0, 0, 1)
+	player.transform_into(HeavyPlayer.State.FLAMING)
+	for i in 10:
+		await get_tree().physics_frame
+	_note("catching fire sprints you", player.flat_speed() > player.walk_speed + 2.0,
+		"%.1f m/s against a walk of %.1f" % [player.flat_speed(), player.walk_speed])
+	_note("...and you cannot act while transformed", player.is_transformed(),
+		"state %s" % player.state_name())
+
+	# ── being alight opens a speed-gated wall for free ──
+	# `flame_speed` is above every `break_speed` on purpose, and the block asks
+	# how fast you arrived without knowing the state exists.
+	var opened := false
+	for i in 150:
+		await get_tree().physics_frame
+		if wall.broken_open:
+			opened = true
+			break
+	_note("being alight opens a speed-gated wall for free", opened,
+		"break_speed %.0f against flame_speed %.0f" % [wall.break_speed, player.flame_speed])
+
+	# ── and it burns out on its own ──
+	await _place(Vector3(-40, 0.15, -14))
+	player.transform_into(HeavyPlayer.State.FLAMING, 0.3)
+	for i in 90:
+		await get_tree().physics_frame
+		if not player.is_transformed():
+			break
+	_note("the fire burns out on its own", not player.is_transformed(),
+		"state %s" % player.state_name())
+
+	# ── PUFFY: rises, and weighs nothing while it does ──
+	plate.reset()
+	await _put(level.get_node_or_null("PlateCrate") as RigidBody3D, Vector3(16, 0.8, 18))
+	await _place(Vector3(22, 0.45, 18))
+	var base := player.mass
+	player.transform_into(HeavyPlayer.State.PUFFY)
+	await get_tree().physics_frame
+	_note("being inflated takes your mass to zero", is_zero_approx(player.mass),
+		"mass %.1f, was %.1f" % [player.mass, base])
+	var rose := player.global_position.y
+	for i in 30:
+		await get_tree().physics_frame
+	_note("...and floats you upward", player.global_position.y > rose + 0.5,
+		"rose %.2f m" % [player.global_position.y - rose])
+
+	# ── crouch pops it, and the mass comes back ──
+	await _tap("crouch")
+	_note("crouch pops you out of it", not player.is_transformed(),
+		"state %s" % player.state_name())
+	_note("and your mass comes back", is_equal_approx(player.mass, base),
+		"mass %.1f" % player.mass)
+	_release_all()
+	await get_tree().physics_frame
+
+
+## Drops the player on to the head of `rail` and waits for the catch.
+func _catch_rail(rail: GrindRail) -> bool:
+	await _place(Vector3(-40, 7.0, -26))
+	player._grind_lock = 0.0
+	# Just above and just past the rail's head, falling, with some speed along it
+	# so the entry projection has something to work with.
+	player.global_position = rail.point_at(1.5) + Vector3.UP * 1.2
+	player.velocity = Vector3(0, -2.0, 6.0)
+	player.facing = Vector3(0, 0, 1)
+	player._set_state(HeavyPlayer.State.AIR)
+	for i in 40:
+		await get_tree().physics_frame
+		if player.state == HeavyPlayer.State.GRIND:
+			return true
+	return false
 
 
 ## Horizontal speed of a loose object. Watching the whole velocity vector picks

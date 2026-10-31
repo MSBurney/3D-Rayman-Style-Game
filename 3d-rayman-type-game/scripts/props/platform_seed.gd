@@ -116,8 +116,13 @@ func _physics_process(_delta: float) -> void:
 func _hold_position() -> Vector3:
 	# The player has a hold point in front of its chest, set up in player.tscn.
 	# An enemy has no such thing, so it carries this over its head.
-	if _carrier is Player:
-		var hold: Node3D = (_carrier as Player).hold_point
+	if _carrier.has_method(&"hold_position"):
+		# The modal controller works its hold point out from `facing` each frame
+		# rather than parking a node in front of its chest.
+		return _carrier.call(&"hold_position")
+	var point: Variant = _carrier.get(&"hold_point")
+	if point is Node3D:
+		var hold: Node3D = point
 		if hold != null:
 			return hold.global_position
 	return _carrier.global_position + Vector3.UP * carry_height
@@ -186,7 +191,11 @@ func consume() -> void:
 	if _spent:
 		return
 	_spent = true
-	if _carrier is Player:
+	if _carrier != null and _carrier.has_method(&"drop_carried"):
+		# Asked for by method name. Both controllers can be holding this, and
+		# neither of them should have to be named here.
+		_carrier.call(&"drop_carried", self)
+	elif _carrier is Player:
 		var player := _carrier as Player
 		if player.abilities != null and player.abilities.carried == self:
 			player.abilities.carried = null
