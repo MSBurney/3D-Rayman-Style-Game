@@ -963,6 +963,203 @@ change of controller.
   switch and the block share the entry point and the threshold), but the "too poor" and "sold out"
   announcements are exercised only by the old suite.
 
+### Stage B4b: the last four scenes, and main.tscn rebuilt (done 2026-10-31)
+
+**Every scene of ours now runs the heavy controller.** `player.tscn` is referenced by exactly two
+files: `scenes/suite_fixture.tscn` (the old suite's fixture) and `scene_smilex.tscn` (Ian's).
+
+#### `scenes/main.tscn` is a rebuild, not a repoint
+
+It loads `scenes/levels/heavy_yard.tscn` — one OPEN yard with eight problems, because the doc names
+*"density of weight-reactive terrain"* as the level-design KPI and *"the world itself is the
+puzzle"*. `test_level.tscn` was four corridors each built around a verb that no longer exists
+(`BRunWall` the wall run, `AGlideCoin*` the glide, North/South the grapple anchors), so there was
+nothing to repoint.
+
+Every threshold in the yard is a MEASURED number off the greybox probe, not an invented one:
+
+| | the problem | the gate |
+| --- | --- | --- |
+| 1 | charge down the ramp into `RampWall` | `break_speed` 22 — flat charge 20, off the ramp 26 |
+| 2 | the 18 m gap to the island | walk-jump 15.5, charge-jump 21.2 |
+| 3 | ram a 16-crate on to a plate wanting 14, ride the lift, slam from 14 m | `strike_momentum` 120 vs a hop's 7, a 14 m drop's 140 |
+| 4 | the see-saw and an 8-mass crate | `carry_max_mass` 10 |
+| 5 | `CrumbleSpan` over a 25 m trench | `break_mass` 20 — the hero is 10, the giant 40 |
+| 6 | lure the giant through `MassWall` | `break_mass` 30 |
+| 7 | the rail off the ramp deck | the slope sets the speed |
+| 8 | the exit at 250 against 310 on the floor | 81%, so the next coin is worth something |
+
+**The ramp's basis and size are copied VERBATIM from the greybox**, with only `x` changed. That is
+deliberate cowardice: a hand-authored rotation has come out wrong every single time in this project,
+and that exact basis is already measured against tan(15°).
+
+**Both vaults are ROOFED**, which is not decoration. A 2 m block is exactly a standing jump's height
+(`jump_speed` 9 against gravity 20 gives 2.0 m), so an unroofed wall is a wall you hop over and the
+speed gate measures nothing at all.
+
+**Every hole has a floor and a staircase**, and the perimeter is walled. With no death, walking off
+the edge is an infinite fall and the doc bans ejection outright — so falling in costs the climb,
+which is a live in-arena penalty rather than travel time.
+
+#### The old suite had to be decoupled first, and that was a hidden blocker
+
+`tests/moveset_smoke_test.gd` instantiated **`scenes/main.tscn`**, which quietly made the project's
+entry scene the fixture for the deprecated controller as well. Rebuilding `main.tscn` would have
+deleted all 214 checks before B5 wrote a replacement. `scenes/suite_fixture.tscn` is now that fixture
+— `test_level.tscn` + `player.tscn` + the HUD — and both halves retire together at B5.
+
+It caught a bug on the way across: `main.tscn` carried **`swing_max_rope = 6.5`**, a grapple
+property that has not existed on `player.gd` since the grapple was deleted. Godot had been silently
+ignoring it for weeks. A property in a `.tscn` that the script does not have produces no warning.
+
+#### The warden's `crack_power` was INVERTED, not merely rescaled
+
+0.5 → **3.0**, and the arithmetic is the point. The modal controller measures slam force in two
+halves — how far you fell, plus how much horizontal speed you delivered into the floor:
+
+| | force |
+| --- | --- |
+| a standing hop | 0.10 |
+| a drop from the pound deck at y = 8 | **1.40** |
+| a flat-out charge cancelled into a slam, **no drop at all** | **2.20** |
+| a charge off the deck | **3.60** |
+
+**Horizontal speed is worth more than the deck is.** At any threshold between 0.5 and 2.2 the answer
+to this boss is "charge at it on flat ground" and the pound deck stops existing — which deletes
+phase two, because the shape of the fight is luring him into the pillar at `x = -18` so that you are
+already up high when he stuns. 3.0 needs BOTH, so the opening is now the doc's signature charge-to-
+slam cancel, and the hint *"pound it from higher up"* stays true.
+
+#### `PlatformSeed` weighed one kilogram
+
+`RigidBody3D.mass` defaults to 1 and the scene never set it, so the object a whole level hangs on
+registered as nothing on a pressure plate and could not tip a see-saw at any distance from the
+pivot. It is **6** now: under `carry_max_mass` so it is still picked up on approach, and under the
+hero's 10 so it cannot out-lever you on a plank.
+
+#### Four bugs the probes caught, and three of them were in the probes
+
+- **The lift overshot the tower by 30 cm.** A `MovingPlatform` deck is 0.6 thick, so its top is
+  `origin.y + 0.3`; `travel` 13.7 landed it at 14.30 against a tower top of 14.0. This is the
+  "arrives *nearly* at the deck" lip the greybox's plate check was written for, caught on a
+  different level by the same check.
+- **The yard probe cast a ray straight through the island chest**, and read "the floor is 1.6 m up"
+  — the trap written at the top of its own file.
+- **It looked for the ABSENCE of a floor to find the gap**, and found no gap anywhere. Correct and
+  useless: every hole here has a floor on purpose. It asks "has the floor dropped" now.
+- **It expected the rail head at 7.9 and got 8.4**, because `GrindRail.point_at()` adds
+  `ride_height`. 8.4 is the line you RIDE, and that it sits just above the 8.0 deck is the right
+  answer — you step up on to a rail rather than down into it.
+
+#### The tree fort had a floating chest, and fixing it recreated the level's oldest bug
+
+`tests/fort_probe.gd` had asked for a surface at (-6.5, 0) at height 8 since the level was written
+and been answered "nothing" every time, so **`ChestGantry` had no floor under it at all.** The
+missing `Deck2Gantry` is now there.
+
+**The first attempt put it at x = -6.5, where a 5 m slab spans x -9..-4 — straight over the
+deck-1-to-deck-2 staircase, which climbs at x = -5.75.** It sat 0.6 m above the steps, which is a
+head-bump and not headroom (anything under about 1.4 m is), so two of the five steps became
+unusable. That is precisely the fault this level shipped with — *"two entire staircases ran
+underneath the deck they were supposed to reach"* — recreated while fixing it, which is the whole
+argument for measuring rather than looking. At **x = -8.5** it clears the stairs, still covers the
+point the probe asks about, and still carries the chest.
+
+**The fort probe is clean for the first time**: 0 faults, with the staircase reading a flat 0.8 m
+rise all the way up.
+
+#### A probe that hangs is a probe that did not PARSE
+
+`yard_probe.gd` ran past two minutes doing nothing but raycasts. Two causes, both worth knowing:
+`get_world_3d()` does not exist on a plain `Node` (the working probes use
+`get_viewport().world_3d`), and `for z in [-5.0, …]` makes `z` a Variant off an untyped array
+literal, so an inferred `var expected := 4.0 + RAMP_TAN * (-15.0 - z)` **fails to compile**. Write
+`for z: float in [...]`.
+
+Either way the script fails to load, the scene runs with a null script, and nothing ever reaches
+`quit()` — so it presents as a hang rather than as a typo. This is the third time that signature has
+appeared in this project.
+
+### Stage B5: the suite rewritten on to the modal controller (done 2026-11-01)
+
+**2152 lines → 1982, 108 checks → 86, and it drives `heavy_player.gd`.** The fixture is
+`scenes/suite_fixture.tscn` (what `suite_fixture.tscn` became): `test_level.tscn` with the MODAL
+player in it. Keeping the old level was deliberate — **only the controller changed**, which is the
+only way to know what broke, and every movement check builds its own flat pad at `PAD_TOP` anyway.
+
+**`player.gd` is now referenced by exactly one file — `scene_smilex.tscn` — and is completely
+untested.** That was the accepted cost of rewriting in place rather than keeping two suites. If
+anyone touches the deprecated controller, nothing will catch it.
+
+#### What went, and what it became
+
+| | |
+| --- | --- |
+| deleted | double and triple jump, backflip, slide, long jump and its convergence, side flip, ledge grab and climb, the spin's damage, chain, air lift and lockout, the magnet, the wall kick |
+| converted | nine `attack`-spin triggers → stomps · three death checks → the no-death model · `State.CROUCH` → `_slam_recover_left` |
+| restructured | `_run()`, one 1536-line scope, → **fifteen per-system functions** |
+
+**The split was not tidiness.** That one scope meant every local in it had to be unique against
+every other local in the whole suite; a collision is a parse error, the script then fails to load,
+the scene runs with a null script and never reaches `quit()` — so it presented as the suite
+**hanging** rather than as a typo. It had cost two debugging sessions. Splitting it exposed exactly
+three cross-section dependencies, now members or file consts: `PAD_TOP`, `game`, `money_seen`.
+
+#### THE HEADLINE: the suite caught two serious bugs that B4 had shipped that same day
+
+- **The carry verb could only see four hand-written crates.** `_try_pickup` walked the `carryable`
+  group, and its only members were crates written directly into two level files — so the keg, the
+  platform seed and everything using `throwable.gd` were invisible to it. **That made
+  `hostage_pit_main` unwinnable from the moment it was repointed**, because the whole level is
+  "carry the seed to the socket". It walks `carryable` AND `throwable` now; `throwable` is the older
+  name for the same idea and the one the props already use.
+- **The carry verb bypassed the props' protocol entirely.** `_pick_up` did the `RigidBody3D`
+  freezing itself and never called the object's own `pick_up(by)`. So `platform_seed._carrier` was
+  never set: `is_held()` stayed false, the seed's own invariant — *"not held but still frozen is
+  always wrong"* — fired and it **rescued itself straight out of the player's hands**, and because
+  nothing in the world knew it was held, a snatcher or the boss could take it at the same time.
+  Four checks failed on that single cause.
+
+  **This is the `weight.gd` lesson in reverse.** That file exists because props asked *who are you*
+  instead of *how heavy are you*; here the CONTROLLER ignored the interface the props publish. If a
+  prop implements `pick_up` / `throw` / `drop`, call them — the prop is where "who is holding this"
+  is recorded, and nothing else can know it.
+
+  A third guard came out of the same fix: pickup now refuses anything whose `is_held()` is true,
+  because it is a POSITION check and a held object still sits at its carrier's hold point.
+
+#### Three failures that were the tests telling the truth
+
+- **The tills area has no floor.** The gate and the machines sit at x = 400 in empty space, and that
+  was fine while a spin opened them — a spin is not a State, so it fires in mid-air. A slam has to
+  LAND. With nothing to land on the player fell for ever, `is_on_floor()` never came true, and six
+  checks failed identically while saying nothing about why. `_tills()` builds a pad now.
+- **The modal controller has NO area damage**, so "slam shockwave reaches sideways" had no mechanism
+  at all. That is the doc rather than a gap: destruction is weight and momentum, so a slam moves
+  things rather than hurting them, and an enemy is toppled by what you bring to it. The check
+  measures a keg thrown sideways now — same claim, the mechanism that exists.
+- **The FLAMING sprint is barely a sprint, and that is a TUNING finding.** Its check wanted
+  `flame_speed > walk_speed * 1.5`, written when walking was 7.5 and a 20 m/s flame was 2.7x it. The
+  modal controller walks at **15**, so the flame is 1.33x and the check was asking for 22.5. The
+  load-bearing half is kept — `flame_speed` must beat `break_speed`, which is what makes catching
+  fire open every speed-gated wall for free — but the margin is gone, and it is the same compression
+  that made walking 75% of a charge.
+
+#### Two checks whose STRUCTURE had no equivalent, not just whose verb changed
+
+- *"only the super spin opens a spin-only block"* asked for three presses with the third being
+  stronger. Every stomp is the same stomp, so there is no third. It is **a hop refused, a real drop
+  through** now — the distinction that does exist is how far you fell.
+- *"a chain of three spins buys one item, not three"* proved `retrigger_delay` (0.4 s) by firing
+  three times inside it. Three stomps take about four seconds, so all three legitimately buy. The
+  claim it protects is that one BLOW cannot register twice, so **one stomp** is what it measures.
+
+#### `EXPECTED_CHECKS` earned its keep twice
+
+It caught both times a batch of checks was removed without the count being updated — which is
+exactly the "prints 0 failures having only run half the suite" failure it exists to prevent. **Bump
+it deliberately whenever you add or remove a check**; it is 86.
+
 ### Stage B: what is left, in dependency order
 
 1. ~~Decouple the props from the `Player` class.~~ **Done — B1 above.**
@@ -974,14 +1171,11 @@ change of controller.
    The HUD hides its hearts when the player has no Health, hazards fall back to a hard hit, and
    `game.gd` only respawns through a duck-typed `respawn_at`. Enemies keep their own health; the doc
    only says the *player* does not die.
-4. **Repoint the eight scenes** to `heavy_player.tscn`. **Four done — B4a above.** Left:
-   `warden_arena_main` (retune `crack_power` first), `tree_fort_main` (probe the jump gaps),
-   `hostage_pit_main` (give the seed a `mass`), and `main.tscn`, which is a rebuild rather than a
-   repoint. **`scene_smilex.tscn` is Ian's and stays on `player.tscn`.**
-5. **Rewrite the suite.** About 50 of its 109 checks test verbs that are being deleted — the Mario
-   moveset, the spin chain. It will get smaller before it grows back, and `_run()` should be split
-   into per-system functions while it is being rewritten; it has hung twice on a local-name
-   collision in that one enormous scope.
+4. ~~Repoint the eight scenes.~~ **Done — B4a and B4b above.** `player.tscn` is now
+   referenced by exactly two files: `scenes/suite_fixture.tscn` (the old suite's fixture) and
+   **`scene_smilex.tscn`, which is Ian's and stays.**
+5. ~~Rewrite the suite.~~ **Done — B5 above.** 86 checks on the modal controller, `_run()` split
+   into fifteen per-system functions. **Stage B is complete.**
 
 ## Who this is for
 
@@ -1038,13 +1232,16 @@ file to be read.
                      moving platform, see-saw, pressure plate (the weight layer)
     ui/              hud.gd
   scenes/            mirrors scripts/ — one scene per script
-                     main.tscn (moveset showcase), playground.tscn (momentum),
+                     main.tscn (the entry scene: heavy_yard, the modal showcase),
+                     suite_fixture.tscn (the suite's fixture: test_level with the
+                     modal player; not a scene anybody plays),
+                     playground.tscn (momentum),
                      tree_fort_main.tscn, rail_yard_main.tscn and
                      thief_arena_main.tscn, market_yard_main.tscn and
                      hostage_pit_main.tscn and warden_arena_main.tscn (experiments),
                      greybox_main.tscn (Milestone 1 — the heavy controller)
   tests/             moveset smoke test, plus throwaway level probes (fort, rail,
-                     market, pit, warden, greybox)
+                     market, pit, warden, greybox, yard)
   tools/             make_placeholder_sounds.gd, make_uids.gd (--script safe)
 ```
 

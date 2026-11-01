@@ -29,6 +29,16 @@ size = Vector3(0.5, 0.5, 0.12)
 ; Layer 64 is `throwable` and mask 5 is world + enemy, copied from the keg so it
 ; behaves the same way when loose on the floor.
 [node name="PlatformSeed" type="RigidBody3D"]
+; **6, because `RigidBody3D.mass` defaults to 1 and nobody ever set it.** The
+; weight layer reads this by name, so until now the object a whole level hangs
+; on weighed a kilogram: it registered as nothing on a pressure plate and could
+; not tip a see-saw at any distance from the pivot.
+;
+; 6 keeps it under `carry_max_mass` (10) so it is still picked up on approach,
+; and under the hero (10) so it cannot out-lever you on a plank — but it is now
+; heavy enough to hold down a default plate, which wants 8 only when something
+; else is on it too.
+mass = 6.0
 ; Layer 64 is `throwable`, mask 5 is world + enemy, copied from the keg.
 ;
 ; NOTE these are their own lines. A collision property written INSIDE the

@@ -902,26 +902,67 @@ func _try_pick_up() -> void:
 
 	var best: Node3D = null
 	var closest := carry_reach
-	# Walked by GROUP and distance, never with an Area3D. A settled crate is a
-	# SLEEPING RigidBody3D and overlap queries are unreliable about those, which
-	# is exactly the state every crate worth picking up is in.
-	for node in get_tree().get_nodes_in_group(&"carryable"):
-		var body := node as Node3D
-		if body == null:
-			continue
-		# Too heavy to lift, so it has to be rammed instead. See `carry_max_mass`.
-		if Weight.mass_of(body) > carry_max_mass:
-			continue
-		var gap := body.global_position.distance_to(global_position + Vector3.UP * 0.9)
-		if gap < closest:
-			closest = gap
-			best = body
+	# **BOTH groups, and leaving `throwable` out was a real bug.**
+	#
+	# `carryable` is the greybox's name and `throwable` is the older one for the
+	# same idea — "a thing you can pick up and throw". Walking only `carryable`
+	# meant the only liftable objects in the entire game were four crates written
+	# by hand into two level files: the keg, the platform seed and anything else
+	# using `throwable.gd` were all invisible to the carry verb.
+	#
+	# That made `hostage_pit_main` UNWINNABLE the moment it was repointed at this
+	# controller, because the whole level is "carry the seed to the socket" and
+	# the seed could not be carried. The smoke suite is what caught it.
+	#
+	# Honouring both rather than re-tagging every prop: a group is a published
+	# extension point, and `throwable` is the one the props already use.
+	var seen: Array[Node] = []
+	for group in [&"carryable", &"throwable"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var body := node as Node3D
+			# A prop can legitimately be in both, and measuring it twice is
+			# harmless but picking the wrong one is not.
+			if body == null or seen.has(body):
+				continue
+			seen.append(body)
+			# ALREADY IN SOMEBODY ELSE'S HANDS. Without this the player can lift
+			# the seed straight off a boss or a snatcher that is carrying it,
+			# because the pickup is a position check and a held object is still
+			# sitting at its carrier's hold point.
+			if body.has_method(&"is_held") and body.call(&"is_held"):
+				continue
+			# Too heavy to lift, so it has to be rammed instead. See
+			# `carry_max_mass`.
+			if Weight.mass_of(body) > carry_max_mass:
+				continue
+			var gap := body.global_position.distance_to(
+				global_position + Vector3.UP * 0.9)
+			if gap < closest:
+				closest = gap
+				best = body
 	if best != null:
 		_pick_up(best)
 
 
 func _pick_up(what: Node3D) -> void:
 	carried = what
+	# **ASK THE PROP FIRST, and not asking was a real bug.**
+	#
+	# `throwable.gd` and `platform_seed.gd` both implement `pick_up(by)`, and
+	# this controller used to skip it and do the RigidBody3D handling itself.
+	# That works for a bare scriptless crate and is wrong for everything with a
+	# script, because a prop's `pick_up` is where it records WHO is holding it.
+	#
+	# The seed was the worst case: `is_held()` stayed false, so its own
+	# invariant — "not held but still frozen is always wrong" — fired and it
+	# rescued itself straight out of the player's hands. And because nothing in
+	# the world knew it was held, a snatcher or the boss could take it at the
+	# same time. The smoke suite caught all four of those at once.
+	if what.has_method(&"pick_up"):
+		what.call(&"pick_up", self)
+		what.global_position = hold_position()
+		picked_up.emit(what)
+		return
 	var rigid := what as RigidBody3D
 	if rigid != null:
 		# Frozen and taken off every layer for the duration. Leave it solid and it
@@ -961,6 +1002,16 @@ func _release(aim: Vector3) -> void:
 	carried = null
 	_regrab = carry_regrab_delay
 	if what == null or not is_instance_valid(what):
+		return
+	# The other half of the protocol. A prop that took `pick_up` must be given
+	# `throw` or `drop`, or it stays frozen and layer-less for ever believing it
+	# is still being carried.
+	if what.has_method(&"throw"):
+		what.call(&"throw", aim)
+		return
+	if what.has_method(&"drop"):
+		what.call(&"drop")
+		Weight.add_velocity(what, aim)
 		return
 	var rigid := what as RigidBody3D
 	if rigid == null:

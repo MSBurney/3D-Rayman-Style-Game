@@ -15,7 +15,7 @@ const MAIN := preload("res://scenes/warden_arena_main.tscn")
 
 var failures: int = 0
 var level: Node3D = null
-var player: Player = null
+var player: HeavyPlayer = null
 var boss: BossWarden = null
 
 
@@ -26,7 +26,7 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	level = main.get_node("WardenArena")
-	player = main.get_node("Player") as Player
+	player = main.get_node("Player") as HeavyPlayer
 	boss = level.get_node_or_null("Warden") as BossWarden
 
 	print("\n==== WARDEN PROBE ====")
@@ -80,21 +80,38 @@ func _pound_worth() -> void:
 	print("  -- what the deck is worth")
 	player.global_position = Vector3(-30, 8.4, 6)
 	player.velocity = Vector3.ZERO
-	player._set_state(Player.State.GROUND)
+	player._set_state(HeavyPlayer.State.WALK)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	# Walk off the edge and read the power at the moment before landing.
 	player.global_position = Vector3(-21, 8.4, 6)
 	player.velocity = Vector3.ZERO
-	player._set_state(Player.State.AIR)
+	player._set_state(HeavyPlayer.State.AIR)
 	var best := 0.0
 	for i in 60:
 		await get_tree().physics_frame
 		best = maxf(best, player.slam_power())
 		if player.is_on_floor():
 			break
-	_note("slam_power from the deck", best >= boss.crack_power,
-		"%.2f against crack_power %.2f" % [best, boss.crack_power])
+	# **`slam_power()` is NOT what the boss compares against**, and reading it as
+	# though it were is the same bug as the threshold being checked. It returns
+	# the DROP half alone, on a 0..1 scale. What `Events.slam_landed` actually
+	# carries is `(drop + horizontal delivered) * impact_force_scalar` — two
+	# extra terms and a doubling.
+	#
+	# So the force is rebuilt here the way the controller builds it, and the
+	# check states the DESIGN CLAIM rather than a number: a standing drop off
+	# the deck is not enough, and a charge off it is. That is what keeps the
+	# pound deck load-bearing instead of being beaten by a flat-ground charge.
+	var standing := best * player.impact_force_scalar
+	var charging := (best + player.charge_top_speed * player.brake_impact_scalar) \
+		* player.impact_force_scalar
+	_note("a standing drop off the deck is not enough",
+		standing < boss.crack_power,
+		"%.2f against crack_power %.2f" % [standing, boss.crack_power])
+	_note("...but a charge off the deck cracks it",
+		charging >= boss.crack_power,
+		"%.2f against crack_power %.2f" % [charging, boss.crack_power])
 
 
 ## Drives the whole fight: armoured, stunned, cracked, beaten.
@@ -117,7 +134,7 @@ func _fight() -> void:
 	# the `strikable` group in its place — see the note in boss_warden.gd.
 	var hints: Array[String] = []
 	Events.boss_refused.connect(func(_b: Node3D, h: String) -> void: hints.append(h))
-	Events.slam_landed.emit(boss.global_position, 1.0)
+	Events.slam_landed.emit(boss.global_position, 3.6)
 	await get_tree().physics_frame
 	_note("a pound on the armour is refused",
 		hints.size() == 1 and boss.phase == BossWarden.Phase.ARMOURED,
@@ -157,7 +174,7 @@ func _fight() -> void:
 			hints[0] if hints.size() > 0 else "none"])
 
 	# --- a proper pound cracks it, and it drops the seed.
-	Events.slam_landed.emit(boss.global_position, 1.0)
+	Events.slam_landed.emit(boss.global_position, 3.6)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	_note("a hard pound cracks it open and the seed drops",

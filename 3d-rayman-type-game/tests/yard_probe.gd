@@ -80,7 +80,7 @@ func _compare(label: String, got: float, expected: float, tolerance: float) -> v
 ## NAN for nothing there. `from_y` starts the ray just above the surface being
 ## asked about, which is what stops an upper deck answering for a lower one.
 func _height_at(x: float, z: float, from_y: float = 3.0) -> float:
-	var space := get_world_3d().direct_space_state
+	var space := get_viewport().world_3d.direct_space_state
 	var from := Vector3(x, from_y, z)
 	var to := Vector3(x, from_y - 14.0, z)
 	var query := PhysicsRayQueryParameters3D.create(from, to, 1)
@@ -111,7 +111,11 @@ func _surfaces() -> void:
 	_surface("ground, east", 50.0, 0.0, 0.0)
 	_surface("ground, north edge", 0.0, -43.0, 0.0)
 	_surface("ground north, across the trench", 0.0, -80.0, 0.0)
-	_surface("the south island", 0.0, 70.0, 0.0)
+	# BESIDE the island chest, not through it. A Treasure is a StaticBody3D on
+	# the world layer, so a ray dropped where it stands reports "the floor is
+	# 1.6 m up" — which is exactly what the first run of this said, and it is
+	# the trap written at the top of this file.
+	_surface("the south island", 12.0, 70.0, 0.0)
 	_surface("the ramp deck", -20.0, -36.0, 8.0, 11.0)
 	_surface("the tower top", 24.0, -10.0, 14.0, 17.0)
 	_surface("the tower landing", 29.5, -10.0, 14.0, 17.0)
@@ -130,7 +134,11 @@ func _surfaces() -> void:
 ## two points can agree by accident and three cannot.
 func _the_ramp() -> void:
 	print("  -- the ramp: 15 degrees, y = 4 at z = -15")
-	for z in [-5.0, -15.0, -25.0]:
+	# TYPED loop variable. Without it `z` is a Variant off an untyped array
+	# literal, `expected` cannot be inferred, and the file fails to PARSE — which
+	# presents as the probe hanging forever rather than as a typo, because the
+	# scene then runs with a null script and never reaches `quit()`.
+	for z: float in [-5.0, -15.0, -25.0]:
 		var expected := 4.0 + RAMP_TAN * (-15.0 - z)
 		_surface("ramp top at z = %.0f" % z, -20.0, z, expected, expected + 3.0)
 
@@ -180,58 +188,65 @@ func _the_holes() -> void:
 
 	# The span's tops have to be FLUSH with the ground. A crumbling slab standing
 	# proud is a kerb, and a kerb across a bridge is where a charge dies.
-	for z in [-47.5, -52.5, -57.5, -62.5, -67.5]:
+	for z: float in [-47.5, -52.5, -57.5, -62.5, -67.5]:
 		_surface("span slab at z = %.1f" % z, -40.0, z, 0.0)
 
 
-## Problem 2, stated as the measurement that makes it a problem at all.
-func _the_gap() -> void:
-	print("  -- the gap: wider than a walking jump, inside a charge-jump")
-	# Found by walking south until the floor runs out, rather than trusting the
-	# numbers in the scene file — the whole point of a probe.
+## Is x,z over a hole? **Asked as "has the floor DROPPED", never as "is there no
+## floor".** The first version asked the latter and found no gap anywhere, which
+## is correct and useless: every hole in this yard has a floor and a staircase
+## on purpose, because there is no death and a bottomless pit would be ejection.
+## So the ground being absent is precisely what never happens here.
+func _over_a_hole(x: float, z: float) -> bool:
+	var h := _height_at(x, z, 3.0)
+	return is_nan(h) or h < -1.0
+
+
+## Walks from `from_z` in `step` increments and returns the near and far edges
+## of the first hole it crosses, as a Vector2, or (NAN, NAN).
+func _hole_span(x: float, from_z: float, step: float) -> Vector2:
 	var near := NAN
-	for i in 200:
-		var z := 30.0 + float(i) * 0.25
-		if is_nan(_height_at(0.0, z, 3.0)):
+	for i in 300:
+		var z := from_z + step * float(i)
+		if _over_a_hole(x, z):
 			near = z
 			break
-	var far := NAN
-	if not is_nan(near):
-		for i in 400:
-			var z := near + float(i) * 0.25
-			if not is_nan(_height_at(0.0, z, 3.0)):
-				far = z
-				break
-	if is_nan(near) or is_nan(far):
-		_note("there is a gap at all", false,
-			"near edge %.1f, far edge %.1f" % [near, far])
-		return
-	var width := far - near
-	_compare("the gap's width", width, 18.0, 0.6)
-	# The two numbers it has to sit between, both measured in the greybox.
-	_note("a walking jump cannot clear it", width > 15.5,
-		"%.1f m against a walking jump's 15.5" % width)
-	_note("a charge-jump can", width < 21.2,
-		"%.1f m against a charge-jump's 21.2" % width)
+	if is_nan(near):
+		return Vector2(NAN, NAN)
+	for i in 600:
+		var z := near + step * float(i)
+		if not _over_a_hole(x, z):
+			return Vector2(near, z)
+	return Vector2(near, NAN)
 
-	# And the trench must be out of reach of BOTH, or the span is decoration.
-	var t_near := NAN
-	for i in 200:
-		var z := -40.0 - float(i) * 0.25
-		if is_nan(_height_at(0.0, z, 3.0)):
-			t_near = z
-			break
-	var t_far := NAN
-	if not is_nan(t_near):
-		for i in 400:
-			var z := t_near - float(i) * 0.25
-			if not is_nan(_height_at(0.0, z, 3.0)):
-				t_far = z
-				break
-	var trench := absf(t_far - t_near) if not is_nan(t_far) else NAN
+
+## Problem 2, stated as the measurement that makes it a problem at all.
+##
+## Both spans are found by WALKING the geometry rather than by trusting the
+## numbers in the scene file, which is the whole point of having a probe.
+func _the_gap() -> void:
+	print("  -- the gap: wider than a walking jump, inside a charge-jump")
+	# Away from the gap stairs at x = 25, or they read as the far edge.
+	var span := _hole_span(0.0, 30.0, 0.25)
+	if is_nan(span.x) or is_nan(span.y):
+		_note("there is a gap at all", false,
+			"near edge %.1f, far edge %.1f" % [span.x, span.y])
+	else:
+		var width := span.y - span.x
+		_compare("the gap's width", width, 18.0, 0.6)
+		# The two numbers it has to sit between, both measured in the greybox.
+		_note("a walking jump cannot clear it", width > 15.5,
+			"%.1f m against a walking jump's 15.5" % width)
+		_note("a charge-jump can", width < 21.2,
+			"%.1f m against a charge-jump's 21.2" % width)
+
+	# And the trench has to be out of reach of BOTH jumps, or the crumbling span
+	# is decoration rather than the only way across.
+	var trench := _hole_span(0.0, -40.0, -0.25)
+	var t_width := absf(trench.y - trench.x)
 	_note("the trench is wider than any jump",
-		not is_nan(trench) and trench > 21.2,
-		"%.1f m against a charge-jump's 21.2" % trench)
+		not is_nan(trench.y) and t_width > 21.2,
+		"%.1f m against a charge-jump's 21.2" % t_width)
 
 
 ## The rail's head has to be catchable from the deck, and its mesh has to sit on
@@ -246,7 +261,11 @@ func _the_rail() -> void:
 		return
 	var head := rail.point_at(0.0)
 	var tail := rail.point_at(rail.length())
-	_compare("the rail's head height", head.y, 7.9, 0.1)
+	# 8.4 and not 7.9: `point_at` adds `ride_height` (0.5), so what it returns is
+	# the line the player RIDES rather than where the curve sits. That it lands
+	# just above the 8.0 deck is the right answer — you step up on to the rail
+	# rather than down into it.
+	_compare("the rail's ride height at the head", head.y, 8.4, 0.1)
 	_compare("the rail drops this far", head.y - tail.y, 4.5, 0.1)
 
 	# The deck edge, measured rather than assumed. The rail yard's working value

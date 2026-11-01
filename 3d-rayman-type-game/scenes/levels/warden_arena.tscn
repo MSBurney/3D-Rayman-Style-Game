@@ -262,7 +262,28 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12, 40)
 
 [node name="Warden" parent="." unique_id=493482645 instance=ExtResource("boss")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
-crack_power = 0.5
+; 3.0, up from 0.5, and the reason is a genuine inversion rather than a rescale.
+;
+; `crack_power` is compared against the force on `Events.slam_landed`, and the
+; modal controller measures that in TWO halves: how far you fell, plus how much
+; horizontal speed you delivered into the floor (`brake_impact_scalar`). Those
+; halves are worth, measured:
+;
+;   a standing hop                       0.10
+;   a drop from the pound deck at y = 8  1.33
+;   a FLAT-OUT CHARGE cancelled into a slam, no drop at all   2.20
+;   a charge off the deck                3.53
+;
+; So horizontal speed is worth MORE than the deck is. At any threshold between
+; 0.5 and 2.2 the answer to this boss becomes "charge at it on flat ground" and
+; the pound deck stops existing — which would delete phase two, since the whole
+; shape of the fight is luring him into the pillar at x = -18 so that you are
+; already up high when he stuns.
+;
+; 3.0 needs BOTH: above the deck and moving. That keeps the hint ("pound it from
+; higher up") honest, keeps the deck load-bearing, and makes the opening the
+; doc's own signature combo — the charge-to-slam cancel — rather than a hop.
+crack_power = 3.0
 seed_path = NodePath("../Seed")
 
 [node name="Seed" parent="." unique_id=1372409959 instance=ExtResource("seed")]

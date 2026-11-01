@@ -363,6 +363,32 @@ worth = 55
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 4, -4.5)
 worth = 35
 
+; The gantry itself, which was missing. A CrumblingFloor is 5 x 1 x 5, so a top
+; of 8.0 means `origin y = 7.5` — the authoring rule for every plank in this
+; project is to think in TOP heights and let the origin follow.
+;
+; It is a crumbling floor rather than a plain plank because the probe calls this
+; surface "deck 2 gantry (crumbles)": a chest out on a span that gives way under
+; a heavy landing is the point of putting it out there.
+; **x = -8.5, and the first attempt at -6.5 recreated this level's oldest bug.**
+;
+; A CrumblingFloor is 5 m square, so centred at -6.5 it spanned x -9..-4 — and
+; the deck-1-to-deck-2 staircase climbs at x = -5.75, right through the middle
+; of that. The slab sat 0.6 m above the steps, which is a head-bump rather than
+; headroom (anything under about 1.4 m is), so two of the five steps became
+; unusable and the probe read them as 8.0 instead of 7.2 and 8.0.
+;
+; That is exactly the fault this level was built with and the probe exists to
+; catch: "two entire staircases ran underneath the deck they were supposed to
+; reach." Recreating it while fixing it is the argument for measuring.
+;
+; At -8.5 the slab spans x -11..-6, which clears the stairs, still covers the
+; (-6.5, 0) the probe asks about, and still carries ChestGantry at -8.3. The
+; 1.5 m of air between the deck edge and the slab is where the stairs arrive,
+; so you come up them and step WEST on to the gantry.
+[node name="Deck2Gantry" parent="." instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8.5, 7.5, 0)
+
 [node name="ChestGantry" parent="." unique_id=816785476 instance=ExtResource("chest")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3.1145625, 8, -1.1077523)
 worth = 55

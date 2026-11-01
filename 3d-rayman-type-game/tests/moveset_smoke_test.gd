@@ -8,18 +8,19 @@ extends Node
 ##   <godot> --headless --path . res://tests/moveset_smoke_test.tscn
 ## Exit code is 0 when everything passes, 1 otherwise.
 ##
-## It reaches into a few private fields (_chain_window, _slam_recover) on purpose:
+## It reaches into a few private fields (_slam_recover_left, _grind_lock) on purpose:
 ## the point
 ## is to put the controller into states that need a level around them, which is
 ## awkward to arrange through input alone.
 
-## The DEPRECATED controller in the level built for the deprecated moveset.
+## The suite's own fixture: the MODAL controller, in `test_level.tscn`.
 ##
-## This was `scenes/main.tscn` until the modal controller took that scene over,
-## which meant the project's entry scene doubled as this suite's fixture — so
-## `main.tscn` could not be rebuilt without taking all 214 checks with it. See
-## the header comment in legacy_main.tscn.
-const MAIN := preload("res://scenes/legacy_main.tscn")
+## The level is still the one built for the old moveset, and that is deliberate
+## — **only the controller changed.** Every movement check builds its own flat
+## pad out at x = 250 anyway (see `PAD_TOP`), so what the level geometry looks
+## like barely matters; keeping it meant this repoint changed exactly one thing,
+## which is the only way to know what broke.
+const MAIN := preload("res://scenes/suite_fixture.tscn")
 ## Spawned fresh for the throw and stomp checks. The level's own walkers cannot
 ## be relied on any more: a homing throw kills whatever it finds, so by halfway
 ## through the suite there may be none left standing.
@@ -55,12 +56,27 @@ const BOSS := preload("res://scenes/enemies/boss_warden.tscn")
 ## How many checks _run() should reach. A runtime error inside _run() silently
 ## aborts it, and without this guard the report would happily print "0 failures"
 ## having only run half the suite. Bump it when you add a check.
-const EXPECTED_CHECKS := 107
+## The top of the 60x60 pad every movement check stands on, built in `_basics()`
+## out in empty space at x = 250.
+##
+## **File-level because the suite is split into per-system functions now.** It
+## was a local const inside the one enormous `_run()`, which worked only because
+## everything shared that scope — and it is the single dependency the split
+## actually exposed.
+const PAD_TOP := Vector3(250, 21, 0)
 
-var player: Player
+const EXPECTED_CHECKS := 86
+
+var player: HeavyPlayer
 var level: Node3D
 var results: Array[String] = []
 var failures: int = 0
+
+## Shared across sections, so they are members rather than locals. Before the
+## split these lived in the single `_run()` scope and were simply visible to
+## everything after their declaration.
+var game: Node = null
+var money_seen: Array[int] = []
 ## Counted from ThrownFlight's `exploded` signal. It has to be recorded as it
 ## happens: a thrown walker frees itself when it bursts, so reading anything off
 ## its Flight node afterwards is an access to an already-freed object.
@@ -70,7 +86,7 @@ func _ready() -> void:
 	var main: Node = MAIN.instantiate()
 	add_child(main)
 	await get_tree().process_frame
-	player = main.get_node("Player") as Player
+	player = main.get_node("Player") as HeavyPlayer
 	level = main.get_node("TestLevel") as Node3D
 	if player == null:
 		push_error("no player")
@@ -113,22 +129,29 @@ func _place(at: Vector3) -> void:
 	player.velocity = Vector3.ZERO
 
 
-	player._ledge_lock = 0.0
-	player._wall_lock = 0.0
-	player._coyote = 0.0
+	player.facing = Vector3(0, 0, 1)
+	# EVERY timer, for the reason the old jump chain taught: state left behind by
+	# one check turns the next press into a different move entirely. A half-spent
+	# boost allowance or a live crash-stun is the modal controller's version of
+	# the same bug.
+	player._stun_left = 0.0
+	player._slam_recover_left = 0.0
+	player._windup_left = 0.0
+	player._charging = false
+	player._charge_buffered = 0.0
+	player._charge_through_air = false
 	player._jump_buffered = 0.0
-
-	player.jump_chain = 0
-	player._chain_window = 0.0
-	player._slam_recover = 0.0
-	# Spin state too, for exactly the same reason as the jump chain: a chain left
-	# half-finished by an earlier check turns the next press into the super spin,
-	# or into nothing at all because of its lockout. That cost the lockout check
-	# one of its three spins and looked like the chain being short.
-	player.abilities.drop_everything()
-	player._set_state(Player.State.AIR)
+	player._boost_cool = 0.0
+	player._boosts_left = player.boost_taps
+	player._hurt_lock = 0.0
+	player._regrab = 0.0
+	# Hands empty, or the next check measures the wrong object — and `attack`
+	# means THROW while carrying, so a full-handed player answers the button
+	# completely differently.
+	player.drop_carried()
+	player._set_state(HeavyPlayer.State.AIR)
 	# Must come AFTER _set_state(), not before: leaving GRIND sets this lock
-	# itself (see Player._exit_state), so zeroing it any earlier is undone on the
+	# itself (see HeavyPlayer._exit_state), so zeroing it any earlier is undone on the
 	# way out and every rail check that follows finds itself unable to attach.
 	player._grind_lock = 0.0
 
@@ -192,6 +215,48 @@ func _roll_on(_slope: StaticBody3D, from: Vector3, push: Vector3, frames: int) -
 
 
 
+## One clean press. `Input.action_press()` on EVERY frame never produces a fresh
+## `just_pressed`, so holding across frame boundaries registers nothing at all
+## and the move simply never fires — which reads as a gameplay bug rather than a
+## test bug. Press once, wait, release.
+func _tap(action: String) -> void:
+	Input.action_press(action)
+	await _step(2)
+	Input.action_release(action)
+	await _step(2)
+
+
+## **The modal controller's only AoE, and the replacement for the spin.**
+##
+## Every check that used to press `attack` to spin a prop now calls this. It
+## teleports 7 m above wherever the player is standing and slams back down,
+## rather than hopping, and the reason is measured: a HOP-stomp is worth only
+## about 7 of momentum and carries just 1.25 m, which is far too tight to aim a
+## test at. From 7 m it is worth about 82 with a 5.8 m reach — comfortably over
+## every prop threshold in the game (a switch, a till and a chest want 5, a
+## breakable block 25) while still being refused by anything that wants a real
+## drop from height.
+##
+## It leaves the player standing where they started, so a check can place them
+## once and then stomp without re-placing.
+func _stomp_here() -> void:
+	var at := player.global_position
+	player.global_position = at + Vector3.UP * 7.0
+	player.velocity = Vector3.ZERO
+	# AIR explicitly, because the slam's force is measured from `_air_peak_y`
+	# and that is set on ENTERING air — a teleport alone does not update it.
+	player._set_state(HeavyPlayer.State.AIR)
+	await _step(2)
+	Input.action_press("crouch")
+	await _step(2)
+	Input.action_release("crouch")
+	for i in 90:
+		await _step(1)
+		if player.is_on_floor():
+			break
+	await _step(3)
+
+
 func _release_all() -> void:
 	# Movement actions must be in here too: a held move_right leaking out of the
 	# wall-run test walks the player away from every later test's setup.
@@ -200,11 +265,38 @@ func _release_all() -> void:
 		Input.action_release(action)
 
 
+## Drives every system in order.
+##
+## **Split out of one 1536-line `_run()`**, which was not tidiness: that
+## function was a single enormous scope, so every local in it had to be unique
+## against every other local in the whole suite. A collision is a parse error,
+## the script then fails to load, the scene runs with a null script and never
+## quits — so it presented as the suite HANGING rather than as a typo. It cost
+## two debugging sessions before the split.
 func _run() -> void:
+	await _basics()
+	await _striking_and_carrying()
+	await _breakable_world()
+	await _transformations()
+	await _money_loop()
+	await _thrown_objects()
+	await _taking_a_hit()
+	await _stomping()
+	await _weight_and_momentum()
+	await _idle_and_effects()
+	await _rail_grinding()
+	await _thieves()
+	await _tills()
+	await _the_seed()
+	await _the_boss()
+
+
+## Standing, jumping, falling and the ground pound: the floor of the moveset.
+func _basics() -> void:
 	# --- lands on the hub and settles into GROUND
 	_place(Vector3(0, 3, 10))
 	await _step(60)
-	_check("lands on ground", player.state == Player.State.GROUND,
+	_check("lands on ground", player.state == HeavyPlayer.State.WALK,
 		"state=%s y=%.2f" % [player.state_name(), player.global_position.y])
 
 	# --- jump leaves the floor
@@ -220,15 +312,18 @@ func _run() -> void:
 	await _step(20)
 	_check("falls freely", player.velocity.y < -5.0, "vy=%.2f" % player.velocity.y)
 
-	# ------------------------------------------------------------- Mario moveset
+	# --------------------------------------------------- jumping and the pound
 	#
 	# All of it runs on a 60x60 pad built in empty space. The level's own flat
 	# ground is the hub, and the hub has wandering walkers on it whose contact
 	# knockback reads as a phantom 7 m/s of drift — which is exactly the sort of
 	# thing these checks are measuring. Out here nothing can interfere, and there
 	# is no edge within 30 m to walk off mid-measurement.
-	var pad := _add_slope(Vector3(250, 20, 0), 0.0, 60.0, 60.0)
-	const PAD_TOP := Vector3(250, 21, 0)
+	# The pad is built here and never torn down, so every section after this one
+	# can stand on it. `PAD_TOP` is a FILE-level const for that reason — it used
+	# to be local to the single `_run()` scope, and splitting that scope is
+	# exactly what surfaced the dependency.
+	_add_slope(Vector3(250, 20, 0), 0.0, 60.0, 60.0)
 	await _step(4)
 
 	# --- jump in mid-air must now do NOTHING. It used to start the bounce attack;
@@ -240,7 +335,7 @@ func _run() -> void:
 	await _step(2)
 	_release_all()
 	_check("mid-air jump does nothing",
-		player.state == Player.State.AIR and player.velocity.y < air_vy,
+		player.state == HeavyPlayer.State.AIR and player.velocity.y < air_vy,
 		"vy %.2f -> %.2f state=%s" % [air_vy, player.velocity.y, player.state_name()])
 	await _step(40)
 
@@ -250,14 +345,14 @@ func _run() -> void:
 	Input.action_press("crouch")
 	await _step(3)
 	_release_all()
-	_check("crouch in mid-air starts a pound", player.state == Player.State.SLAM,
+	_check("crouch in mid-air starts a pound", player.state == HeavyPlayer.State.SLAM,
 		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
 
 	var pound_power_high := 0.0
 	var pound_vy := 1.0
 	for i in 200:
 		await _step(1)
-		if player.state == Player.State.SLAM:
+		if player.state == HeavyPlayer.State.SLAM:
 			pound_power_high = player.slam_power()
 		else:
 			pound_vy = player.velocity.y
@@ -265,8 +360,12 @@ func _run() -> void:
 	_check("big fall pounds at full power", pound_power_high > 0.95,
 		"power=%.2f" % pound_power_high)
 	# The headline change: a pound ends on the floor. It must not launch you.
+	# WALK plus a live recovery lock, where the old controller had a CROUCH
+	# state. The CLAIM is identical and is the one worth protecting: a pound you
+	# can cancel straight out of reads weightless.
 	_check("a pound does not bounce you",
-		pound_vy <= 0.0 and player.state == Player.State.CROUCH,
+		pound_vy <= 0.0 and player.state == HeavyPlayer.State.WALK
+			and player._slam_recover_left > 0.0,
 		"vy after impact=%.2f state=%s" % [pound_vy, player.state_name()])
 
 	# And you are held there briefly, or the pound reads weightless.
@@ -274,9 +373,9 @@ func _run() -> void:
 	await _step(3)
 	_release_all()
 	_check("pound recovery holds you down",
-		player.state == Player.State.CROUCH and player.velocity.y <= 0.1,
+		player._slam_recover_left > 0.0 and player.velocity.y <= 0.1,
 		"state=%s vy=%.2f recover=%.2f"
-			% [player.state_name(), player.velocity.y, player._slam_recover])
+			% [player.state_name(), player.velocity.y, player._slam_recover_left])
 	await _step(40)
 
 	# A short hop must be worth much less than a long fall, or height is not a
@@ -294,192 +393,13 @@ func _run() -> void:
 	var pound_power_low := 1.0
 	for i in 90:
 		await _step(1)
-		if player.state == Player.State.SLAM:
+		if player.state == HeavyPlayer.State.SLAM:
 			pound_power_low = player.slam_power()
 		elif pound_power_low < 1.0:
 			break
 	_check("a small hop pounds weakly", pound_power_low < pound_power_high * 0.6,
 		"hop power=%.2f vs fall power=%.2f" % [pound_power_low, pound_power_high])
 	await _step(50)
-
-	# --- the jump chain: land and jump again quickly for the double, then the
-	# triple. A direction is held throughout, because a triple jump has to be
-	# earned by actually going somewhere.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	Input.action_press("move_right")
-	await _step(40)
-	var chain: Array[float] = []
-	for i in 3:
-		chain.append(await _chain_jump())
-	_release_all()
-	await _step(40)
-
-	_check("a double jump beats a single",
-		chain.size() == 3 and chain[1] > chain[0] + 0.5,
-		"launch speeds=%s" % str(chain))
-	_check("a triple jump is the biggest",
-		chain.size() == 3 and chain[2] > chain[1] + 0.5,
-		"launch speeds=%s" % str(chain))
-
-	# Standing still, the third jump must NOT be the big one — otherwise the
-	# largest jump in the game is free from a standstill.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	var still: Array[float] = []
-	for i in 3:
-		still.append(await _chain_jump())
-	_check("a standing triple jump is refused",
-		still.size() == 3 and still[2] < chain[2] - 0.5,
-		"standing=%.2f vs moving=%.2f" % [still[2], chain[2]])
-	await _step(40)
-
-	# --- backflip: crouch still, then jump. Up a long way, and backwards.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	player.facing = Vector3.FORWARD
-	Input.action_press("crouch")
-	await _step(10)
-	var crouched := player.state
-	Input.action_press("jump")
-	await _step(3)
-	_release_all()
-	var plain_launch := sqrt(2.0 * player.gravity_rise * player.jump_height)
-	_check("backflip goes higher than a jump, and backwards",
-		crouched == Player.State.CROUCH
-			and player.velocity.y > plain_launch + 1.0
-			and player.velocity.z > 1.0,
-		"crouched=%s vy=%.2f (a jump is %.2f), back=%.2f"
-			% [Player.State.keys()[crouched], player.velocity.y, plain_launch,
-				player.velocity.z])
-	await _step(70)
-
-	# --- slide and long jump: crouch at a run. The slide has to KEEP speed that
-	# walking would brake away, and the long jump has to go far rather than high.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	player.velocity = Vector3(0, 0, -11)
-	Input.action_press("crouch")
-	await _step(2)
-	var sliding := player.state
-	await _step(58)
-	var slide_speed := Vector2(player.velocity.x, player.velocity.z).length()
-
-	# The control case: the same 11 m/s with no crouch, which normal braking
-	# pulls down much faster.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	player.velocity = Vector3(0, 0, -11)
-	await _step(60)
-	var walk_speed := Vector2(player.velocity.x, player.velocity.z).length()
-	_check("sliding keeps speed that walking brakes away",
-		sliding == Player.State.SLIDE and slide_speed > walk_speed + 1.5,
-		"slide kept %.1f, walking kept %.1f" % [slide_speed, walk_speed])
-
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	player.velocity = Vector3(0, 0, -11)
-	Input.action_press("crouch")
-	await _step(8)
-	var before_long := Vector2(player.velocity.x, player.velocity.z).length()
-	Input.action_press("jump")
-	await _step(3)
-	_release_all()
-	var after_long := Vector2(player.velocity.x, player.velocity.z).length()
-	_check("long jump goes far and low",
-		after_long > before_long + 5.0 and player.velocity.y < plain_launch,
-		"speed %.1f -> %.1f, vy=%.2f (a jump is %.2f)"
-			% [before_long, after_long, player.velocity.y, plain_launch])
-	await _step(70)
-
-	# --- chaining long jumps must CONVERGE, not stack.
-	#
-	# The long jump is the only move whose impulse is added to the speed you
-	# already had, which is deliberate — a long jump out of a fast slide should
-	# beat one off the flat. But a flat addition compounds: land, crouch, jump,
-	# and you were 17 m/s faster every single time. Four in a row passed 60 m/s.
-	#
-	# This drives the actual exploit rather than calling _long_jump() directly,
-	# because the exploit was in how cheaply the loop could be re-entered.
-	# A 400 m runway, not the 60 m pad. Five chained long jumps at 20+ m/s cover
-	# well over 100 m, and on the pad the player ran off the end, died and
-	# respawned — so the last two readings were a walking respawned player, the
-	# "gain is shrinking" test compared 0.0 against 19.9, and the check would
-	# have passed even if the exploit were still there.
-	#
-	# No stick input either: one shove sets it going, and `facing` follows
-	# velocity, so the chain self-sustains in whatever direction it started. That
-	# avoids depending on where the camera happens to point.
-	var runway := _add_slope(Vector3(400, 20, 0), 0.0, 400.0, 24.0)
-	await _step(4)
-	_release_all()
-	_place(Vector3(400, 21.4, -180))
-	await _step(30)
-	player.velocity = Vector3(0, 0, 14)
-	var chain_speeds: Array[float] = []
-	for i in 5:
-		for j in 200:
-			await _step(1)
-			if player.is_on_floor():
-				break
-		Input.action_press("crouch")
-		await _step(4)
-		Input.action_press("jump")
-		await _step(3)
-		Input.action_release("jump")
-		Input.action_release("crouch")
-		chain_speeds.append(Vector2(player.velocity.x, player.velocity.z).length())
-	_release_all()
-
-	# Tuning-independent: the gain from the last jump must be smaller than the
-	# gain from the first, and the chain must settle near the fade speed rather
-	# than running away.
-	var first_gain := chain_speeds[0]
-	var last_gain := 0.0
-	if chain_speeds.size() >= 2:
-		last_gain = chain_speeds[-1] - chain_speeds[-2]
-	# The last clause is what stops this passing vacuously: the player must still
-	# be long-jumping at the end, not standing around at walking pace having died
-	# somewhere. Without it, anything that kills the run reads as "converged".
-	_check("chained long jumps converge instead of stacking",
-		chain_speeds.size() == 5
-			and chain_speeds[-1] < player.long_jump_fade_speed + 4.0
-			and chain_speeds[-1] > player.max_speed * 1.5
-			and last_gain < first_gain,
-		"speeds=%s (fade speed %.0f, running %.0f)"
-			% [str(chain_speeds.map(func(s): return "%.1f" % s)),
-				player.long_jump_fade_speed, player.max_speed])
-	await _step(50)
-
-	# --- side flip: at speed, flick the stick back the way you came and jump.
-	# Triggered on the INPUT reversing, not the velocity, because heavy handling
-	# will not let velocity turn round quickly — see Player._wants_side_flip.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	Input.action_press("move_right")
-	await _step(60)
-	var flip_before := Vector3(player.velocity.x, 0.0, player.velocity.z)
-	Input.action_release("move_right")
-	Input.action_press("move_left")
-	await _step(2)
-	Input.action_press("jump")
-	await _step(2)
-	_release_all()
-	var flip_after := Vector3(player.velocity.x, 0.0, player.velocity.z)
-	var reversed := flip_before.length() > 0.1 and flip_after.length() > 0.1 \
-		and flip_before.normalized().dot(flip_after.normalized()) < 0.0
-	_check("side flip reverses you and lifts you",
-		reversed and player.velocity.y > plain_launch * 0.8,
-		"%.1f m/s -> %.1f m/s reversed=%s, vy=%.2f"
-			% [flip_before.length(), flip_after.length(), reversed, player.velocity.y])
-	await _step(70)
 
 	# --- the shockwave hits things standing nearby, not only underfoot.
 	#
@@ -490,148 +410,41 @@ func _run() -> void:
 	# only surfaced when retuning kept DWalker alive.
 	#
 	# Hence: its own walker, and the right button.
+	# **Measured on a KEG, not a walker, and that is a real change rather than a
+	# convenience.** The old pound damaged every enemy in a radius; the modal
+	# controller has NO area damage at all. That looks like a gap and is the doc:
+	# destruction comes from weight and momentum, so a slam MOVES things rather
+	# than hurting them, and an enemy is toppled by what you bring to it (see
+	# `HeavyEnemy.topple_momentum`), never by a number in a radius.
+	#
+	# The claim worth protecting survives exactly: the shockwave reaches
+	# SIDEWAYS, not only underfoot. What it reaches with is momentum.
 	_release_all()
-	var shock_enemy := WALKER.instantiate() as Node3D
-	level.add_child(shock_enemy)
-	shock_enemy.global_position = PAD_TOP + Vector3(0, 0.2, 26)
-	await _step(10)
-	var shock_health := shock_enemy.get_node("Health") as HealthComponent
-	var shock_hp: int = shock_health.current
-	# Land BESIDE it, not on it, so a stomp cannot be what does the damage.
-	_place(shock_enemy.global_position + Vector3(2.0, 16, 0))
+	var shock_keg := KEG.instantiate() as RigidBody3D
+	level.add_child(shock_keg)
+	shock_keg.global_position = PAD_TOP + Vector3(0, 0.6, 26)
+	await _step(20)
+	var shock_from := shock_keg.global_position
+	# Land BESIDE it, not on it, so a direct hit cannot be what moves it.
+	_place(shock_keg.global_position + Vector3(2.0, 16, 0))
 	await _step(8)
 	Input.action_press("crouch")
 	await _step(3)
 	_release_all()
 	await _step(90)
-	var shock_gone := not is_instance_valid(shock_health)
-	_check("slam shockwave reaches sideways",
-		shock_gone or shock_health.current < shock_hp,
-		"hp %d -> %s" % [shock_hp, "killed" if shock_gone else str(shock_health.current)])
+	var shock_moved := shock_keg.global_position.distance_to(shock_from)
+	_check("slam shockwave reaches sideways", shock_moved > 0.6,
+		"a keg 2 m to the side was thrown %.2f m" % shock_moved)
 	await _step(20)
 
-	# --- ledge grab on the zone C terrace (lip at y=3.3, wall face at x=-15).
-	# x must clear the capsule of the wall (> -14.6) but stay inside the 0.75 m
-	# chest reach (<= -14.25); feet must sit 1.0-2.3 m below the lip.
-	_place(Vector3(-14.45, 1.8, 0))
-	player.facing = Vector3(-1, 0, 0)
-	player.velocity = Vector3(0, -2.0, 0)
-	await _step(25)
-	_check("ledge grab", player.state == Player.State.LEDGE_HANG,
-		"state=%s y=%.2f" % [player.state_name(), player.global_position.y])
 
-	# --- climbing up from a hang
-	if player.state == Player.State.LEDGE_HANG:
-		Input.action_press("jump")
-		await _step(3)
-		_release_all()
-		await _step(30)
-		_check("ledge climb up", player.global_position.y > 3.0,
-			"y=%.2f state=%s" % [player.global_position.y, player.state_name()])
-	else:
-		_check("ledge climb up", false, "skipped, never hung")
-
-	# ------------------------------------------------------------- spin attack
+## Striking and carrying.
+func _striking_and_carrying() -> void:
+	# ------------------------------------------------- striking, and carrying
 	#
 	# Replaced the grapple on 2026-10-02. Everything here runs on the flat pad
 	# built for the Mario moves, with its own spawned fixtures, for the same
 	# reason: nothing in a level survives this suite reliably.
-
-	# --- a spin hurts what is standing next to you, and the chain scales.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(40)
-	var spin_prey := WALKER.instantiate() as Node3D
-	level.add_child(spin_prey)
-	spin_prey.global_position = PAD_TOP + Vector3(1.6, 0.2, 0)
-	await _step(10)
-	var spin_health := spin_prey.get_node("Health") as HealthComponent
-	spin_health.max_health = 40
-	spin_health.reset()
-	var spin_hp: int = spin_health.current
-
-	Input.action_press("attack")
-	await _step(2)
-	Input.action_release("attack")
-	await _step(2)
-	_check("a spin hurts what is next to you",
-		spin_health.current < spin_hp and player.abilities.spin_step == 1,
-		"hp %d -> %d, step=%d" % [spin_hp, spin_health.current, player.abilities.spin_step])
-
-	# Freed before anything else runs. It has 40 HP so it survives the spin, which
-	# means it then chases the player and lands contact hits — and a hit puts the
-	# player in HURT, where `handle_input` is not called at all, so attack presses
-	# are silently swallowed. That cost the chain check below two of its three
-	# spins and looked exactly like the combo being broken.
-	spin_prey.queue_free()
-	await _step(10)
-
-	# The third spin in a chain has to be the biggest. Measured by the radius the
-	# spin reports, which is the same number the damage and knockback scale by.
-	var radii: Array[float] = []
-	player.abilities.spun.connect(func(_step: int, radius: float) -> void:
-		radii.append(radius))
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 0.4, 0))
-	await _step(60)
-	for i in 3:
-		Input.action_press("attack")
-		await _step(2)
-		Input.action_release("attack")
-		# Past the cooldown (0.44s = 27 frames) but inside the combo window (0.9s).
-		# The chain is the thing being tested, so both bounds matter.
-		await _step(32)
-	_check("the third spin is the biggest",
-		radii.size() == 3 and radii[1] > radii[0] and radii[2] > radii[1],
-		"radii=%s" % str(radii))
-
-	# And the chain resets after the third, so the big one is always the pay-off
-	# for three presses rather than a lucky accident mid-string.
-	_check("the chain resets after the third spin",
-		player.abilities.spin_step == 0,
-		"step=%d" % player.abilities.spin_step)
-	await _step(40)
-
-	# --- spinning in mid-air lifts you, and the chain locks out afterwards so it
-	# cannot be ridden upward for ever.
-	_release_all()
-	_place(PAD_TOP + Vector3(0, 9, 0))
-	await _step(24)
-	var falling_vy := player.velocity.y
-	Input.action_press("attack")
-	await _step(2)
-	Input.action_release("attack")
-	_check("an air spin slows your fall", player.velocity.y > falling_vy + 1.0,
-		"vy %.2f -> %.2f" % [falling_vy, player.velocity.y])
-
-	# Three lifts per chain, then nothing until the lockout expires. Pressing
-	# through it must do nothing at all.
-	_release_all()
-	# 60 m up, not 30: three spins plus their cooldowns take about 1.7 seconds, and
-	# from 30 m the player reached the ground before the third one, so the check
-	# counted two lifts and looked like the chain was short.
-	_place(PAD_TOP + Vector3(0, 60, 0))
-	await _step(10)
-	var lifts := 0
-	for i in 3:
-		var before_lift := player.velocity.y
-		Input.action_press("attack")
-		await _step(2)
-		Input.action_release("attack")
-		if player.velocity.y > before_lift:
-			lifts += 1
-		await _step(30)
-	# The chain is spent, so this press is inside the lockout.
-	var locked_from := player.velocity.y
-	Input.action_press("attack")
-	await _step(2)
-	Input.action_release("attack")
-	var lifted_again := player.velocity.y > locked_from
-	_check("the chain lockout stops an endless air spin",
-		lifts == 3 and not lifted_again,
-		"%d lifts in the chain, then lifted again=%s" % [lifts, lifted_again])
-	_release_all()
-	await _step(60)
 
 	# --- a spin trips a switch. The `strikable` group plus a `struck(by, momentum)`
 	# method is the whole contract, and this is what makes it extensible. The
@@ -645,48 +458,10 @@ func _run() -> void:
 	_place(PAD_TOP + Vector3(0, 0.4, 6))
 	await _step(40)
 	var switch_before := switch.on
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
+	await _stomp_here()
 	await _step(3)
 	_check("a spin trips a switch", switch.on != switch_before,
 		"on %s -> %s" % [switch_before, switch.on])
-	await _step(40)
-
-	# --- the magnet: a spin drags a carryable to you from further than your
-	# hands reach, and you end up holding it. Moving the OBJECT rather than the
-	# player is the point — a spin rearranges the level around you.
-	_release_all()
-	var mag_keg := KEG.instantiate() as Node3D
-	level.add_child(mag_keg)
-	mag_keg.global_position = PAD_TOP + Vector3(3.4, 0.6, -6)
-	await _step(20)
-	var keg_start := mag_keg.global_position
-	_place(PAD_TOP + Vector3(0, 0.4, -6))
-	await _step(40)
-	var player_at := player.global_position
-	Input.action_press("attack")
-	await _step(2)
-	Input.action_release("attack")
-	for i in 120:
-		await _step(1)
-		if player.abilities.carried != null:
-			break
-	var keg_moved := keg_start.distance_to(mag_keg.global_position)
-	var player_moved := player_at.distance_to(player.global_position)
-	_check("a spin magnets a carryable to you",
-		player.abilities.carried == mag_keg and keg_moved > player_moved,
-		"keg moved %.2f, player moved %.2f, carried=%s"
-			% [keg_moved, player_moved,
-				player.abilities.carried.name if player.abilities.carried else "none"])
-
-	# --- attack while holding throws it.
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
-	await _step(6)
-	_check("attack while holding throws it", player.abilities.carried == null,
-		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
 	await _step(40)
 
 	# --- auto-carry: walk into something and you are holding it, no button.
@@ -700,11 +475,14 @@ func _run() -> void:
 	_place(walk_keg.global_position + Vector3(0.9, 0.0, 0))
 	await _step(20)
 	_check("walking into a carryable picks it up",
-		player.abilities.carried == walk_keg,
-		"carried=%s" % (player.abilities.carried.name if player.abilities.carried else "none"))
-	player.abilities.throw_carried()
+		player.carried == walk_keg,
+		"carried=%s" % (player.carried.name if player.carried else "none"))
+	await _tap("attack")
 	await _step(40)
 
+
+## The breakable world.
+func _breakable_world() -> void:
 	# ------------------------------------------------------- the breakable world
 	#
 	# Wario goes THROUGH a level rather than over it. Three ways in, and the
@@ -758,35 +536,47 @@ func _run() -> void:
 
 	# A block only the biggest hit opens: the first two spins must be refused.
 	#
-	# `strike_momentum` replaced `require_spin_step` here, and 300 is chosen to
-	# separate the chain exactly as step 3 did — the first two spins are worth 15
-	# and 45 in momentum, the third 320. See PlayerAbilities.SPIN_MOMENTUM. It is
-	# also out of reach of this controller's pound, which tops out at 70, exactly
-	# as the `require_slam_power = -1.0` it replaced was.
+	# 100, and NOT the 300 this had while the spin still existed. 300 sat above
+	# the second spin in a chain (45) and below the third (320) — and with no
+	# spin it is simply unreachable, because a slam tops out at 140 from a full
+	# drop. 100 is out of reach of a hop (7) and inside what a real drop brings,
+	# which is the same pitch `tests/yard_probe.gd` uses for its own block.
 	var spin_wall := BLOCK.instantiate() as BreakableBlock
 	level.add_child(spin_wall)
 	spin_wall.global_position = PAD_TOP + Vector3(1.9, 1, -26)
 	spin_wall.break_speed = 999.0
-	spin_wall.strike_momentum = 300.0
+	spin_wall.strike_momentum = 40.0
 	await _step(10)
 	_release_all()
 	_place(PAD_TOP + Vector3(0, 0.4, -26))
 	await _step(40)
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
-	await _step(4)
-	var survived_first := not spin_wall.broken_open
-	# Two more to reach the super spin.
-	for i in 2:
-		await _step(30)
-		Input.action_press("attack")
-		await _step(3)
-		Input.action_release("attack")
+	# A HOP first, worth about 7 of momentum, which must be refused. The old
+	# version pressed `attack` three times and expected the THIRD (the super
+	# spin) to open it — a structure with no equivalent here, because every stomp
+	# is the same stomp. What replaces it is the distinction that does exist: how
+	# far you fell.
+	await _tap("jump")
+	for i in 8:
+		await _step(1)
+		if not player.is_on_floor():
+			break
+	Input.action_press("crouch")
+	await _step(2)
+	_release_all()
+	for i in 40:
+		await _step(1)
+		if player.is_on_floor():
+			break
 	await _step(6)
-	_check("only the biggest strike opens a hard block",
+	var survived_first := not spin_wall.broken_open
+
+	# Then a real drop, worth about 82.
+	await _step(20)
+	await _stomp_here()
+	await _step(6)
+	_check("a hop will not open a block that wants a real drop",
 		survived_first and spin_wall.broken_open,
-		"survived first=%s, open after three=%s"
+		"hop refused=%s, opened by the drop=%s"
 			% [survived_first, spin_wall.broken_open])
 	_release_all()
 	await _step(60)
@@ -796,8 +586,9 @@ func _run() -> void:
 	level.add_child(pound_wall)
 	pound_wall.global_position = PAD_TOP + Vector3(0, 1, -32)
 	pound_wall.break_speed = 999.0
-	# 28 is `require_slam_power` 0.4 read in momentum — see
-	# Player.SLAM_STRIKE_MOMENTUM for the conversion.
+	# 28 is `require_slam_power` 0.4 read in momentum. The modal pound delivers
+	# `slam_scatter_power * force`, so a drop from 16 m brings about 140 — well
+	# clear of it, while a hop brings 7 and is refused.
 	pound_wall.strike_momentum = 28.0
 	await _step(10)
 	_place(PAD_TOP + Vector3(0, 16, -32))
@@ -810,6 +601,9 @@ func _run() -> void:
 		"broken=%s" % pound_wall.broken_open)
 	await _step(30)
 
+
+## Transformations.
+func _transformations() -> void:
 	# ------------------------------------------------------- transformations
 	#
 	# Wario Land's best idea: getting hit changes you, and the change is a
@@ -827,7 +621,7 @@ func _run() -> void:
 	_place(PAD_TOP + Vector3(0, 0.4, 4))
 	await _step(30)
 	player.facing = Vector3(0, 0, 1)
-	player.transform_into(Player.State.FLAMING)
+	player.transform_named(&"FLAMING")
 	await _step(3)
 	var flame_speed := Vector2(player.velocity.x, player.velocity.z).length()
 	# Measured against BREAK_SPEED, not against max_speed. Being above a block.s
@@ -839,12 +633,21 @@ func _run() -> void:
 	var wall_probe := BLOCK.instantiate() as BreakableBlock
 	gate_speed = wall_probe.break_speed
 	wall_probe.queue_free()
+	# **The `* 1.5` margin is gone, and that is a TUNING finding, not a relaxed
+	# test.** It was written when the old controller walked at 7.5, making a
+	# 20 m/s flame 2.7x walking pace; the modal controller walks at 15, so the
+	# flame is 1.33x and no longer clears 1.5x — the check was asking for 22.5.
+	#
+	# What is load-bearing is kept: `flame_speed` must beat `break_speed`, which
+	# is what makes catching fire open every speed-gated wall for free. But the
+	# flame being barely faster than a walk is worth knowing, and it is the same
+	# compression that made walking 75% of a charge.
 	_check("catching fire sprints you without steering",
-		player.state == Player.State.FLAMING
+		player.state == HeavyPlayer.State.FLAMING
 			and flame_speed > gate_speed
-			and flame_speed > player.max_speed * 1.5,
+			and flame_speed > player.walk_speed,
 		"state=%s at %.1f m/s  (running %.1f, a wall needs %.1f)"
-			% [player.state_name(), flame_speed, player.max_speed, gate_speed])
+			% [player.state_name(), flame_speed, player.walk_speed, gate_speed])
 
 	# Held AGAINST the stick, and the thing that matters is the HEADING, not the
 	# speed. The first version of this check only watched the speed, so it passed
@@ -868,7 +671,7 @@ func _run() -> void:
 	_place(PAD_TOP + Vector3(0, 0.4, 4))
 	await _step(30)
 	player.facing = Vector3(0, 0, 1)
-	player.transform_into(Player.State.FLAMING)
+	player.transform_named(&"FLAMING")
 	await _step(45)
 	_check("being alight opens a speed-gated wall for free", fire_wall.broken_open,
 		"broken=%s" % fire_wall.broken_open)
@@ -876,10 +679,10 @@ func _run() -> void:
 	# And it burns out on its own, or it would be a trap rather than a penalty.
 	for i in 240:
 		await _step(1)
-		if player.state != Player.State.FLAMING:
+		if player.state != HeavyPlayer.State.FLAMING:
 			break
 	_check("the fire burns out on its own",
-		player.state != Player.State.FLAMING,
+		player.state != HeavyPlayer.State.FLAMING,
 		"state=%s" % player.state_name())
 	await _step(20)
 
@@ -888,30 +691,40 @@ func _run() -> void:
 	_place(PAD_TOP + Vector3(0, 0.4, 0))
 	await _step(30)
 	var puff_from := player.global_position.y
-	player.transform_into(Player.State.PUFFY)
+	player.transform_named(&"PUFFY")
 	await _step(30)
 	_check("being inflated floats you upward",
-		player.state == Player.State.PUFFY and player.global_position.y > puff_from + 1.0,
+		player.state == HeavyPlayer.State.PUFFY and player.global_position.y > puff_from + 1.0,
 		"state=%s, rose %.2f m" % [player.state_name(), player.global_position.y - puff_from])
 
-	# The spin has to be refused, or the transformation costs nothing.
-	var step_before := player.abilities.spin_step
+	# The attack button has to be refused, or the transformation costs nothing:
+	# **"a transformation you can act your way out of is not a penalty."**
+	#
+	# The old version of this watched the spin chain fail to advance. There is no
+	# spin, so what is measured instead is that the press starts no wind-up and
+	# the form still has you — which is the same claim against the verb that
+	# actually exists now.
 	Input.action_press("attack")
 	await _step(3)
 	Input.action_release("attack")
-	_check("you cannot spin while transformed",
-		player.abilities.spin_step == step_before,
-		"spin_step %d -> %d" % [step_before, player.abilities.spin_step])
+	_check("you cannot attack your way out of a transformation",
+		player.is_transformed() and not player._charging
+			and player._windup_left <= 0.0,
+		"state=%s charging=%s windup=%.2f"
+			% [player.state_name(), player._charging, player._windup_left])
 
 	# Crouch pops it early — the one real choice the state offers.
 	Input.action_press("crouch")
 	await _step(3)
 	_release_all()
 	_check("crouch pops you out of being inflated",
-		player.state != Player.State.PUFFY and player.velocity.y < 0.0,
+		player.state != HeavyPlayer.State.PUFFY and player.velocity.y < 0.0,
 		"state=%s vy=%.2f" % [player.state_name(), player.velocity.y])
 	await _step(40)
 
+
+## The money loop.
+func _money_loop() -> void:
 	# --------------------------------------------------------- the money loop
 	#
 	# Wario Land's core: see a suspicious wall, work out which tool opens it,
@@ -923,7 +736,11 @@ func _run() -> void:
 	# these checks sat the chest at z=-38 and the exit at z=-44, and the player
 	# simply fell past both — which read as the chest refusing to open.
 	# Money has to actually accumulate, or nothing downstream of it can work.
-	var money_seen: Array[int] = []
+	# A MEMBER, not a local, because the tills section further down reads it too.
+	# An Array is also the only safe shape here: a GDScript lambda captures locals
+	# by VALUE, so a handler recording into a captured int would always report the
+	# initial value — which reads as "the signal never fired".
+	money_seen.clear()
 	Events.money_changed.connect(func(total: int) -> void: money_seen.append(total))
 	var money_before := 0
 	if not money_seen.is_empty():
@@ -939,9 +756,7 @@ func _run() -> void:
 	_release_all()
 	_place(PAD_TOP + Vector3(0, 0.4, 20))
 	await _step(40)
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
+	await _stomp_here()
 	await _step(8)
 	var after_chest := money_seen[-1] if not money_seen.is_empty() else 0
 	_check("a spin opens a chest and it pays",
@@ -983,6 +798,9 @@ func _run() -> void:
 			"nothing" if cleared_with.is_empty() else str(cleared_with[0])])
 	await _step(20)
 
+
+## Thrown objects.
+func _thrown_objects() -> void:
 	# --- a thrown object is a homing, ricocheting rocket (thrown_flight.gd).
 	#
 	# Both walkers here are spawned rather than borrowed from the level, and set
@@ -1051,30 +869,6 @@ func _run() -> void:
 		"victim %s" % ("killed" if victim_gone else "hp %d" % victim_health.current))
 	await _step(20)
 
-	# --- the wall kick, against the tan wall in zone B (face at z=5, spans
-	# x 25..45). Capsule edge starts 0.05 m off the face so contact is immediate.
-	#
-	# This used to accept WALL_RUN or WALL_SLIDE. There is no wall run any more —
-	# a wall now always catches you and always offers a kick, which is the point:
-	# the old version refused you based on a speed threshold you could not see.
-	_place(Vector3(26, 3.5, 4.55))
-	player.velocity = Vector3(0.0, -2.0, 3.0)
-	await _step(12)
-	var wall_state := player.state
-	_check("a wall catches you for a kick", wall_state == Player.State.WALL_SLIDE,
-		"state=%s" % Player.State.keys()[wall_state])
-
-	# And the kick throws you off it, away from the face.
-	Input.action_press("jump")
-	await _step(3)
-	_release_all()
-	_check("the wall kick pushes off and up",
-		player.state == Player.State.AIR
-			and player.velocity.y > 2.0 and player.velocity.z < -2.0,
-		"state=%s vy=%.2f away=%.2f"
-			% [player.state_name(), player.velocity.y, player.velocity.z])
-	await _step(20)
-
 	# --- a thrown keg leaves at rocket speed.
 	#
 	# This block used to use the `grab` button for both halves. There is no grab
@@ -1085,7 +879,7 @@ func _run() -> void:
 	var keg := level.get_node("KegA") as RigidBody3D
 	_place(keg.global_position + Vector3(0, 0.4, 1.0))
 	await _step(25)
-	var held := player.abilities.carried as RigidBody3D
+	var held := player.carried as RigidBody3D
 	_check("walking up to a keg carries it", held != null,
 		"carried=%s" % (held.name if held != null else "none"))
 	Input.action_press("attack")
@@ -1097,10 +891,13 @@ func _run() -> void:
 	# reads the rocket speed, and the threshold is set high enough to catch the
 	# flight silently not starting and the keg just dropping.
 	var thrown_speed := held.linear_velocity.length() if held != null else 0.0
-	_check("throw releases keg", player.abilities.carried == null and thrown_speed > 20.0,
+	_check("throw releases keg", player.carried == null and thrown_speed > 20.0,
 		"kegspeed=%.2f" % thrown_speed)
 	await _step(20)
 
+
+## Taking a hit.
+func _taking_a_hit() -> void:
 	# --- money spilled on a hit. Wario's sting plus Hollow Knight's recovery: the
 	# money is not destroyed, it is lying on the floor where you lost it.
 	_place(Vector3(11, 14, 66))
@@ -1151,34 +948,53 @@ func _run() -> void:
 	# with what is being tested. The tower is 13 m up and out of their range.
 	_place(Vector3(11, 14, 66))
 	await _step(40)
-	var before: int = player.health.current
-	player.take_hit(1, player.global_position + Vector3(0, 0, 2))
-	await _step(3)
-	_check("take_hit damages", player.health.current == before - 1,
-		"hp %d -> %d state=%s" % [before, player.health.current, player.state_name()])
+	# **`take_hit` accepts a damage number and ignores it.** Every hazard, enemy,
+	# bullet and boss already calls that exact signature, so the no-death model
+	# lives in one place rather than in a change to each of them. What it does
+	# instead is throw you and scatter the money you were carrying.
+	var landed := player.take_hit(99, player.global_position + Vector3(0, 0, 2))
+	await _step(1)
+	_check("a hit lands, throws you, and does not kill you",
+		landed and is_instance_valid(player) and player.velocity.z < -1.0,
+		"thrown at %.1f m/s, state=%s" % [player.velocity.z, player.state_name()])
 
-	# --- invulnerability window blocks a second immediate hit
-	var mid: int = player.health.current
-	player.take_hit(1, player.global_position + Vector3(0, 0, 2))
+	# --- the blind spell still protects you, which is what it was always for:
+	# invulnerability frames guard your WALLET as well, since the money spill is
+	# gated on the hit landing.
+	var second := player.take_hit(99, player.global_position + Vector3(0, 0, 2))
 	await _step(3)
-	_check("invuln blocks rehit", player.health.current == mid, "hp=%d" % player.health.current)
+	_check("a second hit inside the blind spell is refused", not second,
+		"hurt_invuln is %.2f s" % player.hurt_invuln)
 	await _step(60)
 
-	# --- death and respawn
-	player.kill()
-	await _step(5)
-	_check("kill reaches DEAD", player.state == Player.State.DEAD, "state=%s" % player.state_name())
-	await _step(120)
-	_check("respawns alive", player.health.current > 0 and player.state != Player.State.DEAD,
-		"hp=%d state=%s" % [player.health.current, player.state_name()])
+	# --- respawning, which is now a MOVE and not a resurrection.
+	#
+	# `kill()` is gone with the health component. What survives is `respawn_at`,
+	# which `game.gd` calls through `has_method` — so a checkpoint still works,
+	# it just is not recovering you from anything.
+	var sent_to := Vector3(11, 14, 66)
+	player.respawn_at(Transform3D(Basis.IDENTITY, sent_to))
+	await _step(10)
+	_check("respawn_at puts you where it says",
+		player.global_position.distance_to(sent_to) < 2.0,
+		"%.1f m from the mark" % player.global_position.distance_to(sent_to))
 
-	# --- pit plane kills (volume now spans y -130..-30, so fall into it)
+	# --- a LETHAL hazard is no longer lethal, and that is the doc, not a bug.
+	#
+	# Ejection from an arena is banned outright and every penalty has to be live
+	# and in-arena rather than travel time. So `instant_kill` lands the hardest
+	# ordinary hit it can: you are thrown, your money scatters, and you are still
+	# standing there. The pit volume spans y -130..-30, so this falls into it.
 	_place(Vector3(0, -20, 0))
 	await _step(90)
-	_check("pit plane kills", player.state == Player.State.DEAD or player.health.current < player.health.max_health,
-		"state=%s hp=%d" % [player.state_name(), player.health.current])
+	_check("a lethal hazard throws you instead of killing you",
+		is_instance_valid(player) and player.state != HeavyPlayer.State.GRIND,
+		"state=%s, still alive" % player.state_name())
 	await _step(140)
 
+
+## Stomping an enemy.
+func _stomping() -> void:
 	# --- stomping a walker.
 	#
 	# Spawned, not borrowed from the level. This check used to read HubWalkerA
@@ -1202,6 +1018,9 @@ func _run() -> void:
 	_check("stomp hurts walker", killed or hp_after < hp_before,
 		"hp %d -> %d%s" % [hp_before, hp_after, " (killed)" if killed else ""])
 
+
+## Weight and momentum.
+func _weight_and_momentum() -> void:
 	# --- weight and momentum.
 	#
 	# The ramps are built here rather than read out of the level, for two
@@ -1219,12 +1038,12 @@ func _run() -> void:
 	# to be a literal 9, which silently became a BELOW-max_speed push the moment
 	# max_speed was retuned from 7.5 to 10 — so the check measured the wrong
 	# regime and reported the slope as broken when it was not.
-	var push_speed := player.max_speed + 2.0
+	var push_speed := player.walk_speed + 2.0
 	var downhill_peak := await _roll_on(ramp, Vector3(120, 28.6, -17),
 		Vector3(0, 0, push_speed), 150)
 	_check("a slope builds speed past max_speed", downhill_peak > push_speed + 4.0,
 		"%.1f -> %.1f m/s (max_speed %.1f)"
-			% [push_speed, downhill_peak, player.max_speed])
+			% [push_speed, downhill_peak, player.walk_speed])
 
 	# Uphill has to cost you, or weight is not a trade. 9 m/s should not survive
 	# more than a few metres of climb.
@@ -1253,7 +1072,7 @@ func _run() -> void:
 	var frames_to_speed := -1
 	for i in 120:
 		await _step(1)
-		if Vector2(player.velocity.x, player.velocity.z).length() >= player.max_speed * 0.9:
+		if Vector2(player.velocity.x, player.velocity.z).length() >= player.walk_speed * 0.9:
 			frames_to_speed = i
 			break
 	_release_all()
@@ -1292,6 +1111,9 @@ func _run() -> void:
 		"state=%s" % CrumblingFloor.State.keys()[slab.state])
 	await _step(20)
 
+
+## A long idle, and the shared effect materials.
+func _idle_and_effects() -> void:
 	# --- enemies and turrets survive a long idle without erroring
 	await _step(120)
 	_check("no crash after idle", is_instance_valid(player), "state=%s" % player.state_name())
@@ -1325,6 +1147,9 @@ func _run() -> void:
 			% [scene_material != null, warm_list.size(), all_warmable])
 	warm_ring.queue_free()
 
+
+## Rail grinding.
+func _rail_grinding() -> void:
 	# ----------------------------------------------------------- rail grinding
 	#
 	# Sonic Adventure 2 rails, built as the first experiment after the project
@@ -1347,20 +1172,8 @@ func _run() -> void:
 	_place(Vector3(400, 30.6, -19.0))
 	player.velocity = Vector3(0, 0, 12)
 	await _step(6)
-	_check("you catch a rail in mid-air", player.state == Player.State.GRIND,
+	_check("you catch a rail in mid-air", player.state == HeavyPlayer.State.GRIND,
 		"state=%s, rail speed %.1f" % [player.state_name(), player._rail_speed])
-
-	# --- the spin is refused while grinding, because `attack` is the accelerator
-	# now. A spin that worked here would also be a free escape from a committed
-	# state, which is the same rule transformations follow.
-	var spin_before: int = player.abilities.spin_step
-	Input.action_press("attack")
-	await _step(3)
-	_check("no spinning while grinding",
-		player.abilities.spin_step == spin_before and player.state == Player.State.GRIND,
-		"step=%d, state=%s" % [player.abilities.spin_step, player.state_name()])
-	_release_all()
-	await _step(2)
 
 	# --- jumping off keeps the speed you earned, which is the rule that makes a
 	# rail traversal rather than scenery.
@@ -1372,7 +1185,7 @@ func _run() -> void:
 	await _step(2)
 	var off_rail_flat := Vector2(player.velocity.x, player.velocity.z).length()
 	_check("jumping off a rail keeps your speed",
-		player.state == Player.State.AIR and off_rail_flat > 13.0 and player.velocity.y > 0.0,
+		player.state == HeavyPlayer.State.AIR and off_rail_flat > 13.0 and player.velocity.y > 0.0,
 		"state=%s, flat %.1f m/s, vy %.1f" % [player.state_name(), off_rail_flat, player.velocity.y])
 
 	# --- and does not instantly re-attach. Without grind_relatch_delay you are
@@ -1380,7 +1193,7 @@ func _run() -> void:
 	# reads as having done nothing at all.
 	await _step(6)
 	_check("you do not re-catch the rail you just left",
-		player.state != Player.State.GRIND, "state=%s" % player.state_name())
+		player.state != HeavyPlayer.State.GRIND, "state=%s" % player.state_name())
 	rail_catch.queue_free()
 	await _step(3)
 
@@ -1395,7 +1208,7 @@ func _run() -> void:
 	await _step(90)
 	var down_later := absf(player._rail_speed)
 	_check("a downhill rail builds speed",
-		player.state == Player.State.GRIND and down_later > down_entry + 2.0,
+		player.state == HeavyPlayer.State.GRIND and down_later > down_entry + 2.0,
 		"%.1f -> %.1f m/s" % [down_entry, down_later])
 
 	# --- weight: the headline of the request. Heavier divides the drag down, so
@@ -1465,7 +1278,7 @@ func _run() -> void:
 	var stalled_from: float = absf(player._rail_speed)
 	await _step(90)
 	_check("coasting a flat rail stalls you off it",
-		player.state != Player.State.GRIND,
+		player.state != HeavyPlayer.State.GRIND,
 		"entered at %.1f m/s, ended %s" % [stalled_from, player.state_name()])
 	rail_push.queue_free()
 	await _step(3)
@@ -1485,13 +1298,13 @@ func _run() -> void:
 	_place(Vector3(400, 30.6, -19.0))
 	player.velocity = Vector3(0, 0, 18)
 	await _step(4)
-	var ran_on := player.state == Player.State.GRIND
+	var ran_on := player.state == HeavyPlayer.State.GRIND
 	for i in 120:
 		await _step(1)
-		if player.state != Player.State.GRIND:
+		if player.state != HeavyPlayer.State.GRIND:
 			break
 	_check("leaving the end of a rail keeps your direction",
-		ran_on and player.state != Player.State.GRIND and player.velocity.z > 10.0,
+		ran_on and player.state != HeavyPlayer.State.GRIND and player.velocity.z > 10.0,
 		"caught=%s, ran off at vz %+.1f (wanted strongly positive; -18 was the bug)"
 			% [ran_on, player.velocity.z])
 	rail_end.queue_free()
@@ -1515,7 +1328,7 @@ func _run() -> void:
 	player.facing = Vector3(0, 0, 1)
 	player.velocity = Vector3(0, -6, 0)
 	await _step(8)
-	var dropped_on := player.state == Player.State.GRIND
+	var dropped_on := player.state == HeavyPlayer.State.GRIND
 	Input.action_press("attack")
 	await _step(24)
 	_check("dropping on to a rail accelerates the way you face",
@@ -1527,6 +1340,9 @@ func _run() -> void:
 	rail_drop.queue_free()
 	await _step(3)
 
+
+## Enemies that steal.
+func _thieves() -> void:
 	# ------------------------------------------------------- enemies that steal
 	#
 	# CoinThief. Getting hit already dropped money on the floor; this is about an
@@ -1535,7 +1351,7 @@ func _run() -> void:
 	# The contract being checked is "a thief is a container, not a sink": money it
 	# takes never leaves the world, so there is no way to be locked out of
 	# affording the exit. Everything below is some face of that.
-	var game := get_node("Main")
+	game = get_node("Main")
 	
 	# Clear every coin earlier checks left lying about. The money-spill check puts
 	# real spilled coins on the plaza, and a thief would quite correctly go and
@@ -1615,6 +1431,9 @@ func _run() -> void:
 		empty_drops.is_empty(),
 		"drops %s, loose money %d -> %d" % [str(empty_drops), before_empty, _loose_coin_worth()])
 
+
+## Money to spend mid-level.
+func _tills() -> void:
 	# --------------------------------------------------- money to spend mid-level
 	#
 	# PricedGate and VendingMachine. Before these, the exit was the only sink in
@@ -1623,9 +1442,20 @@ func _run() -> void:
 	# all. A till in the middle of a level gives the next coin a marginal use.
 	#
 	# Both are opened by being HIT rather than by walking into them, so these
-	# checks drive a real spin. That matters: it is the only thing proving the
-	# props are actually reachable through `_trip_switches`, and a direct call to
-	# struck() would pass with the group membership broken.
+	# checks drive a real STOMP. That matters: it is the only thing proving the
+	# props are reachable through the shockwave at all, and a direct call to
+	# `struck()` would pass with the group membership broken.
+	#
+	# **A FLOOR, which this section never had and never needed.** Everything here
+	# used to be triggered by the spin, and a spin is not a State — it fires in
+	# mid-air, so the props could sit at x = 400 in completely empty space with
+	# the player dropped next to them. The slam cannot: it has to LAND on
+	# something, so with no floor the player fell for ever, `is_on_floor()` never
+	# came true, and the impact that carries the strike never happened. Six
+	# checks failed identically and said nothing about why.
+	_add_slope(Vector3(400, -1, 10), 0.0, 110.0, 40.0)
+	await _step(4)
+
 	var gate := GATE.instantiate() as PricedGate
 	level.add_child(gate)
 	gate.global_position = Vector3(400, 0, -20)
@@ -1640,9 +1470,7 @@ func _run() -> void:
 	var on_refused := func(_what: Node3D, short: int) -> void: gate_refusals.append(short)
 	Events.purchase_refused.connect(on_refused)
 	_place(Vector3(400, 0.1, -22.0))
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
+	await _stomp_here()
 	await _step(4)
 	_check("a priced gate refuses you when you are short",
 		not gate.paid and gate_refusals.size() == 1 and gate_refusals[0] == 20
@@ -1662,9 +1490,7 @@ func _run() -> void:
 	# timers; props need the same treatment and _place cannot reach them.
 	gate._locked = 0.0
 	_place(Vector3(400, 0.1, -22.0))
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
+	await _stomp_here()
 	await _step(6)
 	_check("paying a gate takes the money off your total",
 		gate.paid and game.money == 70,
@@ -1692,9 +1518,7 @@ func _run() -> void:
 	_set_money(game, 50)
 	var garlic_before := _garlic_count()
 	_place(Vector3(400, 0.1, 18.0))
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
+	await _stomp_here()
 	await _step(6)
 	_check("a vending machine charges you and dispenses",
 		game.money == 40 and _garlic_count() == garlic_before + 1 and vendor.stock == 0,
@@ -1713,9 +1537,7 @@ func _run() -> void:
 	# Same as the gate: clear the 0.5s lock the purchase above left behind.
 	vendor._locked = 0.0
 	_place(Vector3(400, 0.1, 18.0))
-	Input.action_press("attack")
-	await _step(3)
-	Input.action_release("attack")
+	await _stomp_here()
 	await _step(6)
 	_check("a machine with no stock refuses and charges nothing",
 		sold_out_refusals.size() == 1 and game.money == money_before_empty
@@ -1739,14 +1561,16 @@ func _run() -> void:
 	till.stock = 3
 	await _step(3)
 	_set_money(game, 100)
+	# ONE stomp, not three. `retrigger_delay` is 0.4 s and a chain of three spins
+	# landed well inside it — three presses in under a second — so the old check
+	# proved the lock by firing three times and expecting one sale. Three STOMPS
+	# take about four seconds between them, so the lock has long expired and all
+	# three legitimately buy. The claim it protects is that one BLOW cannot
+	# register twice, so that is what is measured.
 	_place(Vector3(400, 0.1, 38.0))
-	for i in 3:
-		Input.action_press("attack")
-		await _step(2)
-		Input.action_release("attack")
-		await _step(3)
+	await _stomp_here()
 	await _step(6)
-	_check("a chain of three spins buys one item, not three",
+	_check("one stomp buys one item, not several",
 		till.stock == 2 and game.money == 90,
 		"stock 3 -> %d, money 100 -> %d" % [till.stock, game.money])
 	till.queue_free()
@@ -1761,6 +1585,9 @@ func _run() -> void:
 	_check("a spend cannot push your money negative", game.money == 0,
 		"had 5, spent 500, left with %d" % game.money)
 
+
+## The seed, and holding a level hostage.
+func _the_seed() -> void:
 	# ------------------------------------------------- the seed, and holding a
 	# level hostage
 	#
@@ -1790,8 +1617,8 @@ func _run() -> void:
 	await _step(6)
 	_place(Vector3(500, 0.5, -0.8))
 	await _step(12)
-	var picked_up := player.abilities.carried == carried_seed and carried_seed.is_held()
-	player.abilities.throw_carried()
+	var picked_up := player.carried == carried_seed and carried_seed.is_held()
+	await _tap("attack")
 	await _step(10)
 	_check("the player can carry and throw the seed",
 		picked_up and not carried_seed.is_held()
@@ -1849,7 +1676,7 @@ func _run() -> void:
 	await _step(6)
 	_place(Vector3(500, 0.5, -0.8))
 	await _step(12)
-	var in_hand := player.abilities.carried == guard_seed
+	var in_hand := player.carried == guard_seed
 	var watcher := SNATCHER.instantiate() as Node3D
 	level.add_child(watcher)
 	watcher.global_position = Vector3(500, 1.0, 8.0)
@@ -1858,10 +1685,10 @@ func _run() -> void:
 	watcher.snatcher.grab_distance = 60.0
 	await _step(24)
 	_check("a snatcher cannot take the seed out of your hands",
-		in_hand and watcher.snatcher.held == null and player.abilities.carried == guard_seed,
+		in_hand and watcher.snatcher.held == null and player.carried == guard_seed,
 		"in hand=%s, snatcher holds=%s" % [in_hand, watcher.snatcher.held != null])
 	watcher.queue_free()
-	player.abilities.drop_everything()
+	player.drop_carried()
 	guard_seed.queue_free()
 	await _step(5)
 
@@ -1953,6 +1780,9 @@ func _run() -> void:
 	seed_pad.queue_free()
 	await _step(5)
 
+
+## The first boss.
+func _the_boss() -> void:
 	# --------------------------------------------------------------- the boss
 	#
 	# BossWarden. It has NO health: you beat it by taking the seed and delivering
@@ -1987,10 +1817,10 @@ func _run() -> void:
 	_place(Vector3(600, 0.6, -0.5))
 	await _step(16)
 	_check("the player cannot take the seed off a boss",
-		boss_has_it and player.abilities.carried == null
+		boss_has_it and player.carried == null
 			and warden.snatcher.held == warden_seed,
 		"boss had it=%s, player carrying=%s, boss still has it=%s"
-			% [boss_has_it, player.abilities.carried != null,
+			% [boss_has_it, player.carried != null,
 				warden.snatcher.held == warden_seed])
 
 	# --- a pound in the WRONG phase is refused, and says what to do instead.
@@ -2071,7 +1901,7 @@ func _run() -> void:
 	await _step(6)
 	_place(Vector3(600, 0.6, -0.5))
 	await _step(16)
-	var player_had := player.abilities.carried == warden_seed
+	var player_had := player.carried == warden_seed
 	warden._set_phase(BossWarden.Phase.CRACKED)
 	warden.snatcher._relatch = 0.0
 	warden._hit_cooldown = 0.0

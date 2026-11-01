@@ -377,7 +377,12 @@ material = SubResource("MatTower")
 
 [node name="PlateLift" parent="." instance=ExtResource("lift")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 0.3, -10)
-travel = Vector3(0, 13.7, 0)
+; 13.4 and not 13.7. The platform deck is 0.6 thick, so its TOP is
+; `origin.y + 0.3` — the lift starts with its top at 0.6 and has to arrive with
+; it at 14.0, which is 13.4 of travel. 13.7 put it at 14.30 and the probe caught
+; it: a lift that arrives 30 cm over the thing it serves is a lip you trip on,
+; and "nearly" is invisible until something measures it.
+travel = Vector3(0, 13.4, 0)
 
 [node name="Plate" parent="." instance=ExtResource("plate")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 0, 4)
