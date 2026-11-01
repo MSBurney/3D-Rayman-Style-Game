@@ -13,7 +13,13 @@ extends Node
 ## is to put the controller into states that need a level around them, which is
 ## awkward to arrange through input alone.
 
-const MAIN := preload("res://scenes/main.tscn")
+## The DEPRECATED controller in the level built for the deprecated moveset.
+##
+## This was `scenes/main.tscn` until the modal controller took that scene over,
+## which meant the project's entry scene doubled as this suite's fixture — so
+## `main.tscn` could not be rebuilt without taking all 214 checks with it. See
+## the header comment in legacy_main.tscn.
+const MAIN := preload("res://scenes/legacy_main.tscn")
 ## Spawned fresh for the throw and stomp checks. The level's own walkers cannot
 ## be relied on any more: a homing throw kills whatever it finds, so by halfway
 ## through the suite there may be none left standing.

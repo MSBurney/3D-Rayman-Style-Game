@@ -1,23 +1,31 @@
 [gd_scene format=3 uid="uid://cmxrmaonlm2u7"]
 
+; The project's entry scene. `run/main_scene` in project.godot points here.
+;
+; It used to be the OLD suite's fixture as well — `moveset_smoke_test.gd`
+; instantiated this file, which quietly meant the entry scene could not change
+; without taking 214 checks with it. That snapshot now lives in
+; `scenes/legacy_main.tscn`, and the two are free of each other.
+
 [ext_resource type="Script" uid="uid://dlctxiqwl8dhd" path="res://scripts/game.gd" id="1"]
-[ext_resource type="PackedScene" uid="uid://bnwli4wnfxsxj" path="res://scenes/levels/test_level.tscn" id="2"]
-[ext_resource type="PackedScene" uid="uid://b5papl5ibq4pg" path="res://scenes/player/player.tscn" id="3"]
+[ext_resource type="PackedScene" uid="uid://bq3hrvn7y8kda" path="res://scenes/levels/heavy_yard.tscn" id="2"]
+[ext_resource type="PackedScene" uid="uid://bfwegh8phsmfe" path="res://scenes/player/heavy_player.tscn" id="3"]
 [ext_resource type="PackedScene" uid="uid://bbci0v0k12u0y" path="res://scenes/ui/hud.tscn" id="4"]
 [ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="5"]
 [ext_resource type="PackedScene" uid="uid://kqfsbm07xrgp" path="res://scenes/fx/jump_burst.tscn" id="6"]
 [ext_resource type="PackedScene" uid="uid://xwhp0bfervqw" path="res://scenes/fx/shockwave.tscn" id="7"]
 
-[node name="Main" type="Node" unique_id=1617764626]
+[node name="Main" type="Node"]
 script = ExtResource("1")
 player = NodePath("Player")
 coin_scene = ExtResource("5")
 prewarm_scenes = Array[PackedScene]([ExtResource("6"), ExtResource("7")])
 
-[node name="TestLevel" parent="." unique_id=1412028076 instance=ExtResource("2")]
+[node name="HeavyYard" parent="." instance=ExtResource("2")]
 
-[node name="Player" parent="." unique_id=1272398805 instance=ExtResource("3")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 10)
-swing_max_rope = 6.5
+; Only `transform` is ever overridden on a repointed Player, so there is one
+; place to read a default from and a scene cannot quietly shadow the script.
+[node name="Player" parent="." instance=ExtResource("3")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 14)
 
-[node name="HUD" parent="." unique_id=966758596 instance=ExtResource("4")]
+[node name="HUD" parent="." instance=ExtResource("4")]

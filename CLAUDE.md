@@ -887,6 +887,82 @@ feedback rule, so each gained a rattle — and the tills needed care: **too feeb
 refusal from too poor**, and `purchase_refused` carries a money shortfall, so reporting a weak hit
 through it would print "30 short" at a player who has the money and merely tapped the gate.
 
+### Stage B4a: four scenes moved to the heavy controller (done 2026-10-31)
+
+`playground`, `rail_yard_main`, `market_yard_main` and `thief_arena_main` now instance
+`heavy_player.tscn`. **Staged deliberately rather than done as one swap**, because the eight scenes
+are not equally ready and a single commit that repointed all of them would make every failure
+ambiguous about which scene caused it.
+
+#### The swap itself was one line per scene, and that is worth knowing why
+
+Every level names the node `Player`, instances it as `ExtResource("3")`, and the two player scenes
+expose an **identical interface**: `collision_layer = 2`, `collision_mask = 69`, group `player`. So
+`game.gd` (which finds the player by group), the HUD and every prop needed no change at all — that
+is Stage B1 paying out. The heavy scene's root is called `HeavyPlayer`, but an instancing scene
+names the instance itself, so `$Player` lookups are unaffected.
+
+#### Every player override was STRIPPED, not ported
+
+The playground set eight: `jump_height`, `gravity_rise`, `max_fall_speed`, `apex_threshold`,
+`coyote_time`, `jump_buffer`, `long_jump_push`. Four of those do not exist on the modal controller
+at all, and the four that do were tuned for a character with completely different handling.
+
+Carrying half of them over would be exactly the **"the scene quietly shadows the script default"**
+problem the first tuning pass removed when it moved the greybox's overrides into `heavy_player.gd`.
+One place to read a default from. Only `transform` survives on a repointed Player node, and that
+should stay the rule.
+
+#### The rail probe moved with the scene, and the grind kept its shape
+
+`tests/rail_probe.gd` drives the controller's internals directly, and the grind's names happen to
+match exactly — `_rail`, `_rail_speed`, `_grind_lock` — so it needed only the class swapped and
+`Player.State.GROUND` → `HeavyPlayer.State.WALK`, since the modal controller has no GROUND.
+
+Measured off the deck, against the old controller's numbers in the rail section below:
+
+| | old | heavy |
+| --- | --- | --- |
+| downhill (9.5°) | 11.9 → 16.5 | 10.4 → **15.0** |
+| flat | 12.0 → 7.0 | 10.5 → **5.5** |
+| uphill (5.7°) | 11.6 → 0.0, falls off | 9.9 → **0.0, falls off** |
+| the S-curve | — | 12.0 → **12.8** |
+
+Same shape, which is the point: the grind reuses `slope_gravity` rather than owning a gravity, so a
+rail physically cannot disagree with a ramp about which way is downhill — and that held through a
+change of controller.
+
+#### What is NOT done, and the honest state of each
+
+- **`warden_arena_main` needs a retune before it moves.** `crack_power` is **0.5**, set when
+  `slam_power()` ran 0..1. The modal controller's slam force reaches **4.2**, and a flat-out charge
+  cancelled into a slam delivers about **2.2 with no drop at all** — so phase 2 would stop asking
+  for height entirely. That deletes the pound deck's reason to exist and the "lure him into the
+  pillar at `x=-18` so you are already up high" setup this file calls the shape of the fight.
+- **`tree_fort_main` is vertical and sized for a double and triple jump**, and the modal controller
+  has one jump. Probe the gaps before believing it is playable.
+- **`hostage_pit_main`: `platform_seed.tscn` is a `RigidBody3D` with no `mass` set**, so the weight
+  layer reads it as `UNKNOWN_MASS` (1.0). It carries fine, but a 1-mass seed weighs nothing on a
+  see-saw or a plate. Give it a real number before that matters.
+- **`main.tscn` is to be rebuilt for the modal moveset**, decided 2026-10-31. It loads
+  `test_level.tscn`, which is organised into zones built around verbs that no longer exist — there
+  is still a `BRunWall` node (wall run, deleted) and `AGlide*` coins (glide, deleted), and this file
+  has recorded North/South as anchor-based with no route since the grapple went. Repointing the
+  player would not have broken it; it has been stale for a while.
+
+#### Two drifts that are not bugs and should not be quietly "fixed"
+
+- **The thief scramble is now a stroll.** `CoinThief` races you for dropped coins, and the walker's
+  `chase_speed` (4.4) was chosen to sit well under the old `max_speed` of **7.5**. The modal
+  controller *walks* at **15**. This file says that race "**is** the mechanic", so the number wants
+  revisiting — but `chase_speed` is on every walker in every level, so it is a global change and
+  belongs in a deliberate pass, not in a scene repoint.
+- **The tills' refusal paths are only covered through the deprecated spin.** `market_probe.gd` is a
+  geometry-and-arithmetic probe and never touches the player, so nothing drives a *stomp* into a
+  `PricedGate` or a `VendingMachine`. The `struck` contract itself is covered in the greybox (the
+  switch and the block share the entry point and the threshold), but the "too poor" and "sold out"
+  announcements are exercised only by the old suite.
+
 ### Stage B: what is left, in dependency order
 
 1. ~~Decouple the props from the `Player` class.~~ **Done — B1 above.**
@@ -898,7 +974,10 @@ through it would print "30 short" at a player who has the money and merely tappe
    The HUD hides its hearts when the player has no Health, hazards fall back to a hard hit, and
    `game.gd` only respawns through a duck-typed `respawn_at`. Enemies keep their own health; the doc
    only says the *player* does not die.
-4. **Repoint the eight scenes** to `heavy_player.tscn`.
+4. **Repoint the eight scenes** to `heavy_player.tscn`. **Four done — B4a above.** Left:
+   `warden_arena_main` (retune `crack_power` first), `tree_fort_main` (probe the jump gaps),
+   `hostage_pit_main` (give the seed a `mass`), and `main.tscn`, which is a rebuild rather than a
+   repoint. **`scene_smilex.tscn` is Ian's and stays on `player.tscn`.**
 5. **Rewrite the suite.** About 50 of its 109 checks test verbs that are being deleted — the Mario
    moveset, the spin chain. It will get smaller before it grows back, and `_run()` should be split
    into per-system functions while it is being rewritten; it has hung twice on a local-name

@@ -1,0 +1,690 @@
+[gd_scene format=3 uid="uid://bq3hrvn7y8kda"]
+
+; THE MODAL MOVESET'S SHOWCASE YARD. Replaces test_level.tscn as what
+; `scenes/main.tscn` loads.
+;
+; ─── WHY THIS IS A REBUILD AND NOT A PORT ───────────────────────────────────
+;
+; `test_level.tscn` is four corridors (A/B/C/D) hanging off a hub, and each one
+; was built around a verb that no longer exists: `BRunWall` is the wall run,
+; `AGlideCoin*` is the glide, and North/South were grapple anchors. Three
+; deleted abilities out of four zones, so there was nothing to repoint.
+;
+; It is kept on disk, unreferenced except by `scenes/legacy_main.tscn`, which is
+; the old suite's fixture. It is the record of the Mario moveset.
+;
+; ─── THE SHAPE, WHICH THE DESIGN DOC DICTATES ───────────────────────────────
+;
+; One OPEN yard, not corridors — the doc's "world itself is the puzzle" with
+; "density of weight-reactive terrain" named as the level-design KPI. Every
+; setup below is stated as a PROBLEM rather than a lock: any application of the
+; weight rules that reaches the goal counts.
+;
+; Each threshold is a MEASURED number, not an invented one. All of these came
+; off `tests/greybox_probe.gd`:
+;
+;   walking                      15.0 m/s      a walking jump covers  15.5 m
+;   charge on the flat           20.0 m/s      a charge-jump covers   21.2 m
+;   charge down a 15 degree ramp 26.0 m/s      the hero's mass is     10
+;   a hop-stomp is worth            7 momentum, reaching  1.25 m
+;   a stomp after a 12 m drop      140 momentum, reaching 10.00 m
+;
+; ─── THE EIGHT PROBLEMS ─────────────────────────────────────────────────────
+;
+;   1  charge down the ramp into RampWall      break_speed 22: flat charge
+;                                              does 20, off the ramp 26
+;   2  the 18 m gap to SouthIsland             a walking jump does 15.5,
+;                                              a charge-jump 21.2
+;   3  ram PlateCrate on to Plate, ride the    required_mass 14 against a hero
+;      lift, slam SealedLid from the tower     of 10; strike_momentum 120
+;   4  the see-saw and the 8-mass crate        carry_max_mass 10
+;   5  CrumbleSpan over the trench             break_mass 20: holds the hero
+;                                              at 10, not the giant at 40
+;   6  lure the giant through MassWall         break_mass 30, and he walks at
+;                                              3 m/s so no speed gate can work
+;   7  the rail off the ramp deck              the slope decides the speed
+;   8  pay the exit                            250 against 310 on the floor
+;
+; ─── TWO LAWS THAT SHAPED THE GEOMETRY ──────────────────────────────────────
+;
+; **There is no death, and ejection from an arena is banned.** So every hole in
+; this yard has a floor and a staircase out of it — the trench and the gap both.
+; Falling in costs you the climb, which is a live in-arena penalty, and never
+; travel time. The perimeter is walled for the same reason: there is nothing to
+; fall off, because falling off the world with no death is an infinite fall.
+;
+; **A gate must guard something optional, never the critical path.** The exit is
+; on the main ground. The charge-jump gates the ISLAND TREASURE, which is worth
+; 70 and is skippable — so a player who cannot clear 18 m is poorer, not stuck.
+
+[ext_resource type="PackedScene" uid="uid://b28hxoxpvc4cm" path="res://scenes/props/breakable_block.tscn" id="wall"]
+[ext_resource type="PackedScene" uid="uid://dd6ksosejaaos" path="res://scenes/props/crumbling_floor.tscn" id="crumb"]
+[ext_resource type="PackedScene" uid="uid://bgfe0aabl2p5s" path="res://scenes/props/see_saw.tscn" id="seesaw"]
+[ext_resource type="PackedScene" uid="uid://byhylpx60k578" path="res://scenes/props/pressure_plate.tscn" id="plate"]
+[ext_resource type="PackedScene" uid="uid://byff07mqdy2xa" path="res://scenes/props/moving_platform.tscn" id="lift"]
+[ext_resource type="PackedScene" uid="uid://d3j7q7fgmie67" path="res://scenes/enemies/heavy_enemy.tscn" id="giant"]
+[ext_resource type="PackedScene" uid="uid://fxaq75wjpd27" path="res://scenes/props/grind_rail.tscn" id="rail"]
+[ext_resource type="PackedScene" uid="uid://c2ocooorlwkcr" path="res://scenes/props/treasure.tscn" id="chest"]
+[ext_resource type="PackedScene" uid="uid://wahgaqtfmai3" path="res://scenes/props/level_exit.tscn" id="exit"]
+[ext_resource type="PackedScene" uid="uid://cl8stw417mlld" path="res://scenes/props/coin.tscn" id="coin"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
+sky_top_color = Color(0.3, 0.5, 0.76, 1)
+sky_horizon_color = Color(0.85, 0.83, 0.75, 1)
+ground_bottom_color = Color(0.23, 0.21, 0.19, 1)
+ground_horizon_color = Color(0.85, 0.83, 0.75, 1)
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMat")
+
+[sub_resource type="Environment" id="Env"]
+background_mode = 2
+sky = SubResource("Sky")
+ambient_light_source = 3
+ambient_light_energy = 0.42
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="MatGround"]
+albedo_color = Color(0.46, 0.46, 0.44, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatRamp"]
+albedo_color = Color(0.58, 0.5, 0.38, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatTower"]
+albedo_color = Color(0.4, 0.42, 0.5, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatVault"]
+albedo_color = Color(0.36, 0.33, 0.3, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatPit"]
+albedo_color = Color(0.3, 0.29, 0.28, 1)
+
+[sub_resource type="StandardMaterial3D" id="MatMarker"]
+albedo_color = Color(0.95, 0.82, 0.3, 1)
+
+[sub_resource type="BoxShape3D" id="Shape_crate"]
+size = Vector3(1.1, 1.1, 1.1)
+
+[sub_resource type="StandardMaterial3D" id="MatCrate"]
+albedo_color = Color(0.72, 0.42, 0.26, 1)
+
+[sub_resource type="BoxMesh" id="Mesh_crate"]
+material = SubResource("MatCrate")
+size = Vector3(1.1, 1.1, 1.1)
+
+; 30 m of rail dropping 4.5, so about 8.5 degrees — downhill enough that
+; coasting builds speed without the accelerator, which is what makes the rail
+; worth taking rather than a thing you hold a button on.
+;
+; Curve3D stores THREE Vector3s per point: in-handle, out-handle, then the
+; position, with the handles RELATIVE to it. Both handles at zero keeps the
+; segment straight, which is the only form a probe can check against a formula.
+[sub_resource type="Curve3D" id="Curve_rail"]
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -4.5, 30),
+"tilts": PackedFloat32Array(0, 0)
+}
+point_count = 2
+
+[node name="HeavyYard" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.86, 0.35, -0.37, 0, 0.73, 0.68, 0.51, -0.59, 0.63, 0, 40, 0)
+shadow_enabled = true
+
+; ───────────────────────────────────────────────────────── the ground, in three
+;
+; Authored as TOP heights, which is what the player stands on: a slab whose top
+; is y = 0 has `origin y = -size.y / 2`. Every surface in this file is written
+; that way and `tests/yard_probe.gd` raycasts each one against the number.
+
+[node name="GroundMain" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, -5)
+use_collision = true
+size = Vector3(120, 2, 80)
+material = SubResource("MatGround")
+
+; Across the trench. The giant lives here and so does the mass wall.
+[node name="GroundNorth" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, -82)
+use_collision = true
+size = Vector3(120, 2, 24)
+material = SubResource("MatGround")
+
+; Across the 18 m gap. Reachable by a charge-jump (21.2 m) and not by a walking
+; one (15.5 m), which is the whole of problem 2.
+[node name="SouthIsland" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 73)
+use_collision = true
+size = Vector3(60, 2, 40)
+material = SubResource("MatGround")
+
+; ──────────────────────────────────────────── the holes, and the ways out of them
+;
+; The trench is 25 m, deliberately WIDER than a charge-jump, so CrumbleSpan is
+; the only way across rather than a convenience.
+
+[node name="TrenchFloor" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7, -57.5)
+use_collision = true
+size = Vector3(120, 2, 25)
+material = SubResource("MatPit")
+
+[node name="GapFloor" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -7, 44)
+use_collision = true
+size = Vector3(60, 2, 18)
+material = SubResource("MatPit")
+
+; Seven steps of 0.8 m out of the trench, at its east end. Written tall so each
+; box rests on the trench floor rather than floating; only the TOP matters.
+[node name="TrenchStep1" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -4.8, -45.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="TrenchStep2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -5.6, -47.25)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="TrenchStep3" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -6.4, -48.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="TrenchStep4" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -7.2, -50.25)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="TrenchStep5" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -8, -51.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="TrenchStep6" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -8.8, -53.25)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="TrenchStep7" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, -9.6, -54.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+; The same seven steps out of the gap, so a missed charge-jump costs the climb
+; and nothing else.
+[node name="GapStep1" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -4.8, 35.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="GapStep2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -5.6, 37.25)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="GapStep3" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -6.4, 38.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="GapStep4" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -7.2, 40.25)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="GapStep5" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -8, 41.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="GapStep6" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -8.8, 43.25)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+[node name="GapStep7" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, -9.6, 44.75)
+use_collision = true
+size = Vector3(8, 8, 1.5)
+material = SubResource("MatPit")
+
+; ───────────────────────────────────────────────── problem 1: the ramp and the wall
+;
+; **The transform and the size are copied VERBATIM from the greybox's ramp**,
+; with only x changed. That is deliberate engineering cowardice: a hand-written
+; rotation has come out wrong every single time this project has authored one,
+; and this exact basis is the one `tests/greybox_probe.gd` has already measured
+; against tan(15 degrees). Re-deriving it would be re-rolling a dice this
+; project has lost four times.
+;
+; Godot serialises a Transform3D basis ROW by row, so those nine numbers are
+; rows and not the x/y/z axis columns. Read them as columns and you get a ramp
+; tilted the wrong way, which is invisible until you probe the surface normals.
+;
+; The top surface passes through y = 4 at z = -15 and rises toward -z, so it
+; meets the ground at z = 0 and reaches y = 8 at z = -30.
+[node name="Ramp" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.9659, -0.2588, 0, 0.2588, 0.9659, -20, 3.276, -15.194)
+use_collision = true
+size = Vector3(14, 1.5, 31)
+material = SubResource("MatRamp")
+
+[node name="RampDeck" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 7.25, -36)
+use_collision = true
+size = Vector3(14, 1.5, 12)
+material = SubResource("MatRamp")
+
+; break_speed 22 is the whole of this problem: a charge on the flat reaches 20
+; and is SHORT, a charge down the ramp reaches 26 and goes through. If this ever
+; becomes breakable without the ramp, the setup has stopped asking its question.
+;
+; `strike_momentum` -1 turns the slam route off, so the wall cannot be opened
+; from above either. Speed is the only answer.
+[node name="RampWall" parent="." instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1, 4.5)
+break_speed = 22.0
+strike_momentum = -1.0
+coin_count = 0
+
+; The vault behind it, ROOFED on purpose. A 2 m block is exactly a standing
+; jump's height (jump_speed 9 against gravity 20 gives 2.0 m), so an unroofed
+; wall is a wall you hop over and the speed gate measures nothing.
+[node name="RampVaultW" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -22, 1.3, 9)
+use_collision = true
+size = Vector3(2, 2.6, 8)
+material = SubResource("MatVault")
+
+[node name="RampVaultE" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1.3, 9)
+use_collision = true
+size = Vector3(2, 2.6, 8)
+material = SubResource("MatVault")
+
+[node name="RampVaultN" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 1.3, 12.5)
+use_collision = true
+size = Vector3(6, 2.6, 1)
+material = SubResource("MatVault")
+
+[node name="RampVaultRoof" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 2.75, 9)
+use_collision = true
+size = Vector3(6, 0.3, 8)
+material = SubResource("MatVault")
+
+[node name="TreasureRamp" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0.6, 9)
+worth = 60
+
+; ────────────────────────────────────────────────────── problem 7: the grind rail
+;
+; Head placed 0.1 m below the deck top and inside its z range, which is the rail
+; yard's measured pattern for "the deck edge is close enough to catch a rail".
+[node name="Rail" parent="." instance=ExtResource("rail")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 7.9, -38)
+curve = SubResource("Curve_rail")
+
+[node name="RailPost" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 8.6, -39.4)
+size = Vector3(0.5, 1.2, 0.5)
+material = SubResource("MatMarker")
+
+; ───────────────────────────── problem 3: ram, ride, slam — a three-step problem
+;
+; The only setup here that chains three verbs, and the one that proves the weight
+; layer is a vocabulary rather than a pile of props:
+;
+;   PlateCrate weighs 16, which is OVER carry_max_mass (10), so it cannot be
+;   picked up — it has to be RAMMED (weight rule 2). The plate wants 14, which
+;   is over the hero's own 10, so standing on it is not enough either (rule 1).
+;   It latches, the lift rises to the tower top, and from 14 m up a slam is
+;   worth 140 against SealedLid's 120.
+
+[node name="Tower" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 7, -10)
+use_collision = true
+size = Vector3(8, 14, 8)
+material = SubResource("MatTower")
+
+; Bridges the lift to the tower's east face, because a lift that arrives two
+; metres short of the thing it serves is a lip the player falls off.
+[node name="TowerLanding" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29.5, 13.85, -10)
+use_collision = true
+size = Vector3(3, 0.3, 6)
+material = SubResource("MatTower")
+
+[node name="PlateLift" parent="." instance=ExtResource("lift")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 0.3, -10)
+travel = Vector3(0, 13.7, 0)
+
+[node name="Plate" parent="." instance=ExtResource("plate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 0, 4)
+required_mass = 14.0
+stays_pressed = true
+activates = NodePath("../PlateLift")
+
+; The answer to the plate, parked a shove to the EAST of it so the solution is
+; visible from the problem without being on top of it.
+[node name="PlateCrate" type="RigidBody3D" parent="." groups=["carryable", "heavy"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 40, 0.8, 4)
+collision_layer = 64
+collision_mask = 67
+mass = 16.0
+
+[node name="Shape" type="CollisionShape3D" parent="PlateCrate"]
+shape = SubResource("Shape_crate")
+
+[node name="Mesh" type="MeshInstance3D" parent="PlateCrate"]
+mesh = SubResource("Mesh_crate")
+
+; A box with a breakable LID rather than a breakable door, so the slam is the
+; only way in and the reward is visible through the open top once it goes.
+[node name="VaultW" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.25, 2)
+use_collision = true
+size = Vector3(1, 2.5, 4)
+material = SubResource("MatVault")
+
+[node name="VaultE" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25, 1.25, 2)
+use_collision = true
+size = Vector3(1, 2.5, 4)
+material = SubResource("MatVault")
+
+[node name="VaultN" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.5, 1.25, 3.5)
+use_collision = true
+size = Vector3(4, 2.5, 1)
+material = SubResource("MatVault")
+
+[node name="VaultS" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.5, 1.25, 0.5)
+use_collision = true
+size = Vector3(4, 2.5, 1)
+material = SubResource("MatVault")
+
+; break_speed 999 and break_mass -1 shut out every other route: you cannot
+; arrive fast enough and nothing is heavy enough. 120 needs a real drop — a
+; hop-stomp beside it brings 7.
+[node name="SealedLid" parent="." instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.5, 1.5, 2)
+break_speed = 999.0
+break_mass = -1.0
+strike_momentum = 120.0
+coin_count = 0
+
+[node name="TreasureVault" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.5, 0.3, 2)
+worth = 50
+
+; ───────────────────────────────────────── problem 4: the see-saw and the crate
+;
+; The crate is LIGHTER than the hero (8 against 10) and still wins from the
+; middle, because `WeightSensor.moment` is mass times distance from the pivot.
+; Leverage is the one thing about a see-saw a player can work out unaided.
+[node name="SeeSaw" parent="." instance=ExtResource("seesaw")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1.4, 12)
+
+; Decorative, and `use_collision` is deliberately absent: a solid fulcrum under
+; a kinematically-driven plank is just something for the physics to argue with.
+[node name="SeeSawFulcrum" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 0.6, 12)
+size = Vector3(1.2, 1.2, 1.2)
+material = SubResource("MatTower")
+
+[node name="SeeSawCrate" type="RigidBody3D" parent="." groups=["carryable", "heavy"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 2.2, 15.6)
+collision_layer = 64
+collision_mask = 67
+mass = 8.0
+
+[node name="Shape" type="CollisionShape3D" parent="SeeSawCrate"]
+shape = SubResource("Shape_crate")
+
+[node name="Mesh" type="MeshInstance3D" parent="SeeSawCrate"]
+mesh = SubResource("Mesh_crate")
+
+; ──────────────────────────────── problem 5: the span that holds you, not him
+;
+; The doc's own example of rule 1 as a FILTER: "floors that hold the player but
+; not the giant chasing them." `break_mass` 20 sits between the hero's 10 and
+; the giant's 40, so the number alone decides which body is allowed across.
+; Five 5 m slabs, tops flush with the ground at y = 0.
+
+[node name="SpanA" parent="." instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, -0.5, -47.5)
+break_mass = 20.0
+
+[node name="SpanB" parent="." instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, -0.5, -52.5)
+break_mass = 20.0
+
+[node name="SpanC" parent="." instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, -0.5, -57.5)
+break_mass = 20.0
+
+[node name="SpanD" parent="." instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, -0.5, -62.5)
+break_mass = 20.0
+
+[node name="SpanE" parent="." instance=ExtResource("crumb")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, -0.5, -67.5)
+break_mass = 20.0
+
+; ────────────────────────────────── problem 6: the giant is the wall-breaker
+;
+; `break_mass` 30 against his 40, with `break_speed` 999 and the slam route off.
+; **He walks at 3 m/s and can therefore never clear a speed gate**, which is
+; exactly why a wall meant for a giant has to ask about his weight instead —
+; and it makes him a tool you aim rather than an obstacle you fight.
+
+[node name="Giant" parent="." instance=ExtResource("giant")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, -78)
+
+[node name="MassWall" parent="." instance=ExtResource("wall")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1, -84)
+break_speed = 999.0
+break_mass = 30.0
+strike_momentum = -1.0
+coin_count = 0
+
+[node name="MassVaultW" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 1.3, -88)
+use_collision = true
+size = Vector3(2, 2.6, 8)
+material = SubResource("MatVault")
+
+[node name="MassVaultE" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38, 1.3, -88)
+use_collision = true
+size = Vector3(2, 2.6, 8)
+material = SubResource("MatVault")
+
+[node name="MassVaultN" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 1.3, -91.5)
+use_collision = true
+size = Vector3(6, 2.6, 1)
+material = SubResource("MatVault")
+
+[node name="MassVaultRoof" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 2.75, -88)
+use_collision = true
+size = Vector3(6, 0.3, 8)
+material = SubResource("MatVault")
+
+[node name="TreasureGiant" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0.6, -88)
+worth = 40
+
+; ─────────────────────────── problem 2: the island, and problem 8: the exit
+;
+; The island treasure is worth 70 and is OPTIONAL, which is the rule about
+; gates: a charge-jump on the critical path would strand anyone who cannot do
+; it. The exit sits on the main ground where everyone can reach it.
+
+[node name="TreasureIsland" parent="." instance=ExtResource("chest")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 70)
+worth = 70
+
+; 250 against 310 on the floor, so about four fifths of everything. The point of
+; pricing it tight is that the NEXT coin is worth something; price it low and
+; nothing you collect after the threshold matters at all.
+[node name="Exit" parent="." instance=ExtResource("exit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 20)
+price = 250
+
+; ────────────────────────────────────────────────────── the walls of the world
+;
+; Not decoration. With no death, walking off the edge is an infinite fall, and
+; the doc bans ejection outright — so the yard is closed and every hole has a
+; staircase. The only penalty anywhere here is the climb back.
+
+[node name="WallW" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -61, 2, -30)
+use_collision = true
+size = Vector3(2, 8, 130)
+material = SubResource("MatVault")
+
+[node name="WallE" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 61, 2, -30)
+use_collision = true
+size = Vector3(2, 8, 130)
+material = SubResource("MatVault")
+
+[node name="WallN" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, -95)
+use_collision = true
+size = Vector3(124, 8, 2)
+material = SubResource("MatVault")
+
+[node name="IslandWallW" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 2, 73)
+use_collision = true
+size = Vector3(2, 8, 42)
+material = SubResource("MatVault")
+
+[node name="IslandWallE" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 31, 2, 73)
+use_collision = true
+size = Vector3(2, 8, 42)
+material = SubResource("MatVault")
+
+[node name="IslandWallS" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 94)
+use_collision = true
+size = Vector3(64, 8, 2)
+material = SubResource("MatVault")
+
+; The main ground's south edge, so you cannot walk into the gap by accident —
+; only jump it. A low kerb would stop a charge dead, so these are at the sides
+; of the run-up lane rather than across it.
+[node name="GapKerbW" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 0.4, 34.5)
+use_collision = true
+size = Vector3(36, 0.8, 1)
+material = SubResource("MatVault")
+
+[node name="GapKerbE" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 0.4, 34.5)
+use_collision = true
+size = Vector3(36, 0.8, 1)
+material = SubResource("MatVault")
+
+; ────────────────────────────────────────────────────────────────────── money
+;
+; Eighteen coins at 5 each is 90 on the floor, which with the four chests makes
+; 310 against a 250 exit.
+
+[node name="CoinA" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.8, 8)
+value = 5
+
+[node name="CoinB" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.8, 8)
+value = 5
+
+[node name="CoinC" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 8)
+value = 5
+
+[node name="CoinD" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.8, 8)
+value = 5
+
+[node name="CoinE" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.8, 8)
+value = 5
+
+[node name="CoinF" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 8.6, -34)
+value = 5
+
+[node name="CoinG" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -17, 8.6, -34)
+value = 5
+
+[node name="CoinH" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -23, 8.6, -34)
+value = 5
+
+[node name="CoinI" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 2.6, -12)
+value = 5
+
+[node name="CoinJ" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 1.4, -8)
+value = 5
+
+[node name="CoinK" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 34, 0.8, 10)
+value = 5
+
+[node name="CoinL" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 0.8, 10)
+value = 5
+
+[node name="CoinM" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 0.8, 20)
+value = 5
+
+[node name="CoinN" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 0.8, 24)
+value = 5
+
+[node name="CoinO" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0.8, -74)
+value = 5
+
+[node name="CoinP" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 0.8, -74)
+value = 5
+
+[node name="CoinQ" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.8, 62)
+value = 5
+
+[node name="CoinR" parent="." instance=ExtResource("coin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.8, 62)
+value = 5

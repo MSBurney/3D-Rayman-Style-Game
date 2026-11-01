@@ -33,7 +33,7 @@ func _ready() -> void:
 	_rail_meshes(level)
 
 	print("  -- running off the deck on to each rail, for real")
-	var player := main.get_node("Player") as Player
+	var player := main.get_node("Player") as HeavyPlayer
 	if player != null:
 		for pair in [["RailDownhill", -12.0], ["RailFlat", 0.0],
 				["RailUphill", 12.0], ["RailCurved", 24.0]]:
@@ -137,15 +137,15 @@ func _rails(level: Node3D) -> void:
 ## Velocity is set directly rather than pressing move_forward, because which way
 ## "forward" is depends on where the camera happens to be looking, and a probe
 ## should not be able to fail for that reason.
-func _run_on(level: Node3D, player: Player, rail_name: String, x: float) -> void:
+func _run_on(level: Node3D, player: HeavyPlayer, rail_name: String, x: float) -> void:
 	player.global_position = Vector3(x, 8.2, -44.0)
 	player.velocity = Vector3(0, 0, 12)
 	player._grind_lock = 0.0
-	player._set_state(Player.State.GROUND)
+	player._set_state(HeavyPlayer.State.WALK)
 	var caught := ""
 	for i in 40:
 		await get_tree().physics_frame
-		if player.state == Player.State.GRIND and player._rail != null:
+		if player.state == HeavyPlayer.State.GRIND and player._rail != null:
 			caught = player._rail.name
 			break
 	if caught != rail_name:
@@ -156,7 +156,7 @@ func _run_on(level: Node3D, player: Player, rail_name: String, x: float) -> void
 	var entry: float = absf(player._rail_speed)
 	for i in 120:
 		await get_tree().physics_frame
-		if player.state != Player.State.GRIND:
+		if player.state != HeavyPlayer.State.GRIND:
 			break
 	var ended: float = absf(player._rail_speed)
 	print("  %-26s caught it at %5.1f m/s, left at %5.1f m/s (%s)"
