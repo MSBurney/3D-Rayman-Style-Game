@@ -2002,8 +2002,14 @@ func _run() -> void:
 		Events.slam_landed.emit(warden.global_position, 1.0)
 		await _step(3)
 	Events.boss_refused.disconnect(on_boss_refused)
-	_check("a pound in the wrong phase is refused, with a hint",
-		warden_hints.size() == 2 and not warden_hints.has(""),
+	# Asserting the hints DIFFER, not merely that two arrived. The first version
+	# of this check asked only for two non-empty strings, and passed while both
+	# phases returned the same line — which in CRACKED was advice to go and do
+	# something the player had already done. A hint that names the wrong verb is
+	# worse than no hint, so the check has to be able to see that.
+	_check("a pound in the wrong phase is refused, with a hint per phase",
+		warden_hints.size() == 2 and not warden_hints.has("")
+			and warden_hints[0] != warden_hints[1],
 		"%d hints: %s" % [warden_hints.size(), str(warden_hints)])
 
 	# --- only a hard pound, and only on a stunned boss. Three outcomes from one

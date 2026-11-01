@@ -867,6 +867,18 @@ beside `_on_slam_landed`, which is the one verb that ever cracked it open. The s
 hint check is now a two-phase one asking the slam, since the law it was really protecting — **a
 refusal has to say what would work** — is untouched.
 
+#### The bug the rename introduced, and the weak check that let it through
+
+Retiring the spin meant retiring its per-phase hint, and `_on_slam_landed`'s refusal inherited **one
+hardcoded string for every wrong phase** — so a player in CRACKED was told to *"crash it into a
+pillar first"*, which is not merely unhelpful but wrong: the armour is already open and what they
+should be doing is racing for the seed. `_wrong_phase_hint()` forks on phase again.
+
+**The check passed anyway**, because it asked only that two non-empty strings arrived. A refusal
+naming the WRONG verb satisfies that, and a hint that names the wrong verb is worse than no hint.
+The check now asserts the two differ. Same lesson as the giant's three bugs: *the probe tested the
+rule and not the interaction.*
+
 #### Every refusal had to be built, because most of these props had none
 
 The switch, the chest and both tills previously just *worked*, so none of them had a "not hard

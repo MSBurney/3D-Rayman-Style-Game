@@ -281,7 +281,7 @@ func _on_slam_landed(at: Vector3, force: float) -> void:
 	if at.distance_to(global_position) > crack_radius:
 		return
 	if phase != Phase.STUNNED:
-		Events.boss_refused.emit(self, "Armour holds — crash it into a pillar first")
+		Events.boss_refused.emit(self, _wrong_phase_hint())
 		_clang()
 		return
 	if force < crack_power:
@@ -292,6 +292,23 @@ func _on_slam_landed(at: Vector3, force: float) -> void:
 		_clang()
 		return
 	_set_phase(Phase.CRACKED)
+
+
+## What to do INSTEAD, and it has to differ by phase.
+##
+## The spin used to carry a hint per phase, and when the spin was retired this
+## refusal inherited a single hardcoded string — which told a player in CRACKED
+## to "crash it into a pillar", advice that is not merely unhelpful but wrong:
+## the armour is already open and what they should be doing is racing for the
+## seed. **Treat the hints as mechanics, not flavour.** A phase whose refusal
+## does not name the right verb is a phase the player has to brute-force, which
+## is the exact failure this fight exists to avoid.
+func _wrong_phase_hint() -> String:
+	match phase:
+		Phase.CRACKED:
+			return "No time for that — get the seed to the socket"
+		_:
+			return "Armour holds — dodge, and let it crash into a pillar"
 
 
 func _on_hurtbox_entered(body: Node3D) -> void:
