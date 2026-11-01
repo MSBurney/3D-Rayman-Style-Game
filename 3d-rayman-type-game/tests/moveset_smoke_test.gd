@@ -1508,7 +1508,7 @@ func _tills() -> void:
 	await _step(5)
 
 	# --- the machine: charges, and puts a real item on the floor. It dispenses an
-	# ordinary Coin set to garlic, so the healing path is the existing one.
+	# ordinary Coin set to FOOD, so the pickup path is the existing one.
 	var vendor := VEND.instantiate() as VendingMachine
 	level.add_child(vendor)
 	vendor.global_position = Vector3(400, 0, 20)
@@ -1516,14 +1516,14 @@ func _tills() -> void:
 	vendor.stock = 1
 	await _step(3)
 	_set_money(game, 50)
-	var garlic_before := _garlic_count()
+	var food_before := _food_count()
 	_place(Vector3(400, 0.1, 18.0))
 	await _stomp_here()
 	await _step(6)
 	_check("a vending machine charges you and dispenses",
-		game.money == 40 and _garlic_count() == garlic_before + 1 and vendor.stock == 0,
-		"money 50 -> %d, garlic %d -> %d, stock left %d"
-			% [game.money, garlic_before, _garlic_count(), vendor.stock])
+		game.money == 40 and _food_count() == food_before + 1 and vendor.stock == 0,
+		"money 50 -> %d, food %d -> %d, stock left %d"
+			% [game.money, food_before, _food_count(), vendor.stock])
 	_release_all()
 	await _step(10)
 
@@ -1533,7 +1533,7 @@ func _tills() -> void:
 	var on_sold_out := func(_what: Node3D, short: int) -> void: sold_out_refusals.append(short)
 	Events.purchase_refused.connect(on_sold_out)
 	var money_before_empty: int = game.money
-	var garlic_before_empty := _garlic_count()
+	var food_before_empty := _food_count()
 	# Same as the gate: clear the 0.5s lock the purchase above left behind.
 	vendor._locked = 0.0
 	_place(Vector3(400, 0.1, 18.0))
@@ -1541,10 +1541,10 @@ func _tills() -> void:
 	await _step(6)
 	_check("a machine with no stock refuses and charges nothing",
 		sold_out_refusals.size() == 1 and game.money == money_before_empty
-			and _garlic_count() == garlic_before_empty,
+			and _food_count() == food_before_empty,
 		"refusals %s, money %d -> %d, garlic %d -> %d"
 			% [str(sold_out_refusals), money_before_empty, game.money,
-				garlic_before_empty, _garlic_count()])
+				food_before_empty, _food_count()])
 	Events.purchase_refused.disconnect(on_sold_out)
 	vendor.queue_free()
 	_release_all()
@@ -1835,7 +1835,10 @@ func _the_boss() -> void:
 	Events.boss_refused.connect(on_boss_refused)
 	for p in [BossWarden.Phase.ARMOURED, BossWarden.Phase.CRACKED]:
 		warden._set_phase(p)
-		Events.slam_landed.emit(warden.global_position, 1.0)
+		# A HARD pound, above `crack_power`, so this tests that the PHASE refuses it
+		# rather than the force being too small. At 1.0 the check would also have
+		# passed with the phase gate broken entirely.
+		Events.slam_landed.emit(warden.global_position, warden.crack_power * 1.2)
 		await _step(3)
 	Events.boss_refused.disconnect(on_boss_refused)
 	# Asserting the hints DIFFER, not merely that two arrived. The first version
@@ -1851,14 +1854,18 @@ func _the_boss() -> void:
 	# --- only a hard pound, and only on a stunned boss. Three outcomes from one
 	# move, which is what makes the pound a skill here rather than a button.
 	warden._set_phase(BossWarden.Phase.ARMOURED)
-	Events.slam_landed.emit(warden.global_position, 1.0)
+	Events.slam_landed.emit(warden.global_position, warden.crack_power * 1.2)
 	await _step(3)
 	var armour_held := warden.phase == BossWarden.Phase.ARMOURED
 	warden._set_phase(BossWarden.Phase.STUNNED)
 	Events.slam_landed.emit(warden.global_position, warden.crack_power * 0.5)
 	await _step(3)
 	var weak_refused := warden.phase == BossWarden.Phase.STUNNED
-	Events.slam_landed.emit(warden.global_position, 1.0)
+	# RELATIVE to `crack_power`, never a literal. This was 1.0, which cracked the
+	# boss while the default was 0.3 and silently stopped doing so when the modal
+	# controller pushed that default to 3.0 — a check reporting "the hard pound
+	# did not work" when what had actually changed was the scale underneath it.
+	Events.slam_landed.emit(warden.global_position, warden.crack_power * 1.2)
 	await _step(4)
 	_check("only a hard pound on a stunned boss cracks it",
 		armour_held and weak_refused and warden.phase == BossWarden.Phase.CRACKED,
@@ -1973,10 +1980,10 @@ func _set_money(game: Node, amount: int) -> void:
 ## How many garlic pickups are lying around. Garlic rather than coins because a
 ## vending machine sells healing, and because the suite spills real coins all
 ## over the place and they would drown the signal.
-func _garlic_count() -> int:
+func _food_count() -> int:
 	var found := 0
 	for node in get_tree().get_nodes_in_group(&"coin"):
 		var coin := node as Coin
-		if coin != null and not coin.is_queued_for_deletion() and coin.kind == Coin.Kind.GARLIC:
+		if coin != null and not coin.is_queued_for_deletion() and coin.kind == Coin.Kind.FOOD:
 			found += 1
 	return found

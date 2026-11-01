@@ -10,9 +10,9 @@ extends StaticBody3D
 ## whether what it sells is worth more to you than the exit is, and a decision
 ## you make repeatedly is worth more than a decision you make once.
 ##
-## It dispenses an ordinary `Coin` set to `Kind.GARLIC`, so the healing path is
-## the one that already exists — `coin.gd` heals on pickup for garlic — and this
-## script contains no healing code whatsoever. Point `item_scene` at the coin
+## It dispenses an ordinary `Coin` set to `Kind.FOOD`, so the pickup path is the
+## one that already exists — `coin.gd` transforms you on pickup for food — and
+## this script contains no item code whatsoever. Point `item_scene` at the coin
 ## scene and it sells money instead, which is a bad idea for obvious reasons but
 ## a useful thing to be able to try.
 ##
@@ -23,21 +23,21 @@ extends StaticBody3D
 @export var price: int = 10
 ## How many it has. -1 means an endless supply.
 ##
-## A finite stock turns the machine into a resource of its own: five garlic in
-## the level is a thing you ration, where endless garlic at 10 is just a slow
-## way of converting money into health.
+## A finite stock turns the machine into a resource of its own: five pieces of
+## food in the level is a thing you ration, where an endless supply at 10 is
+## just a slow way of converting money into transformations.
 @export var stock: int = 5
 ## Ignores further hits for this long, so one spin buys one item and a chain of
 ## three spins does not empty the machine.
 @export var retrigger_delay: float = 0.5
 
 @export_group("What it sells")
-## The coin scene. Dispensed as garlic unless `sells_money` is on.
+## The coin scene. Dispensed as food unless `sells_money` is on.
 @export var item_scene: PackedScene
-## Off: dispenses garlic, which heals. On: dispenses actual money, which only
+## Off: dispenses food, which transforms you. On: dispenses money, which only
 ## makes sense for testing.
 @export var sells_money: bool = false
-## Heal amount for garlic, or value for money.
+## Value for money. Unused for food, which gives a form rather than an amount.
 @export var item_value: int = 1
 ## Momentum a strike must bring before the machine takes it as a request. 12 is
 ## "any stomp beside it" — see strike_switch.gd for the measured scale.
@@ -138,7 +138,7 @@ func _dispense() -> void:
 	var item := item_scene.instantiate() as Coin
 	if item == null:
 		return
-	item.kind = Coin.Kind.COIN if sells_money else Coin.Kind.GARLIC
+	item.kind = Coin.Kind.COIN if sells_money else Coin.Kind.FOOD
 	item.value = item_value
 	# Parented to the level rather than to the machine, so it does not inherit
 	# the machine's transform and is not freed with it.
@@ -149,7 +149,7 @@ func _dispense() -> void:
 	# position early.
 	item.global_position = global_position + dispense_offset
 	# NOT marked as spilled, which means CoinThief leaves it alone. An enemy
-	# stealing the garlic out of the machine you just paid for would be a bridge
+	# stealing the food out of the machine you just paid for would be a bridge
 	# too far.
 
 

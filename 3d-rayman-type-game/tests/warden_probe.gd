@@ -31,6 +31,7 @@ func _ready() -> void:
 
 	print("\n==== WARDEN PROBE ====")
 	_surfaces()
+	await _softlock()
 	await _pound_worth()
 	await _fight()
 	print("---- %d wrong ----" % failures)
@@ -46,6 +47,20 @@ func _note(label: String, ok: bool, detail: String) -> void:
 func _compare(label: String, got: float, expected: float, tolerance: float) -> void:
 	_note(label, absf(got - expected) <= tolerance,
 		"expected %.2f got %.2f" % [expected, got])
+
+
+## The surface height at x,z, or NAN. Started just ABOVE the surface being
+## asked about and given a short reach, because a ray cast from the sky reports
+## whatever is topmost — so any deck with another deck above it reads back the
+## wrong one.
+func _ray_down(x: float, z: float, from_y: float) -> float:
+	var space := get_viewport().world_3d.direct_space_state
+	var from := Vector3(x, from_y, z)
+	var hit := space.intersect_ray(
+		PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 6.0))
+	if hit.is_empty():
+		return NAN
+	return hit["position"].y
 
 
 func _floor_at(label: String, x: float, z: float, expected: float) -> void:
@@ -77,6 +92,32 @@ func _surfaces() -> void:
 
 ## What is a drop from the deck actually worth? slam_power() is fall/12.
 func _pound_worth() -> void:
+	# ── the ramps that replaced the stairs ──
+	#
+	# Checked against the line the scene comment states — y = 4 + 0.4 * (z + 30)
+	# — at three separate z, because two points can agree by accident and three
+	# cannot. A hand-authored rotation has come out wrong every single time this
+	# project has written one, and a ramp tilted the wrong way looks completely
+	# fine until something measures the surface.
+	print("  -- the ramps up to the pound decks")
+	for x: float in [-30.0, 26.28]:
+		for z: float in [-38.0, -30.0, -22.0]:
+			_floor_at("ramp at x %.0f, z %.0f" % [x, z], x, z,
+				4.0 + 0.4 * (z + 30.0))
+
+	# The ANGLE, which is the number that decides whether the ramp is usable at
+	# all: over about 27 degrees the slope pull beats `deceleration` and you
+	# slide back down standing still; under about 7 momentum stops building.
+	var ramp_low := _ray_down(-30.0, -38.0, 3.0)
+	var ramp_high := _ray_down(-30.0, -22.0, 10.0)
+	if is_nan(ramp_low) or is_nan(ramp_high):
+		_note("the ramp is climbable, not a slide", false, "could not measure it")
+	else:
+		var angle := rad_to_deg(atan((ramp_high - ramp_low) / 16.0))
+		_note("the ramp is climbable, not a slide",
+			angle < 27.0 and angle > 7.0,
+			"%.1f degrees: under 27 where you would slide, over 7 where momentum stops building" % angle)
+
 	print("  -- what the deck is worth")
 	player.global_position = Vector3(-30, 8.4, 6)
 	player.velocity = Vector3.ZERO
@@ -112,6 +153,48 @@ func _pound_worth() -> void:
 	_note("...but a charge off the deck cracks it",
 		charging >= boss.crack_power,
 		"%.2f against crack_power %.2f" % [charging, boss.crack_power])
+
+
+## **A regression test for a reported softlock, and the reason it is worth one.**
+##
+## The boss ends a charge flush against a wall that is not a pillar, winds up
+## again, and `_aim_at_player()` points straight back INTO the surface it is
+## already touching — so it charges into the same wall for ever, from zero
+## distance, never moving. Reported from play as "it gets stuck and constantly
+## loops its charging state, but never moves and I can't kill it".
+##
+## And you cannot kill it, correctly: this boss is beaten by taking the seed,
+## not by damage. But wedged like that it can never be lured into a pillar
+## either, so phase one becomes unwinnable — a softlock in a fight whose entire
+## design is "no death, no timer". `_bounce_off()` is the fix.
+func _softlock() -> void:
+	print("  -- a charge into something that is NOT a pillar")
+	boss._set_phase(BossWarden.Phase.ARMOURED)
+	# Pressed against the west outer wall at x = -44.5, with the player placed
+	# BEYOND it so the aim points into the wall every single cycle. That is the
+	# exact geometry that pinned it.
+	boss.global_position = Vector3(-42.0, 1.0, 10.0)
+	boss.velocity = Vector3.ZERO
+	player.global_position = Vector3(-70.0, 1.0, 10.0)
+	player.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	var from := boss.global_position
+
+	# Long enough for several wind-up-charge-crash cycles at the defaults.
+	for i in 420:
+		await get_tree().physics_frame
+	var moved := boss.global_position.distance_to(from)
+	_note("it backs off instead of pinning itself", moved > 3.0,
+		"it travelled %.1f m in about 7 s of charging at a wall" % moved)
+	_note("...and it is still in a phase that can be lured",
+		boss.phase == BossWarden.Phase.ARMOURED,
+		"phase=%s" % BossWarden.Phase.keys()[boss.phase])
+
+	# It must NOT have stunned itself on the outer wall: only pillars do that,
+	# or the boss does phase one for the player.
+	_note("the outer wall still does not stun it",
+		boss.phase != BossWarden.Phase.STUNNED,
+		"phase=%s" % BossWarden.Phase.keys()[boss.phase])
 
 
 ## Drives the whole fight: armoured, stunned, cracked, beaten.

@@ -66,6 +66,26 @@ Two guardrails on this system:
 | Slam | Any airborne state | Aimed downward impact. Attack, breaker, pressure input, see-saw launcher — and the brake: kills horizontal momentum by delivering it into the ground | Force scales with drop height and carried speed — braking hard can break your own footing. The signature verb |
 | Crash-stop / slide | Charge exit | Ending a charge: hit something, slide out, or cancel into slam | Stopping is itself a mechanic with a cost |
 | Boost | Charge or Air | Discrete impulse in the stick direction — the steering vocabulary at speed; course-corrects a committed trajectory | Redirects by adding momentum, never rewriting it — correcting makes you faster and more committed; limited by a cooldown |
+| Grind | Grind | Riding a rail: no steering, no gravity, the rail's slope sets your speed and `attack` accelerates | A slope you cannot steer off — the ramp system with the steering taken away. Heavier holds speed better and takes longer to get going |
+
+**Amendment, 2026-11-01 — the grind is KEPT, and its use is not yet decided.**
+This document did not contain a grind verb; rail grinding was built as an
+experiment before this doc existed and has been carried forward by an explicit
+decision rather than by the doc. The standing rules say *"a proposal that
+violates one needs this document amended first, not an exception granted
+quietly"*, so this is that amendment rather than a quiet exception.
+
+What is settled: the mechanic stays. What is **open**: how a world uses it. It
+is a traversal verb with no puzzle role yet, and the doc's own position on
+traversal is that momentum should live in the LEVEL rather than in an ability
+the player can summon anywhere — a rail satisfies that (it is content you place,
+like a ramp), which is the argument for it fitting at all. It also sits oddly
+beside *"the terrain must talk back"*, because a rail is the one surface that
+asks nothing of the player once they are on it.
+
+Treat it as provisional on those grounds: not a pillar, not scheduled for
+removal, and **not yet a thing any room is designed around.** It is implemented
+on the modal controller and covered by `tests/rail_yard` and the smoke suite.
 
 Build priority: **the slam is this game's A-press** — the most-used, most-satisfying verb and the bridge between modes (charge → slam converts horizontal speed into aimed impact). The controller is tuned around the fall feeling incredible before anything else.
 

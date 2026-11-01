@@ -1,27 +1,57 @@
 class_name Coin
 extends Area3D
 
-## A coin, or a clove of garlic.
+## A coin, or a piece of food.
 ##
 ## Money is the point of a Wario game, so the yellow one is currency: it adds to
-## the running total that a level exit charges you. The red one is garlic, which
-## is what Wario eats to recover, so it heals instead.
+## the running total that a level exit charges you.
+##
+## **The red one was GARLIC and it healed you. Healing is gone.** It only ever
+## existed because the no-death question was open; the design doc answers it now
+## — there is no health to restore, so a heal has nothing to do and garlic had
+## become a pickup that silently paid nothing.
+##
+## What it is instead is the first piece of the doc's **food-attack system**:
+## eating it TRANSFORMS you. That reuses `transform_named()`, which already
+## exists for FLAMING and PUFFY, so this needs no new systems — and it puts the
+## pickup on the road the doc already lays out rather than inventing a parallel
+## power-up idea.
+##
+## Note the level-design rule that comes with it, which is not optional:
+## **put a piece of food in front of the thing its transformation is FOR.** A
+## transformation is a penalty as well as a key — you cannot steer while alight
+## — so food with nothing to use it on is purely an inconvenience, which is the
+## exact failure that earned Wario Land its criticism.
+##
+## The fiction is still open: `FOOD` is what the mechanic does, and whether it
+## stays garlic or becomes something else is a separate decision.
 ##
 ## One scene for both, tinted from `kind`, so there is no second scene to keep in
 ## sync. Was called a "lum" until 2026-10-02 — a Rayman fossil.
 
-enum Kind { COIN, GARLIC }
+enum Kind { COIN, FOOD }
 
 @export var kind: Kind = Kind.COIN
+## Money for a COIN. For FOOD it is unused, because what food gives you is a
+## form rather than an amount.
 @export var value: int = 1
+## Which transformation a FOOD pickup grants, asked for BY NAME.
+##
+## By name and never by enum value, for the reason `transformer.gd` records: the
+## deprecated controller's `FLAMING` is a different integer from the modal
+## one's, and an int handed between two enums is a bug waiting for either to
+## gain a member.
+@export var grants: StringName = &"FLAMING"
+## How long the form lasts. Negative uses the controller's own default for it.
+@export var grants_seconds: float = -1.0
 @export var spin_speed: float = 2.0
 @export var bob_height: float = 0.16
 @export var bob_speed: float = 2.4
-## Yellow is money, red is garlic (a heal).
+## Yellow is money, red is food.
 @export var coin_colour: Color = Color(1.0, 0.88, 0.32)
-@export var garlic_colour: Color = Color(1.0, 0.36, 0.42)
+@export var food_colour: Color = Color(1.0, 0.36, 0.42)
 @export var coin_sfx: AudioStream
-@export var garlic_sfx: AudioStream
+@export var food_sfx: AudioStream
 
 @export_group("Spilled")
 ## Spilled coins cannot be picked up for this long.
@@ -64,7 +94,7 @@ func _ready() -> void:
 
 
 func _apply_tint() -> void:
-	var colour := garlic_colour if kind == Kind.GARLIC else coin_colour
+	var colour := food_colour if kind == Kind.FOOD else coin_colour
 
 	# Duplicated from the scene's own material rather than built with
 	# `StandardMaterial3D.new()`, for exactly the reason spelled out in
@@ -150,13 +180,12 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	_taken = true
 	match kind:
-		Kind.GARLIC:
-			# **Garlic is inert against a controller with no health**, which is the
-			# honest state of it rather than an oversight: the doc replaces health
-			# with food that scatters when you are hit, and that system does not
-			# exist yet. Until it does, a garlic is a coin that pays nothing.
-			if player.has_method(&"heal"):
-				player.call(&"heal", value)
+		Kind.FOOD:
+			# Asked for by METHOD NAME, like everything else a prop does to the
+			# player, so this works for any controller that offers the verb and
+			# is simply inert on one that does not.
+			if player.has_method(&"transform_named"):
+				player.call(&"transform_named", grants, grants_seconds)
 		_:
 			Events.money_collected.emit(value)
 
@@ -164,7 +193,7 @@ func _on_body_entered(body: Node3D) -> void:
 	# Stop the idle bob, or it fights the tween below for control of position.y.
 	set_process(false)
 
-	var sound := garlic_sfx if kind == Kind.GARLIC else coin_sfx
+	var sound := food_sfx if kind == Kind.FOOD else coin_sfx
 	if sound != null:
 		_sfx.stream = sound
 		_sfx.play()

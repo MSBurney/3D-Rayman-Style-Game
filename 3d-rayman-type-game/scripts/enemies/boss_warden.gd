@@ -78,16 +78,44 @@ enum Phase {
 ## How long one charge lasts before it stops and lines up again.
 @export var charge_time: float = 1.6
 @export var turn_speed: float = 4.0
+## How long it spends reversing out of something that was not a pillar. Without
+## this the boss pins itself against a wall for ever — see `_bounce_off()`.
+@export var recover_time: float = 0.9
+## Fraction of `charge_speed` it backs off at. Deliberately well under 1: this
+## should read as a stagger away from the wall, not a second charge.
+@export var recover_speed_scale: float = 0.45
 @export var gravity: float = 24.0
 
 @export_group("The pound window")
 ## How long it stays stunned after crashing. Generous on purpose: you have to
 ## get up somewhere high and come down on it, and a window that only a player
 ## who was already standing in the right place can use is not a test of skill.
-@export var stun_time: float = 3.2
+## **7.0, up from 3.2, because the opening got harder to use rather than easier.**
+##
+## The modal controller cannot reach `crack_power` from a standing drop — it
+## needs to be above the boss AND moving, which is a charge along the pound deck
+## cancelled into a slam. That is a genuinely longer thing to arrange than the
+## old controller's triple jump was, so a window tuned against the old moveset
+## leaves this fight unopenable in practice.
+##
+## The window closing is still the only pressure in the fight; there is no clock
+## on the fight itself.
+@export var stun_time: float = 7.0
 ## Minimum `Player.slam_power()` that cracks it — 0 is a standing hop, 1 is a
 ## tower drop. Above what a hop gives, so height has to be earned.
-@export var crack_power: float = 0.3
+## Force on `Events.slam_landed` needed to crack it open.
+##
+## **3.0 on the modal controller's scale, where this used to be 0.3 on the old
+## one's.** That slam reports force in two halves — how far you fell plus how
+## much horizontal speed you delivered into the floor — so, measured: a standing
+## hop is 0.10, a drop from the pound deck 1.40, and a FLAT-OUT CHARGE cancelled
+## into a slam 2.20 with no drop at all.
+##
+## Horizontal speed being worth more than the deck is why this number is 3.0 and
+## not something between: at any lower threshold the answer to the boss is
+## "charge at it on flat ground" and the pound deck stops existing, which deletes
+## phase two. 3.0 needs both, so the opening is the charge-to-slam cancel.
+@export var crack_power: float = 3.0
 ## How close the pound has to land.
 @export var crack_radius: float = 4.5
 
@@ -122,6 +150,9 @@ var _windup: float = 0.0
 var _charge_left: float = 0.0
 var _charge_dir: Vector3 = Vector3.FORWARD
 var _stun_left: float = 0.0
+## Set by `_bounce_off()`; while it runs the boss is reversing out of a wall.
+var _recover_left: float = 0.0
+var _recover_dir: Vector3 = Vector3.ZERO
 var _hit_cooldown: float = 0.0
 
 @onready var snatcher: ItemThief = $Snatcher
@@ -189,12 +220,40 @@ func _physics_process(delta: float) -> void:
 		if _hit_a_pillar():
 			_set_phase(Phase.STUNNED)
 		else:
-			# Ran into something that is not a pillar. The charge ends, but it does
-			# not stun — otherwise it would grind along the wall for the rest of
-			# the charge, and in a corner it would pin itself there.
+			# Ran into something that is not a pillar. The charge ends and does
+			# not stun — only pillars stun it, because a boss that knocked itself
+			# out on the outer wall would be doing phase one for the player.
+			#
+			# **BUT IT HAS TO BACK OFF, and not doing so was a softlock.**
+			# Reported from play as "it gets stuck and constantly loops its
+			# charging state, but never moves and I can't kill it". Exactly that:
+			# it ends the charge flush against the wall, winds up again, and
+			# `_aim_at_player()` points straight back INTO the surface it is
+			# touching — so it charges into the same wall for ever, from zero
+			# distance, never moving.
+			#
+			# And you cannot kill it, correctly: you beat this boss by taking the
+			# seed, not by damage. But wedged like that it can never be lured
+			# into a pillar either, so phase one becomes unwinnable. A softlock
+			# in a fight whose whole design is "no death, no timer".
 			_charge_left = 0.0
 			_windup = windup_time
+			_bounce_off()
 	_face_travel(delta)
+
+
+## Walks away from whatever it just crashed into.
+##
+## Uses the wall normal `move_and_slide()` has already worked out, which is the
+## one direction guaranteed to be out of the surface. Falls back to reversing the
+## charge if there is no usable normal — a corner can report a near-vertical one.
+func _bounce_off() -> void:
+	var away := get_wall_normal()
+	away.y = 0.0
+	if away.length_squared() < 0.01:
+		away = -_charge_dir
+	_recover_dir = away.normalized()
+	_recover_left = recover_time
 
 
 ## Lines up, tells you about it, then charges in a straight line.
@@ -203,6 +262,14 @@ func _physics_process(delta: float) -> void:
 ## that steers is unavoidable, so it cannot be dodged, so the arena stops being
 ## part of the fight — and the arena is the whole of phase one.
 func _do_armoured(delta: float) -> Vector3:
+	# Backing away from a surface it just bounced off. This has to come FIRST:
+	# while it runs, the boss is not winding up and not charging, so the loop
+	# that used to pin it against a wall cannot form.
+	if _recover_left > 0.0:
+		_recover_left -= delta
+		_tint(armoured_colour)
+		return _recover_dir * charge_speed * recover_speed_scale
+
 	if _charge_left > 0.0:
 		_charge_left -= delta
 		if _charge_left <= 0.0:

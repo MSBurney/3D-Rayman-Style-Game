@@ -39,7 +39,9 @@ albedo_color = Color(0.3, 0.29, 0.33, 1)
 ;   TOTAL ON THE FLOOR           = 130
 ;   exit                         = 110
 ;   priced gate                  =  30, and a 70 chest behind it
-;   garlic                       =  10 each, five in stock
+;   food                         =  10 each, five in stock (it USED to heal; it
+;                                  transforms you now, so this line is a
+;                                  survival option no longer — see coin.gd)
 ;
 ; Which makes three real plays rather than one:
 ;
@@ -49,7 +51,9 @@ albedo_color = Color(0.3, 0.29, 0.33, 1)
 ;   INVEST     pay 30 for the gate and you are down to 100 with an exit that
 ;              wants 110 — the scary part is not the 30, it is walking around
 ;              underfunded — then the chest pays 70 and you leave with 60 spare.
-;   SURVIVE    garlic at 10 competes directly with both of the above.
+;   SURVIVE    was garlic at 10 competing with both of the above. Healing is
+;              gone, so this third play needs rebuilding around what food does
+;              now, which is grant a transformation.
 ;
 ; The gate guards an OPTIONAL chest, never the exit. A gate on the critical path
 ; is a toll, not a decision.

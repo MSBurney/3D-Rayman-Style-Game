@@ -117,130 +117,43 @@ use_collision = true
 size = Vector3(3, 6, 3)
 material = SubResource("MatPillar")
 
-[node name="Step0" type="CSGBox3D" parent="." unique_id=1090393927]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0.4, -31.4)
+; **RAMPS, where this arena had two ten-step staircases.** Asked for to make the
+; traversal easier, and they suit the modal controller far better than steps did:
+; a charge up a ramp is a real decision, where a charge into a step is a stumble.
+;
+; 21.8 degrees — an 8 m rise over a 20 m run — and the angle is the whole point.
+; Steeper than about 27 and you slide back down standing still, because the slope
+; pull beats `deceleration`. Shallower than about 7 and momentum stops building.
+; 21.8 sits between the two, so the ramp is climbable AND worth charging down.
+;
+; The top surface satisfies y = 4 + 0.4 * (z + 30), so it passes through y = 8 at
+; z = -20 (the deck's south edge) and y = 0 at z = -40. `tests/warden_probe.gd`
+; checks it against that line rather than by eye, because a hand-written rotation
+; has come out wrong every single time this project has authored one — and this
+; one was no exception. The first attempt used origin y = 3.3036, derived from
+; `cos(21.8) * half-thickness`, and measured 0.11 m high at every point.
+;
+; The missing term: rotating the box moves its top face in Z as well as Y, so
+; the point of the surface that is directly above a given global z is not the
+; local centre of the face. The offset is `sin(21.8) * half-thickness` along z,
+; which at this gradient is another 0.11 m of height. Invisible by eye, caught
+; by the probe in one run.
+[node name="RampWest" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.9285, 0.3714, 0, -0.3714, 0.9285, -30, 3.1922, -30)
 use_collision = true
-size = Vector3(6, 0.8, 1.2)
+size = Vector3(10, 1.5, 22)
 material = SubResource("MatDeck")
 
-[node name="Step1" type="CSGBox3D" parent="." unique_id=1052342074]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0.8, -30.2)
+[node name="RampEast" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.9285, 0.3714, 0, -0.3714, 0.9285, 26.279984, 3.1922, -30)
 use_collision = true
-size = Vector3(6, 1.6, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step2" type="CSGBox3D" parent="." unique_id=1397336966]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1.2, -29)
-use_collision = true
-size = Vector3(6, 2.4, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step3" type="CSGBox3D" parent="." unique_id=1623677980]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1.6, -27.8)
-use_collision = true
-size = Vector3(6, 3.2, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step4" type="CSGBox3D" parent="." unique_id=734064071]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2, -26.6)
-use_collision = true
-size = Vector3(6, 4, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step5" type="CSGBox3D" parent="." unique_id=1356081848]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.4, -25.4)
-use_collision = true
-size = Vector3(6, 4.8, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step6" type="CSGBox3D" parent="." unique_id=937142806]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 2.8, -24.2)
-use_collision = true
-size = Vector3(6, 5.6, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step7" type="CSGBox3D" parent="." unique_id=2147128019]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 3.2, -23)
-use_collision = true
-size = Vector3(6, 6.4, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step8" type="CSGBox3D" parent="." unique_id=282936181]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 3.6, -21.8)
-use_collision = true
-size = Vector3(6, 7.2, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step9" type="CSGBox3D" parent="." unique_id=1850411152]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 4, -20.6)
-use_collision = true
-size = Vector3(6, 8, 1.2)
+size = Vector3(10, 1.5, 22)
 material = SubResource("MatDeck")
 
 [node name="PoundDeck2" type="CSGBox3D" parent="." unique_id=2032102220]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 7.5, 0)
 use_collision = true
 size = Vector3(16, 1, 40)
-material = SubResource("MatDeck")
-
-[node name="Step10" type="CSGBox3D" parent="." unique_id=1155317516]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 0.4, -31.4)
-use_collision = true
-size = Vector3(6, 0.8, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step11" type="CSGBox3D" parent="." unique_id=233321117]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 0.8, -30.2)
-use_collision = true
-size = Vector3(6, 1.6, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step12" type="CSGBox3D" parent="." unique_id=1680367734]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 1.2, -29)
-use_collision = true
-size = Vector3(6, 2.4, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step13" type="CSGBox3D" parent="." unique_id=1285588168]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 1.6, -27.8)
-use_collision = true
-size = Vector3(6, 3.2, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step14" type="CSGBox3D" parent="." unique_id=1838068716]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 2, -26.6)
-use_collision = true
-size = Vector3(6, 4, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step15" type="CSGBox3D" parent="." unique_id=512485372]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 2.4, -25.4)
-use_collision = true
-size = Vector3(6, 4.8, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step16" type="CSGBox3D" parent="." unique_id=960602315]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 2.8, -24.2)
-use_collision = true
-size = Vector3(6, 5.6, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step17" type="CSGBox3D" parent="." unique_id=2018793680]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 3.2, -23)
-use_collision = true
-size = Vector3(6, 6.4, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step18" type="CSGBox3D" parent="." unique_id=298083756]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 3.6, -21.8)
-use_collision = true
-size = Vector3(6, 7.2, 1.2)
-material = SubResource("MatDeck")
-
-[node name="Step19" type="CSGBox3D" parent="." unique_id=1957544609]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.279984, 4, -20.6)
-use_collision = true
-size = Vector3(6, 8, 1.2)
 material = SubResource("MatDeck")
 
 [node name="ExitDeck" type="CSGBox3D" parent="." unique_id=2132998980]
@@ -262,28 +175,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 12, 40)
 
 [node name="Warden" parent="." unique_id=493482645 instance=ExtResource("boss")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
-; 3.0, up from 0.5, and the reason is a genuine inversion rather than a rescale.
-;
-; `crack_power` is compared against the force on `Events.slam_landed`, and the
-; modal controller measures that in TWO halves: how far you fell, plus how much
-; horizontal speed you delivered into the floor (`brake_impact_scalar`). Those
-; halves are worth, measured:
-;
-;   a standing hop                       0.10
-;   a drop from the pound deck at y = 8  1.33
-;   a FLAT-OUT CHARGE cancelled into a slam, no drop at all   2.20
-;   a charge off the deck                3.53
-;
-; So horizontal speed is worth MORE than the deck is. At any threshold between
-; 0.5 and 2.2 the answer to this boss becomes "charge at it on flat ground" and
-; the pound deck stops existing — which would delete phase two, since the whole
-; shape of the fight is luring him into the pillar at x = -18 so that you are
-; already up high when he stuns.
-;
-; 3.0 needs BOTH: above the deck and moving. That keeps the hint ("pound it from
-; higher up") honest, keeps the deck load-bearing, and makes the opening the
-; doc's own signature combo — the charge-to-slam cancel — rather than a hop.
-crack_power = 3.0
 seed_path = NodePath("../Seed")
 
 [node name="Seed" parent="." unique_id=1372409959 instance=ExtResource("seed")]

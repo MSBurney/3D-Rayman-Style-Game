@@ -41,12 +41,6 @@ func damage(amount: int = 1) -> bool:
 		died.emit()
 	return true
 
-func heal(amount: int = 1) -> void:
-	if not is_alive() or amount <= 0:
-		return
-	current = mini(max_health, current + amount)
-	changed.emit(current, max_health)
-
 func reset() -> void:
 	current = max_health
 	_invuln = 0.0

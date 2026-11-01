@@ -1171,11 +1171,107 @@ it deliberately whenever you add or remove a check**; it is 86.
    The HUD hides its hearts when the player has no Health, hazards fall back to a hard hit, and
    `game.gd` only respawns through a duck-typed `respawn_at`. Enemies keep their own health; the doc
    only says the *player* does not die.
-4. ~~Repoint the eight scenes.~~ **Done — B4a and B4b above.** `player.tscn` is now
-   referenced by exactly two files: `scenes/suite_fixture.tscn` (the old suite's fixture) and
-   **`scene_smilex.tscn`, which is Ian's and stays.**
+4. ~~Repoint the eight scenes.~~ **Done — B4a and B4b above.** And after B5 swapped the suite's
+   fixture over too, `player.tscn` is referenced by **exactly one file: `scene_smilex.tscn`, which
+   is Ian's and stays.**
 5. ~~Rewrite the suite.~~ **Done — B5 above.** 86 checks on the modal controller, `_run()` split
    into fifteen per-system functions. **Stage B is complete.**
+
+## After the reunification: what was decided, and what is parked (2026-11-01)
+
+**Stage B is complete and the heavy controller is THE controller** — the user's words: *"the old
+player systems are pretty much obsolete… the heavy player is what I want the game to be built
+around, those systems are the real core for the project."* So `player.gd` is obsolete by decision
+and not merely by disuse.
+
+**That makes deleting it purely a question for Ian.** Nothing of ours loads it: it is referenced by
+`scene_smilex.tscn` alone. The conversation is still owed, and the standing rule has not changed —
+not a unilateral delete.
+
+### The warden, fixed (2026-11-01)
+
+**A softlock, reported from play**: *"if the Warden crashed on anything that isn't a pillar, it gets
+stuck and constantly loops its charging state, but never moves and I can't kill it."* Exactly right,
+and the mechanism is worth keeping:
+
+> It ends a charge flush against a non-pillar wall, winds up again, and `_aim_at_player()` points
+> **straight back into the surface it is already touching** — so it charges the same wall for ever,
+> from zero distance, never moving.
+
+And you cannot kill it, correctly: this boss is beaten by taking the seed, not by damage. But wedged
+there it can never be lured into a pillar either, so **phase one becomes unwinnable** — a softlock
+in a fight whose whole design is "no death, no timer". `_bounce_off()` reverses it out along the
+wall normal for `recover_time` before it can wind up again. Measured in `tests/warden_probe.gd`: it
+travels **4.1 m over 7 s of charging at a wall instead of 0**, stays ARMOURED, and **still does not
+stun on the outer wall** — the pillars-only rule is intact.
+
+**`stun_time` 3.2 → 7.0, and that is a consequence of the `crack_power` change rather than a
+separate wish.** The modal controller cannot reach `crack_power` from a standing drop; it needs to be
+above the boss AND moving, which is a charge along the pound deck cancelled into a slam. That is a
+longer thing to arrange than the old triple jump was, so a window tuned against the old moveset left
+the fight effectively unopenable. `crack_power`'s default moved into the script as well (0.3 → 3.0)
+and the arena's override is gone, so there is one place to read it from.
+
+**The twenty stairs are two ramps now**, asked for to make traversal easier, and they suit the modal
+controller far better: a charge up a ramp is a decision where a charge into a step is a stumble.
+**21.8°** — an 8 m rise over a 20 m run — and the angle is the whole content of the choice: steeper
+than about 27° and the slope pull beats `deceleration` so you slide back down standing still;
+shallower than about 7° and momentum stops building.
+
+**The probe caught the ramp 0.11 m high at every point**, and the missing term is the useful part:
+**rotating a box moves its top face in Z as well as Y**, so the surface point directly above a given
+global z is not the local centre of that face. The offset is `sin(angle) * half-thickness` along z,
+which at this gradient is another 0.11 m of height. Invisible by eye; one run to find.
+
+### Healing is scrapped, and garlic became food (2026-11-01)
+
+`heal()` is gone from `health.gd` and `player.gd`. It only ever existed because the no-death question
+was open, and the doc answers it — there is no health to restore, so the heal had nothing to do and
+garlic had quietly become a pickup that paid nothing.
+
+**`Coin.Kind.GARLIC` is `Coin.Kind.FOOD`, and eating it TRANSFORMS you.** It reuses
+`transform_named()`, so it needed no new systems, and it is the first piece of the doc's food-attack
+system rather than a parallel power-up idea invented beside it. `grants` is an export and is asked
+for **by name**, never by enum value, for the reason `transformer.gd` records.
+
+**The level-design rule comes with it and is not optional:** *put a piece of food in front of the
+thing its transformation is FOR.* A transformation is a penalty as well as a key — you cannot steer
+while alight — so food with nothing to use it on is purely an inconvenience, which is the exact
+failure that earned Wario Land its criticism.
+
+The fiction is **open**: `FOOD` names what the mechanic does, and whether it stays garlic is a
+separate decision.
+
+Two knock-ons, both recorded rather than papered over:
+
+- **`coin.tscn` was setting `garlic_sfx`**, which after the rename would have been silently ignored.
+  Renamed. A property in a `.tscn` that the script does not have produces no warning whatsoever.
+- **The market yard's "SURVIVE" play was built on garlic-as-healing** and no longer exists as
+  written. That third route wants rebuilding around what food does now; the comment in
+  `market_yard.tscn` says so rather than pretending the economy still works.
+
+### Parked deliberately, with the reasoning
+
+None of these is a bug and none is forgotten:
+
+| | |
+| --- | --- |
+| **the flaming sprint** | 20 m/s against a 15 m/s walk, where it was 20 against 7.5. Judged fixable and not a concern yet. The lever is `flame_speed`, and raising it is free because nothing else reads it |
+| **the thief scramble** | `chase_speed` 4.4 against a 15 m/s walk, so the race this file calls "**the** mechanic" is now a stroll. Same judgement — and note it is a GLOBAL change, since every walker in every level shares the number |
+| **flame damage** | never ported, and to be built: the doc frames FLAMING as a material language (*"burns rope, thatch and timber that mass cannot crack"*) rather than a damage number, so this is new work and not a restoration |
+| **the see-saw launching the player** | implemented and correct, unreachable in the greybox without a timed drop or an enemy |
+| **`player.gd` untested** | the accepted cost of rewriting the suite in place. Nothing will catch a regression in the deprecated controller |
+
+### And one testing rule earned twice over on the same day
+
+**Never emit a literal force at a threshold you do not own.** Changing `crack_power`'s default from
+0.3 to 3.0 broke a smoke check that emitted `1.0` — a check that then reported *"the hard pound did
+not work"* when what had actually changed was the scale underneath it. Every
+`Events.slam_landed.emit` in the suite is written as `crack_power * <factor>` now.
+
+The same pass found the wrong-phase refusals were emitting a force **below** the threshold, so they
+would have passed with the phase gate broken entirely. They emit a hard pound now, which is the
+claim actually worth testing: *even* a hard pound is refused in the wrong phase.
 
 ## Who this is for
 

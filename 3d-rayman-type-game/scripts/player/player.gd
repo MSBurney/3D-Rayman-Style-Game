@@ -1559,10 +1559,6 @@ func bounce(force: float = -1.0) -> void:
 		_set_state(State.AIR)
 
 
-func heal(amount: int) -> void:
-	health.heal(amount)
-
-
 func kill() -> void:
 	if state != State.DEAD:
 		health.damage(health.current)
